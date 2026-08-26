@@ -16,7 +16,7 @@ The application provides the medium—Three.js book rendering, assets, safe inte
 - Declarative hover and click interactions validated against closed presets.
 - A dimensional landmark knowledge spread as the first flagship sample.
 - A real multi-book shelf: each Sample Book owns its own spreads, revisions, assets, and interactions.
-- A host-portable Sites bundle. Public hosting is intentionally disabled while the product is being rebuilt.
+- A host-portable Sites bundle. Public hosting remains intentionally private until explicit republish approval and final judge-facing verification.
 
 ## Run locally
 
@@ -34,6 +34,7 @@ npm run typecheck
 npm test
 npm run build
 npm run test:sites
+npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
 ## Repository map
@@ -42,6 +43,8 @@ npm run test:sites
 - [`docs/PRODUCT_ARCHITECTURE.md`](docs/PRODUCT_ARCHITECTURE.md) — active product, usage, asset, interaction, security, and delivery architecture.
 - [`docs/CHALLENGE_READINESS.md`](docs/CHALLENGE_READINESS.md) — active challenge gate separating verified local work from missing external delivery.
 - [`docs/ASSET_PROVENANCE.md`](docs/ASSET_PROVENANCE.md) — runtime art, procedural model, icon, reference, and user-import provenance.
+- [`docs/SITE_TOOLS_ACCEPTANCE.md`](docs/SITE_TOOLS_ACCEPTANCE.md) — deployment verifier and real ChatGPT Site Tools acceptance story.
+- [`docs/ELIGIBILITY_AND_BUILD_LOG.md`](docs/ELIGIBILITY_AND_BUILD_LOG.md) — challenge-period Git timeline and ownership evidence.
 - [`app/design-qa.md`](app/design-qa.md) — visual QA evidence and iteration history.
 - [`docs/README.md`](docs/README.md) — current documentation and historical delivery evidence.
 

@@ -2,7 +2,7 @@ import { bookEngine } from "./bookEngine";
 import { getAssetMetadata, listAssetMetadata } from "./assetStore";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
-import type { FocusResponse, HoverResponse, MotionPreset, RevealKind, RevealSpec, SceneModelId, ScenePatchOperation, ThemeId, Transform2D } from "./types";
+import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, RevealKind, RevealSpec, SceneModelId, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 
 const MOTION_PRESETS: string[] = ["gentle-float", "fly-across", "soft-pulse", "slow-orbit", "none"];
 const SCENE_MODEL_IDS: SceneModelId[] = ["flavian-amphitheatre", "great-pyramid", "volcano-cross-section"];
@@ -375,6 +375,16 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
               source: boundedString(value, "source", 200, true),
             };
           };
+          const parseMotion = (raw: unknown): MotionSpec | null | undefined => {
+            if (typeof raw === "undefined" || raw === null) return raw;
+            if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("motion must be an object or null.");
+            const value = raw as ToolInput;
+            assertOnly(value, ["preset", "durationMs", "loop"]);
+            const preset = pick<MotionPreset>(value.preset, "motion.preset", MOTION_PRESETS.filter((item): item is MotionPreset => item !== "none"));
+            const durationMs = optionalBoundedNumber(value, "durationMs", 400, 20000);
+            if (!preset || !Number.isInteger(durationMs) || typeof value.loop !== "boolean") invalid("motion requires preset, integer durationMs, and loop.");
+            return { preset, durationMs: Number(durationMs), loop: value.loop };
+          };
           const operations = input.operations.map((raw, index): ScenePatchOperation => {
             if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`operations[${index}] must be an object.`);
             const value = raw as ToolInput;
@@ -392,6 +402,8 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             const focus = pick<FocusResponse>(value.focus, "focus", FOCUS_RESPONSES);
             const reveal = parseReveal(value.reveal);
             const depth = optionalBoundedNumber(value, "depth", 0, 0.5);
+            if (typeof value.locked !== "undefined" && typeof value.locked !== "boolean") invalid("locked must be boolean.");
+            const motion = parseMotion(value.motion);
             if (op === "add") {
               const page = pick(value.page, "page", ["left", "right"] as const);
               if (!page) invalid("add requires page.");
@@ -405,24 +417,14 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
                 kind: pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const),
                 transform,
                 depth,
+                locked: value.locked as boolean | undefined,
+                motion: motion ?? undefined,
                 hover,
                 focus,
                 reveal,
               };
             }
             if (op !== "update") invalid("op must be add, update, remove, or reorder.");
-            if (typeof value.locked !== "undefined" && typeof value.locked !== "boolean") invalid("locked must be boolean.");
-            let motion;
-            if (value.motion === null) motion = null;
-            else if (typeof value.motion !== "undefined") {
-              if (!value.motion || typeof value.motion !== "object" || Array.isArray(value.motion)) invalid("motion must be an object or null.");
-              const rawMotion = value.motion as ToolInput;
-              assertOnly(rawMotion, ["preset", "durationMs", "loop"]);
-              const preset = pick<MotionPreset>(rawMotion.preset, "motion.preset", MOTION_PRESETS.filter((item): item is MotionPreset => item !== "none"));
-              const durationMs = optionalBoundedNumber(rawMotion, "durationMs", 400, 20000);
-              if (!preset || !Number.isInteger(durationMs) || typeof rawMotion.loop !== "boolean") invalid("motion requires preset, integer durationMs, and loop.");
-              motion = { preset, durationMs: Number(durationMs), loop: rawMotion.loop };
-            }
             const kind = pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const);
             if (!kind && !transform && typeof depth === "undefined" && typeof value.locked === "undefined" && typeof motion === "undefined" && !hover && !focus && !reveal) {
               invalid("update requires at least one change.");

@@ -41,6 +41,7 @@ npm run typecheck
 npm test
 npm run build
 npm run test:sites
+npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
 The production build is emitted as a host-portable bundle:
@@ -73,4 +74,4 @@ Checked against current primary sources on 2026-08-26:
 - Renderer: `three@0.185.1`
 - UI/runtime: `react@19.2.0`, `vite@6.4.3`
 
-Public hosting is intentionally disabled while the product and repository are being rebuilt. No owner OpenAI API key is embedded.
+Public hosting remains intentionally private until explicit republish approval and final judge-facing verification. No owner OpenAI API key is embedded.

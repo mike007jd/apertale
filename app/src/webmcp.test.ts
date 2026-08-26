@@ -164,9 +164,45 @@ describe("WebMCP registration", () => {
     }, { signal: new AbortController().signal })));
     expect(composed).toMatchObject({ ok: true, changedIds: ["1-the-moon-pulls"] });
 
+    const addedModel = JSON.parse(String(await tool("apply_scene_patch").execute({
+      requestId: "add-orbiting-pyramid",
+      expectedRevision: composed.revision,
+      spreadId: "1-the-moon-pulls",
+      operations: [{
+        op: "add",
+        id: "scale-pyramid",
+        label: "Scale pyramid",
+        assetId: "model:great-pyramid",
+        modelId: "great-pyramid",
+        page: "right",
+        kind: "lifted",
+        locked: true,
+        motion: { preset: "slow-orbit", durationMs: 8000, loop: true },
+        hover: "warm-rim",
+        focus: "orbit-inspect",
+        reveal: {
+          kind: "fact-card",
+          title: "A geometry reference",
+          summary: "The pyramid gives the spread a familiar scale anchor.",
+          facts: [{ label: "Shape", value: "Square pyramid" }],
+        },
+      }],
+    }, { signal: new AbortController().signal })));
+    expect(addedModel).toMatchObject({ ok: true, changedIds: ["scale-pyramid"] });
+    expect(bookEngine.getSnapshot().document.spreads[0].elements[0]).toMatchObject({
+      id: "scale-pyramid",
+      locked: true,
+      motion: { preset: "slow-orbit", durationMs: 8000, loop: true },
+      interaction: {
+        hover: "warm-rim",
+        focus: "orbit-inspect",
+        reveal: { kind: "fact-card", title: "A geometry reference" },
+      },
+    });
+
     const rejectedUrl = JSON.parse(String(await tool("apply_scene_patch").execute({
       requestId: "reject-url",
-      expectedRevision: composed.revision,
+      expectedRevision: addedModel.revision,
       spreadId: "1-the-moon-pulls",
       operations: [{ op: "add", id: "remote", label: "Remote", assetId: "https://example.com/model.glb", page: "right" }],
     }, { signal: new AbortController().signal })));

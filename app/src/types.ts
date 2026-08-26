@@ -172,6 +172,8 @@ export type ScenePatchOperation =
       kind?: BookElement["kind"];
       transform?: Partial<Transform2D>;
       depth?: number;
+      locked?: boolean;
+      motion?: MotionSpec;
       hover?: HoverResponse;
       focus?: FocusResponse;
       reveal?: RevealSpec;

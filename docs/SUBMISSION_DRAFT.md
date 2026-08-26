@@ -83,3 +83,7 @@ Show the wordmark and tagline: **Apertale — Open a page. Enter a world.**
 - Figma design URL: [Apertale — Product Design v1.1](https://www.figma.com/design/3Kq19oItsbBczMIeB739cO/Apertale-%E2%80%94-Product-Design-v1.1?node-id=7-6)
 
 Do not replace a placeholder until the destination is public or supplied with judge credentials and has passed the corresponding readiness gate.
+
+## Eligibility and reproducibility evidence
+
+The repository was created during the official submission period. Preserve its timestamped commit history when publishing; [`ELIGIBILITY_AND_BUILD_LOG.md`](ELIGIBILITY_AND_BUILD_LOG.md) records the first commit and the challenge-period implementation milestones. Run the public URL through [`SITE_TOOLS_ACCEPTANCE.md`](SITE_TOOLS_ACCEPTANCE.md) before recording the final demo.

@@ -44,6 +44,8 @@ Primary current references:
 - [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/)
 - [WebMCP specification](https://github.com/webmachinelearning/webmcp)
 
+The checked-in deployment verifier proves the public HTTP artifact, WebMCP document policy, manifest, and exact shipped tool identifiers. It deliberately cannot pass the host-only gate: real discovery and execution must follow [`SITE_TOOLS_ACCEPTANCE.md`](SITE_TOOLS_ACCEPTANCE.md) in an eligible ChatGPT desktop built-in browser.
+
 ### Host contract still to verify
 
 Plain WebMCP tool arguments are structured JSON. A reliable direct contract for transferring a newly generated ImageGen file from the host conversation into an arbitrary webpage is not yet assumed.

@@ -14,6 +14,7 @@ import type {
   DocumentState,
   EditCommand,
   InteractCommand,
+  MotionSpec,
   MutationResult,
   QualityTier,
   RevealSpec,
@@ -628,6 +629,12 @@ export class BookEngine {
       && reveal.facts.every((fact) => fact.label.trim().length >= 1 && fact.label.trim().length <= 64 && fact.value.trim().length >= 1 && fact.value.trim().length <= 160)
       && (typeof reveal.source === "undefined" || reveal.source.trim().length <= 200)
     );
+    const validMotion = (motion: MotionSpec | null | undefined) => typeof motion === "undefined"
+      || motion === null
+      || (["gentle-float", "fly-across", "soft-pulse", "slow-orbit"].includes(motion.preset)
+        && motion.durationMs >= 400
+        && motion.durationMs <= 20_000
+        && typeof motion.loop === "boolean");
     const normalizeReveal = (reveal: RevealSpec) => ({
       kind: reveal.kind,
       title: reveal.title.trim(),
@@ -657,6 +664,7 @@ export class BookEngine {
           || !validAsset
           || !validTransform(operation.transform)
           || (typeof operation.depth === "number" && (operation.depth < 0 || operation.depth > 0.5))
+          || !validMotion(operation.motion)
           || (operation.hover && !HOVER_RESPONSES.includes(operation.hover))
           || (operation.focus && !FOCUS_RESPONSES.includes(operation.focus))
           || !validReveal(operation.reveal)
@@ -671,7 +679,8 @@ export class BookEngine {
           kind: operation.kind ?? "lifted",
           transform,
           depth: operation.depth ?? 0.1,
-          locked: false,
+          locked: operation.locked ?? false,
+          motion: operation.motion,
           interaction: {
             hover: operation.hover ?? defaultInteraction.hover,
             focus: operation.focus ?? defaultInteraction.focus,
@@ -698,17 +707,11 @@ export class BookEngine {
         const [moved] = elements.splice(elementIndex, 1);
         elements.splice(operation.index, 0, moved);
       } else {
-        const motionValid = typeof operation.motion === "undefined"
-          || operation.motion === null
-          || (["gentle-float", "fly-across", "soft-pulse", "slow-orbit"].includes(operation.motion.preset)
-            && operation.motion.durationMs >= 400
-            && operation.motion.durationMs <= 20_000
-            && typeof operation.motion.loop === "boolean");
         if (
           !validTransform(operation.transform)
           || (operation.kind && !["embedded", "lifted", "decoration"].includes(operation.kind))
           || (typeof operation.depth === "number" && (operation.depth < 0 || operation.depth > 0.5))
-          || !motionValid
+          || !validMotion(operation.motion)
           || (operation.hover && !HOVER_RESPONSES.includes(operation.hover))
           || (operation.focus && !FOCUS_RESPONSES.includes(operation.focus))
           || !validReveal(operation.reveal)

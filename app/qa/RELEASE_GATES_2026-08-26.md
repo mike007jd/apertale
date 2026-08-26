@@ -5,10 +5,10 @@
 - `npm run typecheck` — passed.
 - `npm test -- --run` — 4 files, 32 tests passed.
 - `npm run build` — passed; Sites bundle prepared, 19 MB total.
-- `npm run test:sites` — 4 tests passed.
+- `npm run test:sites` — 6 tests passed, including the deployment HTTP-contract verifier.
 - `npm audit --omit=dev` — 0 vulnerabilities.
 - `git diff --check` — passed.
-- `gitleaks detect --no-git --source . --redact --exit-code 1` — 1.29 MB of scannable source inspected, no leaks.
+- `gitleaks detect --no-git --source . --redact --exit-code 1` — 1.31 MB of scannable source inspected, no leaks.
 
 Vite reports the separately lazy-loaded Three.js vendor chunk at 560.58 kB minified / 143.01 kB gzip. This is a non-blocking size warning; the application shell and `ThreeBook` adapter remain separate chunks.
 
@@ -20,7 +20,9 @@ A fresh temporary export excluded `.git`, `node_modules`, and `dist`, then passe
 2. `npm run typecheck`
 3. `npm test -- --run` — 32 tests
 4. `npm run build`
-5. `npm run test:sites` — 4 tests
+5. `npm run test:sites` — 6 tests
+
+The deployment verifier also passed against the freshly built local production preview. Its output proved the Apertale manifest, exact six tool identifiers, entry bundle, and WebMCP document-policy headers while correctly retaining the real ChatGPT host loop as an external requirement.
 
 ## Codex in-app browser acceptance
 
