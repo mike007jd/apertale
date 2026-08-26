@@ -27,6 +27,7 @@ npm run test:sites
 - [`app/design-qa.md`](app/design-qa.md) — same-viewport Product Design QA evidence and iteration history.
 - [`docs/LIVINGBOOK_PRD_AND_DESIGN_SPEC.md`](docs/LIVINGBOOK_PRD_AND_DESIGN_SPEC.md) — Challenge Final 1.1 product/design specification.
 - [`docs/CHALLENGE_SUBMISSION_HANDOFF.md`](docs/CHALLENGE_SUBMISSION_HANDOFF.md) — demo narrative and remaining external submission gates.
+- [`docs/COMPLETION_AUDIT.md`](docs/COMPLETION_AUDIT.md) — requirement-by-requirement proof and the exact external blockers.
 
 ## WebMCP tools
 
@@ -39,4 +40,3 @@ The human UI remains fully usable without WebMCP. Add `?fallback=1&reducedMotion
 The local source, visual QA, automated gates, host-portable build, and submission copy are ready. Figma team placement, live hosting, anonymous production verification, repository publication, demo-video upload, and Devpost submission require explicit external destination/authorization.
 
 License: [MIT](LICENSE).
-

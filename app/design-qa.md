@@ -8,6 +8,8 @@
 - Browser-rendered Night implementation: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-night-final-clean.png`
 - Three.js page-turn evidence: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-page-turn-pass5.png`
 - Mobile implementation: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-mobile-selected-pass2.png`
+- Forced WebGL/reduced-motion fallback: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-fallback-final.png`
+- Page-turn performance record: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/PERFORMANCE.md`
 
 ## Normalization
 
@@ -68,6 +70,8 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - Full-view combined evidence: `qa/comparison-day-final.png` and `qa/comparison-night-final.png`.
 - Focused evidence: `qa/focus-day-final.png` confirms real cutout fidelity, selection treatment, and control anatomy.
 - A fresh browser reload produced no new console errors or warnings.
+- The forced fallback route rendered its 2D book, created no WebGL canvas, and remained operable with reduced motion.
+- Local page-turn diagnostics measured 121 FPS forward and 120 FPS backward against the 45 FPS acceptance floor.
 
 ## Primary interactions tested
 
@@ -79,7 +83,7 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - Enter/exit Preview without changing the current spread.
 - Navigate with keyboard arrows and dismiss selection/Preview with Escape.
 - Verify responsive selection and controls at 390 × 844.
-- Verify all six WebMCP definitions, registration signals, structured output, and abort cleanup in automated tests.
+- Verify all six WebMCP definitions, registration signals, compact JSON output, input validation, idempotency, and abort cleanup in automated tests.
 
 ## Implementation checklist
 
@@ -88,6 +92,7 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - [x] Implement real Three.js depth and deforming two-sided page turns.
 - [x] Implement the shared human/WebMCP command and undo model.
 - [x] Verify desktop, mobile, accessibility, interactions, and console.
+- [x] Verify the forced 2D/reduced-motion fallback and instrument both page-turn directions.
 - [x] Pass type, unit, production build, and Sites worker gates.
 
 final result: passed

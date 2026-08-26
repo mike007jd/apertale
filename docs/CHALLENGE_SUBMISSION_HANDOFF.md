@@ -51,11 +51,15 @@ These fields remain pending because deployment, repository publication, video up
 ## Current verified local gates
 
 - `npm run typecheck`: passed
-- `npm test`: 7 tests passed
+- `npm test`: 9 tests passed
 - `npm run build`: passed
 - `npm run test:sites`: 4 tests passed
+- Production preview smoke: passed; Three.js canvas initialized and console logs were empty
 - Desktop Day/Night visual QA: passed
 - Three.js page-turn midpoint and pointer drag: passed
 - Mobile 390 × 844 responsive interaction: passed
 - Browser accessibility names and primary Preview/Lift/Undo interactions: passed
+- Forced WebGL/reduced-motion fallback route: passed
+- Local page turns: 121 FPS forward / 120 FPS backward (45 FPS floor)
+- Local diagnostics ring and DOM-readable diagnostic snapshot: passed
 - New console errors/warnings after final reload: none

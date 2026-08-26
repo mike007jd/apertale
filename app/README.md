@@ -21,7 +21,7 @@ The page registers exactly six imperative tools through `document.modelContext.r
 5. `set_scene_theme`
 6. `undo_book_change`
 
-Mutation calls require `requestId` and `expectedRevision`. Results use MCP-style text content containing compact JSON, and successful document mutations return a usable `undoToken`.
+Mutation calls require `requestId` and `expectedRevision`. Tool callbacks return compact JSON strings, and successful document mutations include a usable `undoToken`.
 
 ## Run and verify
 
