@@ -31,17 +31,19 @@ Without WebMCP, a person can still select, drag, style, animate, preview, and tu
 
 ## Required external submission fields
 
-- Live app: `PENDING_DEPLOYMENT_URL`
+- Live app: [https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site](https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site)
 - Public or reviewer-accessible repository: `PENDING_REPOSITORY_URL`
 - Demo video: `PENDING_DEMO_VIDEO_URL`
-- Figma design file: `PENDING_FIGMA_FILE`
+- Figma design file: [https://www.figma.com/design/3Kq19oItsbBczMIeB739cO](https://www.figma.com/design/3Kq19oItsbBczMIeB739cO)
+
+OpenAI's launch wording explicitly recommends asking Codex for a “WebMCP-enabled app” deployed to Sites. LivingBook follows that path, reports `WebMCP ready` when a browser has not injected the runtime, and changes to `WebMCP connected` only after all six registrations succeed. Source: [OpenAI Developers launch post](https://x.com/OpenAIDevs/status/2092344959248761263?s=12).
 
 These fields remain pending because deployment, repository publication, video upload, and Figma team placement are external/shared-state actions.
 
 ## Final external gates
 
-- [ ] Choose the Figma team and generate the final editable design file.
-- [ ] Publish the verified `app/` build through the selected host.
+- [x] Generate and validate the final editable Figma file in `Haosheng Li's team`.
+- [x] Publish the verified `app/` build as a public ChatGPT Site.
 - [ ] Verify the deployed URL in ChatGPT’s in-app browser with all six WebMCP tools discoverable.
 - [ ] Run the 90-second demo script against the deployed URL and record the video.
 - [ ] Create or select the submission repository and confirm reviewer access.
@@ -51,7 +53,7 @@ These fields remain pending because deployment, repository publication, video up
 ## Current verified local gates
 
 - `npm run typecheck`: passed
-- `npm test`: 9 tests passed
+- `npm test`: 12 tests passed
 - `npm run build`: passed
 - `npm run test:sites`: 4 tests passed
 - Production preview smoke: passed; Three.js canvas initialized and console logs were empty
@@ -63,3 +65,5 @@ These fields remain pending because deployment, repository publication, video up
 - Local page turns: 121 FPS forward / 120 FPS backward (45 FPS floor)
 - Local diagnostics ring and DOM-readable diagnostic snapshot: passed
 - New console errors/warnings after final reload: none
+- Public Sites version: 2, deployment succeeded
+- Production human interaction, Night theme, Lift/Undo, page turn, and forced 2D fallback: passed

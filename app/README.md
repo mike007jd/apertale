@@ -2,6 +2,8 @@
 
 LivingBook Studio is a WebMCP-native creative editor for turning illustrated spreads into interactive, agent-editable books. A person and ChatGPT work on the same live document: either side can lift prepared paper elements, move or animate them, change the scene theme, and undo exact changes without creating a second copy of the book.
 
+The Challenge build is explicitly WebMCP-enabled and deployed to ChatGPT Sites. In a browser without the injected WebMCP runtime, the Story panel reports `WebMCP ready`; inside a supported ChatGPT in-app browser it reports `WebMCP connected` after all six tools register.
+
 ## Product demo
 
 - Real Three.js/WebGL book scene with curved open pages, cover depth, shadows, two-sided page textures, and pointer-driven page turns.
@@ -20,6 +22,8 @@ The page registers exactly six imperative tools through `document.modelContext.r
 4. `animate_element`
 5. `set_scene_theme`
 6. `undo_book_change`
+
+`get_book_context` returns the compact book outline, current spread, current-spread structured elements, active selection, theme, capabilities, and document revision. Mutating tools accept only elements on the visible spread, preventing an Agent from silently editing hidden content.
 
 Mutation calls require `requestId` and `expectedRevision`. Tool callbacks return compact JSON strings, and successful document mutations include a usable `undoToken`.
 

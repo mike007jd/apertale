@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import * as THREE from "three";
 import { recordDiagnostic } from "./diagnostics";
+import { deformPageVertex } from "./pageTurn";
 import type { BookSnapshot, Spread, TurnState } from "./types";
 
 export type BookSceneHandle = {
@@ -417,20 +418,16 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
 
     function updateTurn(progress: number) {
       const positions = turnGeometry.attributes.position as THREE.BufferAttribute;
-      const angle = Math.PI * progress;
       for (let index = 0; index < positions.count; index += 1) {
         const baseIndex = index * 3;
         const x = basePositions[baseIndex];
         const y = basePositions[baseIndex + 1];
-        const distance = x + PAGE_W / 2;
-        const u = distance / PAGE_W;
-        const bend = Math.sin(Math.PI * progress) * 0.74 * Math.sin(Math.PI * u);
-        const localAngle = angle - bend;
-        const curl = Math.sin(Math.PI * u) * Math.sin(Math.PI * progress) * 0.38;
-        positions.setXYZ(index, -PAGE_W / 2 + Math.cos(localAngle) * distance, y, Math.sin(localAngle) * distance + curl);
+        const deformed = deformPageVertex(x, y, progress, PAGE_W);
+        positions.setXYZ(index, deformed.x, deformed.y, deformed.z);
       }
       positions.needsUpdate = true;
       turnGeometry.computeVertexNormals();
+      turnGeometry.computeBoundingBox();
       turnGeometry.computeBoundingSphere();
     }
 

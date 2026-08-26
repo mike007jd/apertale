@@ -30,6 +30,8 @@ function requiredRevision(input: ToolInput) {
 function requiredElementId(input: ToolInput) {
   const value = requiredString(input, "elementId");
   if (value !== "bird" && value !== "fox") invalid("elementId must be bird or fox.");
+  const visibleIds = bookEngine.getContext().currentSpread.elements.map((element) => element.id);
+  if (!visibleIds.includes(value)) invalid(`elementId ${value} is not on the current spread.`);
   return value;
 }
 

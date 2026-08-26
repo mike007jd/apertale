@@ -15,6 +15,20 @@ describe("BookEngine document contract", () => {
     expect(engine.getContext().selection).toBeNull();
   });
 
+  it("returns a compact, discoverable outline and current-spread element list", () => {
+    const engine = new BookEngine();
+    const context = engine.getContext();
+    expect(context.outline).toEqual([
+      expect.objectContaining({ id: "city-for-small-things", elementIds: ["bird"] }),
+      expect.objectContaining({ id: "lantern-garden", elementIds: ["fox"] }),
+      expect.objectContaining({ id: "river-home", elementIds: [] }),
+    ]);
+    expect(context.currentSpread.elements).toEqual([
+      expect.objectContaining({ id: "bird", label: "Bird", kind: "embedded", locked: false }),
+    ]);
+    expect(JSON.stringify(context).length).toBeLessThanOrEqual(1500);
+  });
+
   it("rejects stale revisions without mutating state", () => {
     const engine = new BookEngine();
     const result = engine.dispatch({ type: "lift", requestId: "stale", expectedRevision: 99, elementId: "bird" }, "agent");

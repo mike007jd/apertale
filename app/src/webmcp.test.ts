@@ -33,7 +33,16 @@ describe("WebMCP registration", () => {
     expect(tools[0].annotations).toMatchObject({ readOnlyHint: true });
     const result = await tools[0].execute({}, { signal: new AbortController().signal });
     expect(typeof result).toBe("string");
-    expect(JSON.parse(String(result))).toMatchObject({ book: { revision: expect.any(Number) } });
+    expect(JSON.parse(String(result))).toMatchObject({
+      book: { revision: expect.any(Number) },
+      outline: expect.any(Array),
+      currentSpread: { elements: [expect.objectContaining({ id: "bird" })] },
+    });
+    expect(String(result).length).toBeLessThanOrEqual(1500);
+
+    await expect(tools[1].execute({ requestId: "hidden-element", expectedRevision: 1, elementId: "fox" }, {
+      signal: new AbortController().signal,
+    })).rejects.toThrow("current spread");
 
     const revisionBeforeInvalid = JSON.parse(String(result)).book.revision;
     await expect(tools[1].execute({ requestId: "invalid", expectedRevision: "1", elementId: "bird" }, {

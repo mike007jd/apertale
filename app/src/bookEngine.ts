@@ -123,7 +123,23 @@ export class BookEngine {
       : null;
     return {
       book: { id: this.documentState.id, title: this.documentState.title, revision: this.documentState.revision },
-      currentSpread: { id: spread.id, title: spread.title, order: spread.order + 1 },
+      outline: this.documentState.spreads.map((item) => ({
+        id: item.id,
+        title: item.title,
+        order: item.order + 1,
+        elementIds: item.elements.map((element) => element.id),
+      })),
+      currentSpread: {
+        id: spread.id,
+        title: spread.title,
+        order: spread.order + 1,
+        elements: spread.elements.map((element) => ({
+          id: element.id,
+          label: element.label,
+          kind: element.kind,
+          locked: element.locked,
+        })),
+      },
       selection: selected
         ? { id: selected.id, label: selected.label, kind: selected.kind, locked: selected.locked, transform: selected.transform, motion: selected.motion ?? null }
         : null,

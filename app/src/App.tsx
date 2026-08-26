@@ -293,7 +293,10 @@ export function App() {
             ))}
           </ol>
           <div className="outline-foot">
-            <span className={webMcpAvailable ? "is-connected" : ""}><i /> {webMcpAvailable ? "WebMCP connected" : "Human mode"}</span>
+            <span
+              className={webMcpAvailable ? "is-connected" : ""}
+              title={webMcpAvailable ? "This browser exposed the WebMCP tool runtime." : "This WebMCP-enabled app remains fully usable while the current browser has not exposed the tool runtime."}
+            ><i /> {webMcpAvailable ? "WebMCP connected" : "WebMCP ready"}</span>
             <button onClick={confirmReset}><ArrowCounterClockwise size={15} /> Reset sample</button>
           </div>
         </aside>

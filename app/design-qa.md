@@ -7,6 +7,8 @@
 - Browser-rendered Day implementation: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-day-final-clean.png`
 - Browser-rendered Night implementation: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-night-final-clean.png`
 - Three.js page-turn evidence: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-page-turn-pass5.png`
+- Fresh bounded page-turn evidence: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/audit-2026-08-26/05-page-turn-corrected.png`
+- Fresh product-audit states: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/audit-2026-08-26/01-day-start.png`, `02-bird-selected.png`, `03-bird-lifted.png`, and `06-night-spread.png`
 - Mobile implementation: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-mobile-selected-pass2.png`
 - Forced WebGL/reduced-motion fallback: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-fallback-final.png`
 - Page-turn performance record: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/PERFORMANCE.md`
@@ -72,6 +74,13 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - A fresh browser reload produced no new console errors or warnings.
 - The forced fallback route rendered its 2D book, created no WebGL canvas, and remained operable with reduced motion.
 - Local page-turn diagnostics measured 121 FPS forward and 120 FPS backward against the 45 FPS acceptance floor.
+
+### Pass 4 — fresh audit, passed after one fix
+
+- P1 found: the full-distance page deformation could approach the camera and visually balloon beyond the physical cover at the midpoint. Evidence: `qa/audit-2026-08-26/04-page-turn-midpoint.png`.
+- Fix: page displacement is now bounded relative to the book depth while retaining the curved sheet, shadow, and two-sided transition. The geometry has direct bounds tests. Evidence: `qa/audit-2026-08-26/05-page-turn-corrected.png`.
+- Fresh Day, selected Bird, lifted Bird, corrected turn, and Night states were placed with audit notes in the final Figma file.
+- WebMCP context now returns the compact book outline and current-spread element list promised by the PRD, and rejects attempts to mutate a hidden-spread element.
 
 ## Primary interactions tested
 
