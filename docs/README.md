@@ -8,6 +8,7 @@
 - [`ASSET_PROVENANCE.md`](ASSET_PROVENANCE.md) — source and licensing notes for runtime art, models, references, and user imports.
 - [`SITE_TOOLS_ACCEPTANCE.md`](SITE_TOOLS_ACCEPTANCE.md) — deployed HTTP verifier and exact ChatGPT built-in-browser WebMCP acceptance story.
 - [`ELIGIBILITY_AND_BUILD_LOG.md`](ELIGIBILITY_AND_BUILD_LOG.md) — timestamped proof that the repository and challenge implementation were created during the submission period.
+- [`SUBMISSION_MEDIA.md`](SUBMISSION_MEDIA.md) — source-true screenshot selection, captions, alt text, and final video media discipline.
 
 ## Historical delivery evidence
 

@@ -4,6 +4,8 @@
 
 Apertale is a WebMCP-native canvas for interactive books. A person describes what they want in their own ChatGPT or Codex conversation; the host Agent uses Apertale's structured tools to compose, animate, and revise the same live book the person can turn, inspect, and edit directly.
 
+![Apertale Day presentation showing a dimensional Colosseum rising from an open book](app/qa/apertale-atlas-day-current.png)
+
 The application provides the medium—Three.js book rendering, assets, safe interaction presets, project state, and exact undo. The user's ChatGPT session in a supporting host provides the intelligence and model usage. The project contains no shared owner-funded OpenAI API key and no fake in-page AI composer. Direct Codex-host WebMCP availability remains host-dependent and must be verified separately.
 
 ## Current build
@@ -17,6 +19,24 @@ The application provides the medium—Three.js book rendering, assets, safe inte
 - A dimensional landmark knowledge spread as the first flagship sample.
 - A real multi-book shelf: each Sample Book owns its own spreads, revisions, assets, and interactions.
 - A host-portable Sites bundle. Public hosting remains intentionally private until explicit republish approval and final judge-facing verification.
+
+## Try the collaboration loop
+
+In a WebMCP-enabled ChatGPT desktop built-in browser, open Apertale and try:
+
+> Inspect this Apertale project. Tell me which book, spread, and revision are open, then switch to Atlas of Living Wonders.
+
+> Create a one-spread book about the geometry of eclipses. Add one lifted 3D focal object with a safe hover response, click fact card, and slow motion.
+
+> Inspect my latest manual placement. Change only the object's motion, then undo your motion change without moving it back.
+
+The first prompt proves page-grounded context and shelf navigation. The second proves structured authoring. The third proves that the Agent and the person share one revisioned artifact and that exact undo preserves later non-overlapping human work.
+
+### Four independent books, two presentations
+
+| Library | Night presentation |
+|---|---|
+| ![Apertale shelf with four independent Sample Books](app/qa/apertale-library-current.png) | ![Apertale Night presentation with the dimensional Colosseum](app/qa/apertale-atlas-night-current.png) |
 
 ## Run locally
 
@@ -45,6 +65,7 @@ npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 - [`docs/ASSET_PROVENANCE.md`](docs/ASSET_PROVENANCE.md) — runtime art, procedural model, icon, reference, and user-import provenance.
 - [`docs/SITE_TOOLS_ACCEPTANCE.md`](docs/SITE_TOOLS_ACCEPTANCE.md) — deployment verifier and real ChatGPT Site Tools acceptance story.
 - [`docs/ELIGIBILITY_AND_BUILD_LOG.md`](docs/ELIGIBILITY_AND_BUILD_LOG.md) — challenge-period Git timeline and ownership evidence.
+- [`docs/SUBMISSION_MEDIA.md`](docs/SUBMISSION_MEDIA.md) — source-true screenshots, captions, alt text, and demo-media usage.
 - [`app/design-qa.md`](app/design-qa.md) — visual QA evidence and iteration history.
 - [`docs/README.md`](docs/README.md) — current documentation and historical delivery evidence.
 

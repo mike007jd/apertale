@@ -33,6 +33,7 @@ This matrix is the current delivery truth for Apertale. A row is only marked pas
 | Working judge-accessible live URL | Not live | `https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/` currently returns HTTP 401. This is intentional after the user asked to take the old branded build down. Republish only after explicit approval. |
 | Public source repository | Missing destination | The local checkout has no Git remote. Source preparation passes locally: visible MIT license, a 1.31 MB scannable-source gitleaks pass with no findings, and a fresh dependency-free source export passed `npm ci`, typecheck, 32 tests, production build, and 6 Sites/deployment tests. [`ELIGIBILITY_AND_BUILD_LOG.md`](ELIGIBILITY_AND_BUILD_LOG.md) proves the first commit occurred inside the challenge period. Publishing the preserved history and then verifying a real anonymous clone remain required. |
 | Public demo video under 3 minutes | Missing | Record after the final live host run; include audio, a human request in ChatGPT, visible WebMCP calls, the resulting book, direct manipulation, and exact undo. |
+| Source-true submission media | Passed locally | [`SUBMISSION_MEDIA.md`](SUBMISSION_MEDIA.md) selects current implementation captures, captions, alt text, and the six required recording beats without using historical mockups as product evidence. |
 | Devpost submission | Missing | Requires the verified live URL, public repository, public video, project description, and explicit final submit action. |
 
 ## Official requirements used for this gate
