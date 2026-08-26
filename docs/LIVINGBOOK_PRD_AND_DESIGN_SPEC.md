@@ -1,13 +1,13 @@
-# LivingBook Studio — WebMCP Challenge Final
+# LivingBook Studio — Archived WebMCP Challenge Specification
 
-> Status: **Challenge Final — implementation scope locked**  
+> Status: **Superseded historical specification — do not use as release truth**
 > Version: **1.1**  
 > Last updated: **2026-08-26 NZST**  
 > Primary target: **OpenAI WebMCP Challenge**  
 > Delivery: **one portable web app, published first as a ChatGPT Site**  
 > Deadline: **2026-09-03 1:00 p.m. PT / 2026-09-04 8:00 a.m. NZST**
 
-This document supersedes version 0.1. It is the single product, design, technical, and acceptance specification for the Challenge build. Future-product ideas are explicitly separated from submission scope and must not delay the accepted demo path.
+This document records the earlier LivingBook-branded build. It is retained only for traceability and no longer defines the product, tool names, acceptance gates, or submission state. The consolidated source of truth is [`PRODUCT_ARCHITECTURE.md`](PRODUCT_ARCHITECTURE.md), with current evidence in [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md).
 
 ## 1. Product decision
 

@@ -1,5 +1,7 @@
 # LivingBook Studio — Challenge Final 1.1 Completion Audit
 
+> **Superseded historical snapshot.** This file contains completion claims from the retired LivingBook build and must not be used as current release truth. See [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md) for the active Apertale gate.
+
 Checked: 2026-08-26
 
 This audit separates the completed product and live deployment from the remaining challenge-submission actions.

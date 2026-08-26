@@ -22,18 +22,20 @@ export function deformPageVertex(baseX: number, baseY: number, progress: number,
   const u = clamp01(distanceFromSpine / pageWidth);
   const turnAngle = Math.PI * t;
   const turnLift = Math.sin(turnAngle);
-  const localCurl = turnLift * 0.36 * Math.sin(Math.PI * u);
-  const localAngle = turnAngle - localCurl;
-
-  const projectedDistance = Math.cos(localAngle) * distanceFromSpine;
+  const curl = Math.sin(Math.PI * u);
+  const projectedDistance = Math.cos(turnAngle) * distanceFromSpine;
+  // Keep the centreline a single non-self-intersecting paper arc. Varying the
+  // rotation angle per vertex made neighbouring strips reverse order at the
+  // middle of a turn, which produced the visible "torn page" triangles.
+  const sidewaysCurl = turnLift * pageWidth * 0.18 * curl;
   const boundedArch = turnLift * (
     0.14
-    + 1.05 * Math.sin(Math.PI * u)
+    + 1.05 * curl
     + 0.26 * u
   );
 
   return {
-    x: -pageWidth / 2 + projectedDistance,
+    x: -pageWidth / 2 + projectedDistance + sidewaysCurl,
     y: baseY,
     z: boundedArch,
   };

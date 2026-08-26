@@ -1,17 +1,19 @@
-# LivingBook Studio Design QA
+# Apertale Design QA
 
 ## Comparison target
 
-- Source visual truth, Day: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/docs/assets/livingbook-day-theme-reference.png`
-- Source visual truth, Night: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/docs/assets/livingbook-night-theme-reference.png`
-- Browser-rendered Day implementation: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-day-final-clean.png`
-- Browser-rendered Night implementation: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-night-final-clean.png`
-- Three.js page-turn evidence: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-page-turn-pass5.png`
-- Fresh bounded page-turn evidence: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/audit-2026-08-26/05-page-turn-corrected.png`
-- Fresh product-audit states: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/audit-2026-08-26/01-day-start.png`, `02-bird-selected.png`, `03-bird-lifted.png`, and `06-night-spread.png`
-- Mobile implementation: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-mobile-selected-pass2.png`
-- Forced WebGL/reduced-motion fallback: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/implementation-fallback-final.png`
-- Page-turn performance record: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/PERFORMANCE.md`
+- Source visual truth, Day: `../docs/assets/livingbook-day-theme-reference.png`
+- Source visual truth, Night: `../docs/assets/livingbook-night-theme-reference.png`
+- Browser-rendered Day implementation: `qa/implementation-day-final-clean.png`
+- Browser-rendered Night implementation: `qa/implementation-night-final-clean.png`
+- Three.js page-turn evidence: `qa/implementation-page-turn-pass5.png`
+- Fresh bounded page-turn evidence: `qa/audit-2026-08-26/05-page-turn-corrected.png`
+- Fresh product-audit states: `qa/audit-2026-08-26/01-day-start.png`, `02-bird-selected.png`, `03-bird-lifted.png`, and `06-night-spread.png`
+- Mobile implementation: `qa/implementation-mobile-selected-pass2.png`
+- Forced WebGL/reduced-motion fallback: `qa/implementation-fallback-final.png`
+- Page-turn performance record: `qa/PERFORMANCE.md`
+- Editable Figma baseline: [Apertale — Product Design v1.1, current product states](https://www.figma.com/design/3Kq19oItsbBczMIeB739cO/Apertale-%E2%80%94-Product-Design-v1.1?node-id=7-6)
+- Current real-scene cover captures: `qa/apertale-atlas-preview-cover.png` and `qa/apertale-science-preview-cover.png`
 
 ## Normalization
 
@@ -20,9 +22,9 @@
 - CSS viewport: 1487 × 1058; browser viewport override at density 1 for equal-pixel comparison.
 - Mobile implementation pixels/CSS viewport: 390 × 844 at density 1.
 - State: Day spread 1 with Bird selected; Night spread 2 with Fox selected; editor mode.
-- Full-view Day comparison: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/comparison-day-final.png`
-- Full-view Night comparison: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/comparison-night-final.png`
-- Focused Bird/control comparison: `/Users/haoshengli/Seafile/WebWorkSpace/imagebook/app/qa/focus-day-final.png`
+- Full-view Day comparison: `qa/comparison-day-final.png`
+- Full-view Night comparison: `qa/comparison-night-final.png`
+- Focused Bird/control comparison: `qa/focus-day-final.png`
 
 The desktop comparisons use the same viewport, crop, theme, selected element, and editor state. The reference page-turn pose is separately compared against the implementation’s captured deforming-page midpoint because a transient animation frame cannot also be the stable full-view selection baseline.
 
@@ -79,8 +81,25 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 
 - P1 found: the full-distance page deformation could approach the camera and visually balloon beyond the physical cover at the midpoint. Evidence: `qa/audit-2026-08-26/04-page-turn-midpoint.png`.
 - Fix: page displacement is now bounded relative to the book depth while retaining the curved sheet, shadow, and two-sided transition. The geometry has direct bounds tests. Evidence: `qa/audit-2026-08-26/05-page-turn-corrected.png`.
-- Fresh Day, selected Bird, lifted Bird, corrected turn, and Night states were placed with audit notes in the final Figma file.
+- Fresh Day, selected Bird, lifted Bird, corrected turn, and Night browser states were captured as local audit evidence. The Figma file now includes a current Apertale Auto Layout board for Day, the four-book Library, and Night; Figma MCP verified frame `7:6` and its rendered output.
 - WebMCP context now returns the compact book outline and current-spread element list promised by the PRD, and rejects attempts to mutate a hidden-spread element.
+
+### Pass 5 — multi-book and authoring expansion, passed locally
+
+- Replaced the single mixed demo with a shelf of four independent Sample Books. Each book preserves its own spreads and revisions when the user switches books.
+- Reworked the page centreline after a real midpoint screenshot exposed strip reversal/self-intersection. Forward and backward midpoint captures now show one continuous leaf; a property test rejects non-adjacent segment intersections throughout the turn.
+- Added procedural Great Pyramid and volcano cross-section plates alongside the Colosseum, each with Day/Night lighting, hover response, click focus, and an accessible fact card.
+- Imported a real PNG through the browser file chooser, confirmed its stable `asset:` id was stored in IndexedDB, reloaded the page, and verified the cutout reappeared with no `asset:resolve-failed` diagnostic. The QA import was then removed by restoring the untouched revision-1 sample.
+- Added `apply_scene_patch` for atomic add/update/remove/reorder operations, full-patch undo, locked-element checks, and arbitrary-URL rejection.
+- Final page-turn diagnostic: 821 ms, 121 FPS on the acceptance browser. The reduced-motion forced fallback changed spreads immediately with no WebGL canvas.
+- Library modal opens with focus on its close control, traps Tab inside the dialog, and closes with Escape.
+
+### Pass 6 — release interaction audit, passed after two fixes
+
+- P2 found and fixed: the expanded element panel overlapped the horizontal selection toolbar and made `Lock` unreachable. The panel now follows the toolbar's left/right clearance and sits below it; a fresh browser run confirmed `Unlock` appears and scale/rotate controls become disabled while locked.
+- Rejected a WebP package-size optimization after the target Codex in-app browser emitted `EncodingError` and rendered blank pages. The final runtime keeps the compatible original PNG artwork; a new PNG-only tab produced no console warnings or errors.
+- Replaced the Atlas and Science CSS-gradient shelf placeholders with optimized captures of their real live Colosseum and volcano scenes. All four Sample Book covers now use project-owned raster artwork.
+- Fresh interaction run passed the four-book Library, structured Colosseum card, continuous Atlas page turn, Great Pyramid, Night, Preview/Escape, Story/Escape, form-safe arrow keys, and 2D/reduced-motion immediate navigation.
 
 ## Primary interactions tested
 
@@ -92,7 +111,7 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - Enter/exit Preview without changing the current spread.
 - Navigate with keyboard arrows and dismiss selection/Preview with Escape.
 - Verify responsive selection and controls at 390 × 844.
-- Verify all six WebMCP definitions, registration signals, compact JSON output, input validation, idempotency, and abort cleanup in automated tests.
+- Verify all six project-level WebMCP definitions, registration signals, compact JSON output, input validation, idempotency, abort cleanup, and field-aware atomic patch undo in automated tests.
 
 ## Implementation checklist
 

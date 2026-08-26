@@ -23,13 +23,13 @@ export function getDiagnostics() {
 }
 
 export function exposeDiagnostics() {
-  document.getElementById("livingbook-diagnostics")?.remove();
+  document.getElementById("apertale-diagnostics")?.remove();
   diagnosticsNode = document.createElement("script");
-  diagnosticsNode.id = "livingbook-diagnostics";
+  diagnosticsNode.id = "apertale-diagnostics";
   diagnosticsNode.type = "application/json";
   diagnosticsNode.textContent = "[]";
   document.head.appendChild(diagnosticsNode);
-  Object.defineProperty(window, "livingBookDiagnostics", {
+  Object.defineProperty(window, "apertaleDiagnostics", {
     configurable: true,
     value: getDiagnostics,
   });
@@ -37,6 +37,6 @@ export function exposeDiagnostics() {
 
 declare global {
   interface Window {
-    livingBookDiagnostics?: () => DiagnosticEvent[];
+    apertaleDiagnostics?: () => DiagnosticEvent[];
   }
 }

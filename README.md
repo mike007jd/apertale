@@ -1,8 +1,24 @@
-# LivingBook Studio
+# Apertale
 
-LivingBook Studio is a WebMCP-native, Three.js picture-book editor built for the OpenAI WebMCP Challenge. People and ChatGPT operate the same live, revisioned book: both can lift prepared paper elements, transform or animate them, switch the scene theme, and safely undo exact changes.
+**Open a page. Enter a world.**
 
-## Start locally
+Apertale is a WebMCP-native canvas for interactive books. A person describes what they want in their own ChatGPT or Codex conversation; the host Agent uses Apertale's structured tools to compose, animate, and revise the same live book the person can turn, inspect, and edit directly.
+
+The application provides the medium—Three.js book rendering, assets, safe interaction presets, project state, and exact undo. The user's ChatGPT session in a supporting host provides the intelligence and model usage. The project contains no shared owner-funded OpenAI API key and no fake in-page AI composer. Direct Codex-host WebMCP availability remains host-dependent and must be verified separately.
+
+## Current build
+
+- A tactile Three.js/WebGL book with deforming page geometry and a 2D/reduced-motion fallback.
+- Day and Night presentation modes over one revisioned document.
+- Shared human/WebMCP command engine with revision checks, idempotency, provenance, and exact undo tokens.
+- WebMCP book creation, spread composition, structured knowledge reveals, and atomic bounded scene patches, plus focused inspection of selected reveals and local assets.
+- Native local PNG/JPEG/WebP import backed by IndexedDB Blob storage; imported assets survive reload, remain reusable across books, and are accepted by the Agent only after a real local-store lookup.
+- Declarative hover and click interactions validated against closed presets.
+- A dimensional landmark knowledge spread as the first flagship sample.
+- A real multi-book shelf: each Sample Book owns its own spreads, revisions, assets, and interactions.
+- A host-portable Sites bundle. Public hosting is intentionally disabled while the product is being rebuilt.
+
+## Run locally
 
 ```bash
 cd app
@@ -10,7 +26,7 @@ npm install
 npm run dev
 ```
 
-## Verify the submission build
+## Verify
 
 ```bash
 cd app
@@ -22,21 +38,23 @@ npm run test:sites
 
 ## Repository map
 
-- [`app/`](app/) — React, TypeScript, Three.js, six WebMCP tools, tests, and Sites-compatible production bundle.
-- [`app/README.md`](app/README.md) — architecture, tool contract, package baseline, and verification commands.
-- [`app/design-qa.md`](app/design-qa.md) — same-viewport Product Design QA evidence and iteration history.
-- [`docs/LIVINGBOOK_PRD_AND_DESIGN_SPEC.md`](docs/LIVINGBOOK_PRD_AND_DESIGN_SPEC.md) — Challenge Final 1.1 product/design specification.
-- [`docs/CHALLENGE_SUBMISSION_HANDOFF.md`](docs/CHALLENGE_SUBMISSION_HANDOFF.md) — demo narrative and remaining external submission gates.
-- [`docs/COMPLETION_AUDIT.md`](docs/COMPLETION_AUDIT.md) — requirement-by-requirement proof and the exact external blockers.
+- [`app/`](app/) — React, TypeScript, Three.js, WebMCP adapter, tests, and host-portable production bundle.
+- [`docs/PRODUCT_ARCHITECTURE.md`](docs/PRODUCT_ARCHITECTURE.md) — active product, usage, asset, interaction, security, and delivery architecture.
+- [`docs/CHALLENGE_READINESS.md`](docs/CHALLENGE_READINESS.md) — active challenge gate separating verified local work from missing external delivery.
+- [`docs/ASSET_PROVENANCE.md`](docs/ASSET_PROVENANCE.md) — runtime art, procedural model, icon, reference, and user-import provenance.
+- [`app/design-qa.md`](app/design-qa.md) — visual QA evidence and iteration history.
+- [`docs/README.md`](docs/README.md) — current documentation and historical delivery evidence.
 
-## WebMCP tools
+## Product boundary
 
-`get_book_context`, `lift_element`, `edit_element`, `animate_element`, `set_scene_theme`, and `undo_book_change` are registered through `document.modelContext.registerTool()` when the host browser supports WebMCP.
+The normal creation loop is bring-your-own-Agent:
 
-The human UI remains fully usable without WebMCP. Add `?fallback=1&reducedMotion=1` to the local URL to exercise the verified 2D/reduced-motion path.
+1. Open Apertale in a supporting ChatGPT desktop built-in browser.
+2. Import source assets into the live page when needed.
+3. Ask ChatGPT to inspect and build the book.
+4. ChatGPT invokes the page's WebMCP tools using the user's own account/session.
+5. Continue editing together in one visible, undoable project.
 
-## Status
-
-The local source, visual QA, automated gates, host-portable build, and submission copy are ready. Figma team placement, live hosting, anonymous production verification, repository publication, demo-video upload, and Devpost submission require explicit external destination/authorization.
+Generated-image file transfer into a webpage is treated as an explicit import handoff until a direct host attachment bridge is verified. See the architecture document for the exact boundary.
 
 License: [MIT](LICENSE).

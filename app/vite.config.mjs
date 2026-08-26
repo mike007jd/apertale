@@ -18,8 +18,18 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     allowedHosts: ["terminal.local"],
+    headers: {
+      "Origin-Agent-Cluster": "?1",
+      "Permissions-Policy": "tools=(self)",
+    },
     warmup: {
       clientFiles: ["./src/main.tsx"],
+    },
+  },
+  preview: {
+    headers: {
+      "Origin-Agent-Cluster": "?1",
+      "Permissions-Policy": "tools=(self)",
     },
   },
   plugins: [react()],

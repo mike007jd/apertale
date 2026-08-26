@@ -27,4 +27,29 @@ describe("page-turn deformation", () => {
     }
     expect(maximumDepth).toBeGreaterThan(1.2);
   });
+
+  it("keeps the paper centreline free of self-intersections throughout the turn", () => {
+    const orientation = (a: Deformed, b: Deformed, c: Deformed) => (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x);
+    const intersects = (a: Deformed, b: Deformed, c: Deformed, d: Deformed) => {
+      const abC = orientation(a, b, c);
+      const abD = orientation(a, b, d);
+      const cdA = orientation(c, d, a);
+      const cdB = orientation(c, d, b);
+      return abC * abD < -1e-10 && cdA * cdB < -1e-10;
+    };
+
+    for (let frame = 1; frame < 20; frame += 1) {
+      const progress = frame / 20;
+      const points = Array.from({ length: 41 }, (_, index) => (
+        deformPageVertex(-PAGE_WIDTH / 2 + (index / 40) * PAGE_WIDTH, 0, progress, PAGE_WIDTH)
+      ));
+      for (let first = 0; first < points.length - 1; first += 1) {
+        for (let second = first + 2; second < points.length - 1; second += 1) {
+          expect(intersects(points[first], points[first + 1], points[second], points[second + 1])).toBe(false);
+        }
+      }
+    }
+  });
 });
+
+type Deformed = ReturnType<typeof deformPageVertex>;

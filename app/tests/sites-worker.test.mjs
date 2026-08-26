@@ -15,6 +15,8 @@ test("serves existing static assets without a fallback", async () => {
   });
 
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get("origin-agent-cluster"), "?1");
+  assert.equal(response.headers.get("permissions-policy"), "tools=(self)");
   assert.deepEqual(calls, ["/assets/app.js"]);
 });
 
@@ -38,6 +40,8 @@ test("falls back to index.html for an unknown app route", async () => {
   );
 
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get("origin-agent-cluster"), "?1");
+  assert.equal(response.headers.get("permissions-policy"), "tools=(self)");
   assert.deepEqual(calls, ["/flow/step-two?source=share", "/index.html"]);
 });
 
@@ -57,6 +61,8 @@ test("does not turn missing API or write requests into the app shell", async () 
     });
 
     assert.equal(response.status, 404);
+    assert.equal(response.headers.get("origin-agent-cluster"), "?1");
+    assert.equal(response.headers.get("permissions-policy"), "tools=(self)");
     assert.equal(calls, 1);
   }
 });

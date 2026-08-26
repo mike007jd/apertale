@@ -1,5 +1,7 @@
 # LivingBook Studio — WebMCP Challenge Handoff
 
+> **Superseded historical draft.** Use [`SUBMISSION_DRAFT.md`](SUBMISSION_DRAFT.md) for current Apertale copy and [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md) for current gate status.
+
 Version: Challenge Final 1.1  
 Prepared: 2026-08-26
 
