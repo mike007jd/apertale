@@ -10,6 +10,7 @@ type Props = {
   snapshot: BookSnapshot;
   turn: TurnState;
   mode?: "reader" | "workshop";
+  readOnly?: boolean;
   onSelect: (elementId: string | null) => void;
   onHover: (elementId: string | null) => void;
   onMoveElement: (elementId: string, x: number, y: number) => void;
@@ -510,10 +511,10 @@ function buildSceneElement(
   };
 }
 
-export function ThreeBook({ snapshot, turn, mode = "reader", onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure }: Props) {
+export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const propsRef = useRef({ snapshot, turn, mode, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure });
-  propsRef.current = { snapshot, turn, mode, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure };
+  const propsRef = useRef({ snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure });
+  propsRef.current = { snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure };
   const sceneStructureKey = JSON.stringify({
     id: snapshot.document.id,
     mode,
@@ -759,10 +760,6 @@ export function ThreeBook({ snapshot, turn, mode = "reader", onSelect, onHover, 
         recordDiagnostic("asset:resolve-failed", { elementId: element.id });
       });
     };
-    propsRef.current.snapshot.document.spreads.forEach((spread) => {
-      spread.elements.forEach(mountSceneElement);
-    });
-
     const placeStaticElement = (element: BookElement, sceneElement: SceneElement, scaleMultiplier = 1) => {
       const pageCenter = element.page === "right" ? PAGE_W / 2 : -PAGE_W / 2;
       sceneElement.root.position.set(
@@ -864,19 +861,31 @@ export function ThreeBook({ snapshot, turn, mode = "reader", onSelect, onHover, 
     let hoveredId: string | null = null;
 
     let pagePairs = new Map<string, PagePair>();
+    const loadingSpreadIds = new Set<string>();
     let readySent = false;
-    loadPagePairs(propsRef.current.snapshot.document.spreads, propsRef.current.mode).then((pairs) => {
-      if (disposed) {
-        pairs.forEach(({ spread, overlay }) => {
-          spread.dispose();
-          overlay.dispose();
-        });
-      } else pagePairs = pairs;
-    }).catch(() => {
-      if (disposed) return;
-      recordDiagnostic("spread:load-failed", { documentId: loadingDocumentId });
-      propsRef.current.onFailure();
-    });
+    const ensureSpreadLoaded = (spread: Spread) => {
+      if (pagePairs.has(spread.id) || loadingSpreadIds.has(spread.id)) return;
+      loadingSpreadIds.add(spread.id);
+      loadPagePairs([spread], propsRef.current.mode).then((pairs) => {
+        loadingSpreadIds.delete(spread.id);
+        if (disposed) {
+          pairs.forEach(({ spread: texture, overlay }) => {
+            texture.dispose();
+            overlay.dispose();
+          });
+          return;
+        }
+        const pair = pairs.get(spread.id);
+        if (pair) pagePairs.set(spread.id, pair);
+      }).catch(() => {
+        loadingSpreadIds.delete(spread.id);
+        if (disposed) return;
+        recordDiagnostic("spread:load-failed", { documentId: loadingDocumentId, spreadId: spread.id });
+        propsRef.current.onFailure();
+      });
+    };
+    const initialSpreadIndex = propsRef.current.snapshot.session.currentSpreadIndex;
+    ensureSpreadLoaded(propsRef.current.snapshot.document.spreads[initialSpreadIndex]);
 
     function resize() {
       const width = host.clientWidth;
@@ -936,7 +945,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", onSelect, onHover, 
       if (elementId) {
         const element = currentSpread().elements.find((item) => item.id === elementId);
         propsRef.current.onSelect(elementId);
-        if (element && !element.locked) {
+        if (element && !element.locked && !propsRef.current.readOnly) {
           drag.elementId = elementId;
           drag.startX = event.clientX;
           drag.startY = event.clientY;
@@ -1018,6 +1027,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", onSelect, onHover, 
     let frame = 0;
     let raf = 0;
     let lastSpreadId = "";
+    let lastPrefetchedSpreadIndex = -1;
     const dayPaperColor = new THREE.Color(0xfffbef);
     const nightPaperColor = new THREE.Color(0xe6dccb);
     const dayPageBlockColor = new THREE.Color(0xe8dcc4);
@@ -1042,6 +1052,13 @@ export function ThreeBook({ snapshot, turn, mode = "reader", onSelect, onHover, 
       const { snapshot: current, turn: currentTurn } = propsRef.current;
       const spread = current.document.spreads[current.session.currentSpreadIndex];
       const pagePair = pagePairs.get(spread.id);
+      if (pagePair && lastPrefetchedSpreadIndex !== current.session.currentSpreadIndex) {
+        lastPrefetchedSpreadIndex = current.session.currentSpreadIndex;
+        const previous = current.document.spreads[current.session.currentSpreadIndex - 1];
+        const next = current.document.spreads[current.session.currentSpreadIndex + 1];
+        if (previous) ensureSpreadLoaded(previous);
+        if (next) ensureSpreadLoaded(next);
+      }
 
       const night = current.session.sceneThemeId === "midnight-desk";
       const reduced = current.session.quality === "reduced";

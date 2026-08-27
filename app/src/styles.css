@@ -37,6 +37,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body, #root {
   width: 100%;
@@ -85,12 +86,14 @@ select:focus-visible {
 }
 
 .app-shell::after {
-  background-image: url("/assets/generated/night-background.png");
   opacity: 0;
 }
 
 :root[data-theme="night"] .app-shell::before { opacity: 0; }
-:root[data-theme="night"] .app-shell::after { opacity: 1; }
+:root[data-theme="night"] .app-shell::after {
+  background-image: url("/assets/generated/night-background.png");
+  opacity: 1;
+}
 .app-shell::selection { background: var(--accent-soft); }
 
 .topbar {
@@ -1099,6 +1102,7 @@ select:focus-visible {
 .workbench-status span { display: grid; gap: 3px; }
 .workbench-status strong { font-size: 12px; }
 .workbench-status small { color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+.workshop-agent-boundary { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 
 /* Creation is a full workspace, not a form modal. The live Three.js stage
    supplies the blank physical book while this layer supplies only controls. */

@@ -1,3 +1,6 @@
+import { createBookShareApi } from "./bookShareApi.js";
+import { D1BookRepository } from "./d1BookRepository.js";
+
 function withWebMcpDocumentPolicy(response) {
   const headers = new Headers(response.headers);
   headers.set("Origin-Agent-Cluster", "?1");
@@ -9,18 +12,75 @@ function withWebMcpDocumentPolicy(response) {
   });
 }
 
-export default {
-  async fetch(request, env) {
-    const response = await env.ASSETS.fetch(request);
-    const acceptsHtml = request.headers.get("accept")?.includes("text/html");
+function unavailableStorageResponse() {
+  return new Response(JSON.stringify({
+    ok: false,
+    code: "storage_unavailable",
+    message: "Book storage is not configured for this Site build.",
+  }), {
+    status: 503,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
 
-    if (response.status !== 404 || !acceptsHtml || !["GET", "HEAD"].includes(request.method)) {
-      return withWebMcpDocumentPolicy(response);
+function apiFromEnvironment(env) {
+  if (!env.DB || !env.FILES) return null;
+  return createBookShareApi({ repository: new D1BookRepository(env.DB), objects: env.FILES });
+}
+
+export async function handleRequest(request, env, options = {}) {
+  const url = new URL(request.url);
+  const storageApi = options.storageApi ?? apiFromEnvironment(env);
+  const isStorageRoute = url.pathname === "/api/books"
+    || url.pathname.startsWith("/api/books/")
+    || url.pathname.startsWith("/api/shared/");
+
+  if (isStorageRoute) {
+    if (!storageApi) return withWebMcpDocumentPolicy(unavailableStorageResponse());
+    const response = await storageApi.handle(request);
+    return withWebMcpDocumentPolicy(response ?? new Response("Not found", { status: 404 }));
+  }
+
+  const shareMatch = /^\/share\/([^/]+)\/?$/u.exec(url.pathname);
+  if (shareMatch && ["GET", "HEAD"].includes(request.method)) {
+    if (!storageApi) return withWebMcpDocumentPolicy(unavailableStorageResponse());
+    let published = false;
+    try {
+      published = await storageApi.isPublishedShare(shareMatch[1]);
+    } catch {
+      return withWebMcpDocumentPolicy(unavailableStorageResponse());
     }
-
+    if (!published) {
+      return withWebMcpDocumentPolicy(new Response(request.method === "HEAD" ? null : "Shared book not found", {
+        status: 404,
+        headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "private, no-store" },
+      }));
+    }
     const indexUrl = new URL(request.url);
     indexUrl.pathname = "/index.html";
     indexUrl.search = "";
     return withWebMcpDocumentPolicy(await env.ASSETS.fetch(new Request(indexUrl, request)));
+  }
+
+  const response = await env.ASSETS.fetch(request);
+  const acceptsHtml = request.headers.get("accept")?.includes("text/html");
+
+  if (response.status !== 404 || !acceptsHtml || !["GET", "HEAD"].includes(request.method)) {
+    return withWebMcpDocumentPolicy(response);
+  }
+
+  const indexUrl = new URL(request.url);
+  indexUrl.pathname = "/index.html";
+  indexUrl.search = "";
+  return withWebMcpDocumentPolicy(await env.ASSETS.fetch(new Request(indexUrl, request)));
+}
+
+export default {
+  async fetch(request, env) {
+    return handleRequest(request, env);
   },
 };
