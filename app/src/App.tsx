@@ -190,7 +190,7 @@ export function App() {
   const openingFrame = useRef<number | null>(null);
   const libraryFrame = useRef<number | null>(null);
   const webGlAvailable = useMemo(supportsWebGl2, []);
-  const renderWebGl = webGlAvailable && !sceneFailed;
+  const renderWebGl = !showLibrary && webGlAvailable && !sceneFailed;
   const library = useMemo(() => bookEngine.getLibrary(), [snapshot.document.id, snapshot.document.revision]);
   const activeLibraryBook = library.books.find((book) => book.id === library.activeBookId);
   const workshopSnapshot = useMemo<BookSnapshot>(() => ({
@@ -351,10 +351,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!openingBook || readyBookId !== openingBook.id) return;
+    if (!openingBook || snapshot.document.id !== openingBook.id) return;
     if (bookTransition?.direction === "open") return;
     beginOpenTransition(openingBook);
-  }, [beginOpenTransition, bookTransition?.direction, openingBook, readyBookId]);
+  }, [beginOpenTransition, bookTransition?.direction, openingBook, snapshot.document.id]);
 
   const closeCodexGuide = useCallback(() => {
     setShowCreateGuide(false);
@@ -733,7 +733,7 @@ export function App() {
 
   return (
     <main className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""} ${bookTransition ? `is-book-nav-active is-book-nav-${bookTransition.direction}` : ""}`}>
-      <header className="topbar" aria-hidden={showLibrary || showCreateGuide || showElementAgentGuide || undefined}>
+      <header className="topbar" hidden={showLibrary || showCreateGuide} aria-hidden={showElementAgentGuide || undefined}>
         {!snapshot.session.preview && <button className="library-button" onClick={openLibrary} aria-label="Open book library"><Books size={18} /> <span>Books</span></button>}
         <button className="wordmark" onClick={() => { bookEngine.setPreview(false); openLibrary(); }} aria-label="Open book library">Apertale</button>
         <div className="topbar-actions">
@@ -772,9 +772,9 @@ export function App() {
             <div className="library-intro">
               <p>Your living library</p>
               <h1 id="library-title">Open a world.<br />Then make one yours.</h1>
-              <span>Open a curated book, or create a new living story with the Codex conversation beside this browser.</span>
+              <span>Browse here in any browser. To create with your own plan usage, open this Site in the ChatGPT desktop built-in browser and use the conversation beside it; Safari does not include that composer.</span>
               <div className="library-actions">
-                <button className="create-codex-button" onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create Your Own</button>
+                <button className="create-codex-button" onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create with ChatGPT</button>
                 <button className="guide-book-button" onClick={() => openBookFromLibrary("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={18} /> Read the Guide Book</button>
               </div>
             </div>
@@ -789,7 +789,13 @@ export function App() {
                   disabled={libraryBusy}
                 >
                   <span className="library-cover-frame">
-                    <img src={resolvedCoverUrls[book.id] ?? book.coverTextureUrl} alt={`${book.title} cover`} />
+                    <img
+                      src={resolvedCoverUrls[book.id] ?? book.coverTextureUrl}
+                      alt={`${book.title} cover`}
+                      loading={index < 2 ? "eager" : "lazy"}
+                      decoding="async"
+                      fetchPriority={index === 0 ? "high" : "auto"}
+                    />
                     {openingBook?.id === book.id && <span className="library-opening-badge" aria-hidden="true"><SpinnerGap size={15} weight="bold" /> Opening</span>}
                   </span>
                   <span className="library-card-copy">
@@ -809,11 +815,12 @@ export function App() {
 
       <section
         className={`stage ${showCreateGuide ? "is-creation-workshop" : ""}`}
+        hidden={showLibrary && !showCreateGuide}
         aria-hidden={(showLibrary && !showCreateGuide) || undefined}
         aria-busy={!showCreateGuide && stageIsLoading}
         aria-label={showCreateGuide ? "Blank three-dimensional book workshop" : `${spread.title}. Spread ${snapshot.session.currentSpreadIndex + 1} of ${snapshot.document.spreads.length}`}
       >
-        {renderWebGl ? (
+        {showLibrary && !showCreateGuide ? null : renderWebGl ? (
           <Suspense fallback={showCreateGuide
             ? <div className="fallback-book workshop-blank-fallback is-loading" />
             : <div className="fallback-book is-loading"><img src={spread.textureUrl} alt="" /></div>}>
@@ -984,13 +991,13 @@ export function App() {
       </section>
 
       {!snapshot.session.preview && !showCreateGuide && (
-        <footer className="bottom-controls" aria-hidden={showLibrary || undefined}>
+        <footer className="bottom-controls" hidden={showLibrary}>
           <div className="bottom-left-actions">
             <button className="outline-button" onClick={() => setShowOutline(!showOutline)} aria-expanded={showOutline}>Story</button>
           </div>
           <button className="agent-prompt" onClick={openCodexGuide}>
             <Sparkle size={17} weight="fill" />
-            <span>Create Your Own</span>
+            <span>Create with ChatGPT</span>
           </button>
           <div className="page-progress"><strong>{snapshot.session.currentSpreadIndex + 1}</strong><span>/</span>{snapshot.document.spreads.length}</div>
         </footer>
@@ -1057,6 +1064,7 @@ export function App() {
               <div className={`workbench-status ${webMcpAvailable ? "is-connected" : ""}`}>
                 <i /><span><strong>{webMcpAvailable ? "WebMCP connected" : "WebMCP-ready page"}</strong><small>{webMcpAvailable ? "Your Agent can operate this open book." : "Open this page in a WebMCP-capable Agent browser."}</small></span>
               </div>
+              <p className="workshop-agent-boundary">This panel is a handoff, not an embedded AI chat. Continue in the ChatGPT desktop conversation beside this Site.</p>
               <div className="workshop-handoff-copy">
                 <p>Continue in your Agent</p>
                 <h3>Bring the idea.<br />Bring the pictures.</h3>
@@ -1115,14 +1123,14 @@ export function App() {
         </section>
       )}
 
-      <div className="sr-only" aria-live="polite">
+      {!showLibrary && <div className="sr-only" aria-live="polite">
         {spread.title}. {spread.body}
         {selectedInteraction && hasReveal(selectedInteraction)
           ? ` ${selectedInteraction.reveal.title}. ${selectedInteraction.reveal.summary} ${selectedInteraction.reveal.facts
               .map((fact) => `${fact.label}: ${fact.value}.`)
               .join(" ")}`
           : ""}
-      </div>
+      </div>}
     </main>
   );
 }
