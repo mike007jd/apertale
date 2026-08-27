@@ -1,6 +1,6 @@
 # Apertale — Devpost Submission Draft
 
-> Prepared: 2026-08-26 NZST
+> Prepared: 2026-08-27 NZST
 > Publication fields remain intentionally blank until their real destinations pass `CHALLENGE_READINESS.md`.
 
 ## Project name
@@ -19,7 +19,7 @@ Apertale is a WebMCP-native canvas where a person and ChatGPT create the same in
 
 Creative direction begins as intent—“build a moonlit atlas from my travel photos,” “open the volcano to explain its layers,” or “make the bird react when I hover”—but the result must become precise visual state. A conventional chat can describe those edits but cannot safely operate the current canvas. WebMCP lets the Agent read stable book, spread, element, asset, and revision IDs, then apply bounded changes to the same artifact the person is touching.
 
-The website remains useful on its own. WebMCP makes it meaningfully better by adding natural-language composition, multi-step scene edits, and context-aware iteration while preserving direct manipulation, visible provenance, conflicts, and undo.
+The website opens as a polished editorial library of curated books that anyone can explore. Its Field Guide then routes authors through **Create Your Own** to the real Agent conversation, where WebMCP adds natural-language composition, multi-step scene edits, and context-aware iteration while preserving direct manipulation, visible provenance, conflicts, and undo.
 
 ## What people and Agents do together
 
@@ -49,7 +49,7 @@ The browser owns the revisioned project and renders it through React, TypeScript
 
 ### 0:00–0:15 — The shelf
 
-Open Apertale and show the four independent sample books. Enter **Atlas of Living Wonders**, turn from the Colosseum to the Great Pyramid, then return to the first spread.
+Open Apertale and show the Field Guide plus four independent Sample Books. Point out the short curated-demo disclosure and **Create Your Own**, then enter **Atlas of Living Wonders** and turn from the Colosseum to the Great Pyramid.
 
 ### 0:15–0:35 — Shared context
 

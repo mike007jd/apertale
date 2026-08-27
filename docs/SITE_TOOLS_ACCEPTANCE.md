@@ -50,13 +50,13 @@ Required evidence:
 
 Prompt:
 
-> Create a temporary book called Site Tools Acceptance with one spread called The Observatory. Compose a concise explanation of how a telescope gathers light. Add the built-in Great Pyramid model as a lifted right-page element, give it a slow orbit, warm hover rim, orbit-inspect focus, and a fact card explaining why its geometry is useful for comparing scale. Use the current revision for every mutation.
+> Create a temporary book called Site Tools Acceptance with one spread called The Observatory. Compose a concise explanation of how a telescope gathers light. Use a browser-local ImageGen cutout imported through the workshop's Image handoff as a lifted right-page element, give it a gentle float, warm hover rim, spotlight focus, and a fact card. Use the current revision for every mutation.
 
 Required evidence:
 
 - `manage_book` returns a new book and undo token.
 - `compose_spread` updates the visible spread using its stable ID.
-- `apply_scene_patch` commits one bounded atomic patch using `model:great-pyramid`; no URL, script, HTML, GLSL, or executable expression is accepted.
+- `apply_scene_patch` commits one bounded atomic patch using the validated browser-local image asset id; no URL, model reference, script, HTML, GLSL, or executable expression is accepted.
 - Hover and click produce visible renderer behavior and a structured fact card.
 
 ### Human correction and exact undo

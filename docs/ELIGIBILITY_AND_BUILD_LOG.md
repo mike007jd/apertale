@@ -21,7 +21,7 @@ The Git history is intentionally preserved. The public repository must publish t
 
 ## Current implementation ownership and provenance
 
-- Product code, procedural Three.js models, WebMCP contracts, tests, documentation, and UI composition are repository-owned challenge work.
+- Product code, the Three.js physical-book renderer, WebMCP contracts, tests, documentation, and UI composition are repository-owned challenge work. Earlier procedural content models remain visible only in Git history; the current runtime is illustration-only.
 - Runtime art provenance and generated-asset boundaries are documented in [`ASSET_PROVENANCE.md`](ASSET_PROVENANCE.md).
 - Third-party packages are declared in `app/package.json` and `app/package-lock.json`; no third-party API or private dataset is embedded.
 - The repository is MIT licensed through the root [`LICENSE`](../LICENSE).

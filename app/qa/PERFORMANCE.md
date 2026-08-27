@@ -2,7 +2,7 @@
 
 Checked: 2026-08-26  
 Runtime: Codex in-app browser, local Vite development build, normal WebGL path  
-Instrumentation: `page-turn:summary` events in `#livingbook-diagnostics`
+Instrumentation: `page-turn:summary` events in `#apertale-diagnostics`
 
 | Direction | Measured duration | Animation frames | Measured rate |
 |---|---:|---:|---:|

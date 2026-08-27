@@ -50,23 +50,32 @@ describe("WebMCP registration", () => {
     }
     expect(registrationSignals).toHaveLength(6);
     const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
+    expect(JSON.stringify(tool("manage_book").inputSchema)).toContain("set-cover");
 
     bookEngine.setSelection("bird");
     const contextResult = await tool("get_project_context").execute({}, { signal: new AbortController().signal });
     const context = JSON.parse(String(contextResult));
     expect(context).toMatchObject({
       book: { id: "apertale-your-story", revision: 1 },
-      currentSpread: { id: "city-for-small-things", elements: [expect.objectContaining({ id: "bird" })] },
+      currentSpread: {
+        id: "city-for-small-things",
+        elements: [
+          expect.objectContaining({ id: "bird" }),
+          expect.objectContaining({ id: "city-flower-towers" }),
+          expect.objectContaining({ id: "city-cloud-family" }),
+          expect.objectContaining({ id: "paper-tower" }),
+        ],
+      },
       selection: { id: "bird" },
       library: { books: expect.any(Array) },
     });
-    expect(String(contextResult).length).toBeLessThanOrEqual(1500);
+    expect(String(contextResult).length).toBeLessThanOrEqual(2200);
 
     const selectedRevealResult = await tool("get_project_context").execute({ detail: "selected-reveal" }, {
       signal: new AbortController().signal,
     });
     expect(JSON.parse(String(selectedRevealResult))).toMatchObject({
-      selection: { interaction: { reveal: { kind: "caption", title: "Bird" } } },
+      selection: { interaction: { reveal: { kind: "caption", title: "A city begins at hand scale" } } },
     });
 
     const assetDetailResult = await tool("get_project_context").execute({ detail: "assets" }, {
@@ -96,7 +105,7 @@ describe("WebMCP registration", () => {
         reveal: {
           kind: "fact-card",
           title: "Flight over the paper city",
-          summary: "The bird becomes a guide through the dimensional spread.",
+          summary: "The bird becomes a guide through the illustrated spread.",
           facts: [{ label: "Interaction", value: "Hover, select, move, and animate" }],
           source: "Agent-authored scene note",
         },
@@ -164,16 +173,15 @@ describe("WebMCP registration", () => {
     }, { signal: new AbortController().signal })));
     expect(composed).toMatchObject({ ok: true, changedIds: ["1-the-moon-pulls"] });
 
-    const addedModel = JSON.parse(String(await tool("apply_scene_patch").execute({
-      requestId: "add-orbiting-pyramid",
+    const addedLayer = JSON.parse(String(await tool("apply_scene_patch").execute({
+      requestId: "add-floating-bird",
       expectedRevision: composed.revision,
       spreadId: "1-the-moon-pulls",
       operations: [{
         op: "add",
-        id: "scale-pyramid",
-        label: "Scale pyramid",
-        assetId: "model:great-pyramid",
-        modelId: "great-pyramid",
+        id: "floating-bird",
+        label: "Floating bird",
+        assetId: "/assets/generated/story-city-boy-cutout-v3.png",
         page: "right",
         kind: "lifted",
         locked: true,
@@ -182,31 +190,53 @@ describe("WebMCP registration", () => {
         focus: "orbit-inspect",
         reveal: {
           kind: "fact-card",
-          title: "A geometry reference",
-          summary: "The pyramid gives the spread a familiar scale anchor.",
-          facts: [{ label: "Shape", value: "Square pyramid" }],
+          title: "An illustrated guide",
+          summary: "The paper bird gives the spread a moving visual anchor.",
+          facts: [{ label: "Medium", value: "Layered paper illustration" }],
         },
       }],
     }, { signal: new AbortController().signal })));
-    expect(addedModel).toMatchObject({ ok: true, changedIds: ["scale-pyramid"] });
+    expect(addedLayer).toMatchObject({ ok: true, changedIds: ["floating-bird"] });
     expect(bookEngine.getSnapshot().document.spreads[0].elements[0]).toMatchObject({
-      id: "scale-pyramid",
+      id: "floating-bird",
       locked: true,
       motion: { preset: "slow-orbit", durationMs: 8000, loop: true },
       interaction: {
         hover: "warm-rim",
         focus: "orbit-inspect",
-        reveal: { kind: "fact-card", title: "A geometry reference" },
+        reveal: { kind: "fact-card", title: "An illustrated guide" },
       },
     });
 
     const rejectedUrl = JSON.parse(String(await tool("apply_scene_patch").execute({
       requestId: "reject-url",
-      expectedRevision: addedModel.revision,
+      expectedRevision: addedLayer.revision,
       spreadId: "1-the-moon-pulls",
-      operations: [{ op: "add", id: "remote", label: "Remote", assetId: "https://example.com/model.glb", page: "right" }],
+      operations: [{ op: "add", id: "remote", label: "Remote", assetId: "https://example.com/image.png", page: "right" }],
     }, { signal: new AbortController().signal })));
     expect(rejectedUrl).toMatchObject({ ok: false, code: "invalid" });
+
+    const layeredBackground = JSON.parse(String(await tool("apply_scene_patch").execute({
+      requestId: "set-layered-background",
+      expectedRevision: addedLayer.revision,
+      spreadId: "1-the-moon-pulls",
+      operations: [{
+        op: "set-background",
+        sourceAssetId: "/assets/generated/wonders-colosseum.png",
+        cleanPlateAssetId: "/assets/generated/wonders-colosseum-clean-v2.png",
+      }, {
+        op: "add",
+        id: "second-layer",
+        label: "Second foreground layer",
+        assetId: "/assets/generated/wonders-colosseum-cypress-cutout-v2.png",
+        page: "left",
+      }],
+    }, { signal: new AbortController().signal })));
+    expect(layeredBackground).toMatchObject({ ok: true, changedIds: ["1-the-moon-pulls:background", "second-layer"] });
+    expect(bookEngine.getSnapshot().document.spreads[0].artwork).toMatchObject({
+      separation: "inpainted-clean-plate",
+      cleanPlateAssetId: "/assets/generated/wonders-colosseum-clean-v2.png",
+    });
 
     cleanup();
     expect(registrationSignals.every((signal) => signal.aborted)).toBe(true);

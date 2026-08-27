@@ -1,7 +1,41 @@
+# macOS and editor state
 .DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-app/node_modules/
-app/dist/
-app/.vite/
+# Local credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+*.local
 
+# Dependencies, caches, and generated builds
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.vite/
+**/.vite/
+coverage/
+**/coverage/
+.cache/
+**/.cache/
+*.tsbuildinfo
+
+# Local browser and test-run artifacts
+test-results/
+**/test-results/
+playwright-report/
+**/playwright-report/
+blob-report/
+**/blob-report/

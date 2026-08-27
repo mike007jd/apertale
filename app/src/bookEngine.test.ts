@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BookEngine } from "./bookEngine";
+import { hasReveal, resolveInteraction } from "./interaction";
 import { sampleBooks } from "./sampleBook";
 
 const cityEngine = () => {
@@ -11,18 +12,85 @@ const cityEngine = () => {
 describe("BookEngine document contract", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    const storage = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => { storage.set(key, value); },
+      removeItem: (key: string) => { storage.delete(key); },
+      clear: () => { storage.clear(); },
+    });
   });
 
-  it("ships four independent sample books instead of one combined demo book", () => {
-    expect(sampleBooks).toHaveLength(4);
+  it("ships a guide plus four independent sample books instead of one combined demo book", () => {
+    expect(sampleBooks).toHaveLength(5);
     expect(sampleBooks.map((book) => book.id)).toEqual([
+      "apertale-field-guide",
       "apertale-atlas-of-wonders",
       "apertale-how-world-works",
       "apertale-your-story",
       "apertale-lantern-garden",
     ]);
-    expect(sampleBooks.map((book) => book.spreads.length)).toEqual([2, 1, 2, 1]);
-    expect(new Set(sampleBooks.flatMap((book) => book.spreads.map((spread) => spread.id))).size).toBe(6);
+    expect(sampleBooks.map((book) => book.spreads.length)).toEqual([4, 8, 6, 5, 5]);
+    expect(new Set(sampleBooks.flatMap((book) => book.spreads.map((spread) => spread.id))).size).toBe(28);
+    expect(sampleBooks[1].spreads.every((spread) => spread.textureUrl?.endsWith(".png"))).toBe(true);
+    expect(sampleBooks[2].spreads.every((spread) => spread.textureUrl?.endsWith(".png"))).toBe(true);
+    sampleBooks.forEach((book) => {
+      const spreadTextures = book.spreads.map((spread) => spread.textureUrl);
+      expect(new Set(spreadTextures).size, `${book.title} should not repeat full-spread artwork`).toBe(spreadTextures.length);
+    });
+    sampleBooks.flatMap((book) => book.spreads).forEach((layeredShowcase) => {
+      expect(layeredShowcase.artwork, layeredShowcase.title).toMatchObject({ separation: "inpainted-clean-plate" });
+      expect(
+        layeredShowcase.elements.filter((element) => !element.assetId.startsWith("procedural:")).length,
+        `${layeredShowcase.title} should ship multiple real foreground layers`,
+      ).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("gives every spread authored hover, focus, and click reveal without forcing idle motion", () => {
+    sampleBooks.forEach((book) => {
+      book.spreads.forEach((spread) => {
+        expect(spread.elements.length, `${book.title} / ${spread.title}`).toBeGreaterThan(0);
+        spread.elements.forEach((element) => {
+          const interaction = resolveInteraction(element);
+          expect(interaction.hover, `${spread.title} / ${element.label} hover`).not.toBe("none");
+          expect(interaction.focus, `${spread.title} / ${element.label} focus`).not.toBe("none");
+          expect(hasReveal(interaction), `${spread.title} / ${element.label} reveal`).toBe(true);
+        });
+      });
+    });
+    expect(sampleBooks[3].spreads[0].elements.find((element) => element.id === "bird")?.motion).toBeUndefined();
+    const riverBoat = sampleBooks[3].spreads[1].elements.find((element) => element.id === "river-paper-boat");
+    expect(riverBoat?.motion?.preset).toBe("water-bob");
+    expect(riverBoat?.transform.x).toBeLessThan(0.3);
+    expect(sampleBooks[3].spreads[4].elements.find((element) => element.id === "warm-window-child")?.motion).toBeUndefined();
+    const storyCutouts = sampleBooks[3].spreads
+      .flatMap((spread) => spread.elements)
+      .filter((element) => !element.assetId.startsWith("procedural:"));
+    expect(storyCutouts).toHaveLength(15);
+    expect(storyCutouts.every((element) => element.assetId.endsWith("-cutout-v3.png"))).toBe(true);
+    const anchoredIds = ["pyramid-main", "great-wall-tower", "petra-treasury-facade", "chichen-pyramid", "machu-citadel", "taj-monument", "corcovado-statue", "river-hill-home", "cloud-road-towers", "garden-arched-gate", "warm-window-child"];
+    const elementsById = new Map(sampleBooks.flatMap((book) => book.spreads.flatMap((item) => item.elements)).map((element) => [element.id, element]));
+    anchoredIds.forEach((id) => {
+      const element = elementsById.get(id);
+      expect(element?.motion, `${id} should stay anchored at rest`).toBeUndefined();
+      expect(element?.interaction?.focus, `${id} should not rise or orbit on focus`).toBe("spotlight");
+    });
+  });
+
+  it("migrates shipped sample semantics without overwriting a reader transform", () => {
+    const documents = structuredClone(sampleBooks);
+    const atlas = documents.find((book) => book.id === "apertale-atlas-of-wonders")!;
+    atlas.revision = 2;
+    const taj = atlas.spreads.find((item) => item.id === "taj-mahal")!.elements.find((element) => element.id === "taj-monument")!;
+    taj.transform.x = 0.91;
+    taj.interaction!.focus = "orbit-inspect";
+    localStorage.setItem("apertale.library.v4", JSON.stringify({ activeBookId: atlas.id, documents }));
+
+    const migrated = new BookEngine().getSnapshot().document;
+    const migratedTaj = migrated.spreads.find((item) => item.id === "taj-mahal")!.elements.find((element) => element.id === "taj-monument")!;
+    expect(migratedTaj.transform.x).toBe(0.91);
+    expect(migratedTaj.interaction?.focus).toBe("spotlight");
   });
 
   it("commits one revision and returns an undo token", () => {
@@ -35,22 +103,30 @@ describe("BookEngine document contract", () => {
   });
 
   it("returns a compact, discoverable outline and current-spread element list", () => {
-    const engine = new BookEngine();
+    const engine = cityEngine();
+    engine.openBook("apertale-atlas-of-wonders");
     const context = engine.getContext();
-    expect(context.outline).toEqual([
-      expect.objectContaining({ id: "flavian-amphitheatre", elementIds: ["colosseum"] }),
-      expect.objectContaining({ id: "great-pyramid-of-giza", elementIds: ["great-pyramid"] }),
-    ]);
-    expect(context.library.books).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "apertale-atlas-of-wonders", spreadCount: 2 }),
-      expect.objectContaining({ id: "apertale-how-world-works", spreadCount: 1 }),
-      expect.objectContaining({ id: "apertale-your-story", spreadCount: 2 }),
-      expect.objectContaining({ id: "apertale-lantern-garden", spreadCount: 1 }),
+    expect(context.outline).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "flavian-amphitheatre", elementCount: 3 }),
+      expect.objectContaining({ id: "great-pyramid-of-giza", elementCount: 4 }),
+      expect.objectContaining({ id: "christ-the-redeemer", elementCount: 4 }),
     ]));
-    expect(context.currentSpread.elements).toEqual([
-      expect.objectContaining({ id: "colosseum", label: "Colosseum", kind: "lifted", locked: false }),
-    ]);
-    expect(JSON.stringify(context).length).toBeLessThanOrEqual(1500);
+    expect(context.outline).toHaveLength(8);
+    expect(context.library.books).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "apertale-atlas-of-wonders", spreadCount: 8 }),
+      expect.objectContaining({ id: "apertale-how-world-works", spreadCount: 6 }),
+      expect.objectContaining({ id: "apertale-your-story", spreadCount: 5 }),
+      expect.objectContaining({ id: "apertale-lantern-garden", spreadCount: 5 }),
+    ]));
+    expect(context.currentSpread.elements).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "colosseum-arena", label: "Arena floor" }),
+      expect.objectContaining({ id: "colosseum-procession", kind: "lifted" }),
+      expect.objectContaining({ id: "colosseum-cypress", kind: "lifted" }),
+    ]));
+    expect(context.capabilities).toContain("set-book-cover");
+    expect(context.capabilities).toContain("full-spread-illustration-stage");
+    expect(context.capabilities).toContain("layered-image-interaction");
+    expect(JSON.stringify(context).length).toBeLessThanOrEqual(2100);
   });
 
   it("rejects stale revisions without mutating state", () => {
@@ -70,7 +146,7 @@ describe("BookEngine document contract", () => {
   });
 
   it("keeps presentation theme outside document revision", () => {
-    const engine = new BookEngine();
+    const engine = cityEngine();
     engine.setTheme("midnight-desk", "agent");
     expect(engine.getSnapshot().session.sceneThemeId).toBe("midnight-desk");
     expect(engine.getSnapshot().document.revision).toBe(1);
@@ -147,19 +223,19 @@ describe("BookEngine document contract", () => {
   });
 
   it("stores an authored interaction response and undoes exactly that field", () => {
-    const engine = new BookEngine();
+    const engine = cityEngine();
     const retuned = engine.dispatch({
       type: "interact",
       requestId: "interact-1",
       expectedRevision: 1,
-      elementId: "colosseum",
+      elementId: "bird",
       interaction: { focus: "rise-and-center" },
     }, "agent");
     expect(retuned.ok).toBe(true);
     const landmark = () => engine.getSnapshot().document.spreads[0].elements[0];
     expect(landmark().interaction?.focus).toBe("rise-and-center");
-    expect(landmark().interaction?.hover).toBe("tilt-toward-pointer");
-    engine.dispatch({ type: "edit", requestId: "move-landmark", expectedRevision: 2, elementId: "colosseum", transform: { x: 0.44 } }, "human");
+    expect(landmark().interaction?.hover).toBe("lift-glow");
+    engine.dispatch({ type: "edit", requestId: "move-landmark", expectedRevision: 2, elementId: "bird", transform: { x: 0.44 } }, "human");
     const undone = engine.dispatch({
       type: "undo",
       requestId: "undo-interact",
@@ -167,16 +243,16 @@ describe("BookEngine document contract", () => {
       undoToken: retuned.ok ? retuned.undoToken : "",
     }, "human");
     expect(undone.ok).toBe(true);
-    expect(landmark().interaction?.focus).toBe("orbit-inspect");
+    expect(landmark().interaction?.focus).toBe("spotlight");
     expect(landmark().transform.x).toBe(0.44);
   });
 
   it("reports the resolved interaction of the selection to the Agent", () => {
-    const engine = new BookEngine();
-    engine.setSelection("colosseum");
+    const engine = cityEngine();
+    engine.setSelection("bird");
     expect(engine.getContext().selection).toMatchObject({
-      id: "colosseum",
-      interaction: { hover: "tilt-toward-pointer", focus: "orbit-inspect", reveal: "fact-card" },
+      id: "bird",
+      interaction: { hover: "lift-glow", focus: "spotlight", reveal: "caption" },
     });
   });
 
@@ -240,78 +316,6 @@ describe("BookEngine document contract", () => {
     }, "human");
     expect(humanUndo.ok).toBe(true);
     expect(engine.getSnapshot().document.spreads[0].elements[0].kind).toBe("embedded");
-  });
-
-  it("adds a local photo to the visible spread and can undo and restore it", () => {
-    const engine = new BookEngine();
-    const element = {
-      id: "photo-test",
-      label: "Harbour photo",
-      kind: "lifted" as const,
-      assetId: "data:image/png;base64,AAAA",
-      page: "right" as const,
-      transform: { x: 0.5, y: 0.5, scaleX: 0.72, scaleY: 0.72, rotationDeg: 0 },
-      depth: 0.12,
-      locked: false,
-      interaction: {
-        hover: "lift-glow" as const,
-        focus: "spotlight" as const,
-        reveal: { kind: "caption" as const, title: "Harbour photo", summary: "Local", facts: [] },
-      },
-      provenance: "human" as const,
-    };
-    const added = engine.dispatch({
-      type: "add",
-      requestId: "add-photo",
-      expectedRevision: 1,
-      spreadId: "flavian-amphitheatre",
-      element,
-    }, "human");
-    expect(added.ok).toBe(true);
-    expect(engine.getSnapshot().document.spreads[0].elements.at(-1)?.id).toBe("photo-test");
-
-    const removed = engine.dispatch({
-      type: "undo",
-      requestId: "remove-photo",
-      expectedRevision: 2,
-      undoToken: added.ok ? added.undoToken : "",
-    }, "human");
-    expect(removed.ok).toBe(true);
-    expect(engine.getSnapshot().document.spreads[0].elements.some((item) => item.id === "photo-test")).toBe(false);
-
-    const restored = engine.dispatch({
-      type: "undo",
-      requestId: "restore-photo",
-      expectedRevision: 3,
-      undoToken: removed.ok ? removed.undoToken : "",
-    }, "human");
-    expect(restored.ok).toBe(true);
-    expect(engine.getSnapshot().document.spreads[0].elements.at(-1)).toMatchObject({ id: "photo-test", label: "Harbour photo" });
-  });
-
-  it("rejects oversized image data at the engine boundary", () => {
-    const engine = new BookEngine();
-    const result = engine.dispatch({
-      type: "add",
-      requestId: "oversized-photo",
-      expectedRevision: 1,
-      spreadId: "flavian-amphitheatre",
-      element: {
-        id: "oversized-photo",
-        label: "Oversized photo",
-        kind: "lifted",
-        assetId: `data:image/png;base64,${"A".repeat(2_100_000)}`,
-        page: "right",
-        transform: { x: 0.5, y: 0.5, scaleX: 0.72, scaleY: 0.72, rotationDeg: 0 },
-        depth: 0.12,
-        locked: false,
-        interaction: { hover: "none", focus: "none", reveal: { kind: "none", title: "", summary: "", facts: [] } },
-        provenance: "human",
-      },
-    }, "human");
-
-    expect(result.ok).toBe(false);
-    expect(engine.getSnapshot().document.spreads[0].elements.some((item) => item.id === "oversized-photo")).toBe(false);
   });
 
   it("creates and composes a book through reversible structural commands", () => {
@@ -385,7 +389,7 @@ describe("BookEngine document contract", () => {
     expect(engine.getLibrary().books.some((book) => book.id === "book-cloud-atlas")).toBe(true);
   });
 
-  it("rejects a create command that would overwrite an existing shelf book", () => {
+  it("rejects a create command that would overwrite an existing library book", () => {
     const engine = new BookEngine();
     const result = engine.dispatch({
       type: "create-book",
@@ -400,20 +404,20 @@ describe("BookEngine document contract", () => {
   });
 
   it("applies a bounded scene patch atomically and undoes the whole patch", () => {
-    const engine = new BookEngine();
+    const engine = cityEngine();
+    const originalX = engine.getSnapshot().document.spreads[0].elements[0].transform.x;
     const patched = engine.dispatch({
       type: "scene-patch",
       requestId: "scene-patch",
       expectedRevision: 1,
-      spreadId: "flavian-amphitheatre",
+      spreadId: "city-for-small-things",
       operations: [
-        { op: "update", elementId: "colosseum", transform: { x: 0.41 }, hover: "warm-rim" },
+        { op: "update", elementId: "bird", transform: { x: 0.41 }, hover: "warm-rim" },
         {
           op: "add",
-          id: "second-colosseum",
-          label: "Second Colosseum",
-          assetId: "model:flavian-amphitheatre",
-          modelId: "flavian-amphitheatre",
+          id: "second-bird",
+          label: "Second Bird",
+          assetId: "/assets/generated/story-city-boy-cutout-v3.png",
           page: "left",
           reveal: {
             kind: "fact-card",
@@ -423,11 +427,11 @@ describe("BookEngine document contract", () => {
             source: "Apertale sample knowledge",
           },
         },
-        { op: "reorder", elementId: "second-colosseum", index: 0 },
+        { op: "reorder", elementId: "second-bird", index: 0 },
       ],
     }, "agent");
-    expect(patched).toMatchObject({ ok: true, changedIds: ["colosseum", "second-colosseum"] });
-    expect(engine.getSnapshot().document.spreads[0].elements.map((element) => element.id)).toEqual(["second-colosseum", "colosseum"]);
+    expect(patched).toMatchObject({ ok: true, changedIds: ["bird", "second-bird"] });
+    expect(engine.getSnapshot().document.spreads[0].elements.map((element) => element.id)).toEqual(["second-bird", "bird", "city-flower-towers", "city-cloud-family", "paper-tower"]);
     expect(engine.getSnapshot().document.spreads[0].elements[0].interaction?.reveal).toMatchObject({
       kind: "fact-card",
       title: "Arena engineering",
@@ -442,8 +446,63 @@ describe("BookEngine document contract", () => {
       undoToken: patched.ok ? patched.undoToken : "",
     }, "human");
     expect(undone.ok).toBe(true);
-    expect(engine.getSnapshot().document.spreads[0].elements.map((element) => element.id)).toEqual(["colosseum"]);
-    expect(engine.getSnapshot().document.spreads[0].elements[0].transform.x).toBe(0.5);
+    expect(engine.getSnapshot().document.spreads[0].elements.map((element) => element.id)).toEqual(["bird", "city-flower-towers", "city-cloud-family", "paper-tower"]);
+    expect(engine.getSnapshot().document.spreads[0].elements[0].transform.x).toBe(originalX);
+  });
+
+  it("accepts the shared water-bob motion contract through scene patches", () => {
+    const engine = cityEngine();
+    engine.setSpread(1);
+    const patched = engine.dispatch({
+      type: "scene-patch",
+      requestId: "water-bob-contract",
+      expectedRevision: 1,
+      spreadId: "river-home",
+      operations: [{ op: "update", elementId: "river-paper-boat", motion: { preset: "water-bob", durationMs: 4200, loop: true } }],
+    }, "agent");
+    expect(patched.ok).toBe(true);
+    expect(engine.getSnapshot().document.spreads[1].elements.find((element) => element.id === "river-paper-boat")?.motion?.preset).toBe("water-bob");
+  });
+
+  it("sets a clean spread background atomically and restores it on undo", () => {
+    const engine = cityEngine();
+    const patched = engine.dispatch({
+      type: "scene-patch",
+      requestId: "set-clean-background",
+      expectedRevision: 1,
+      spreadId: "city-for-small-things",
+      operations: [{
+        op: "set-background",
+        sourceAssetId: "/assets/generated/city-spread.png",
+        cleanPlateAssetId: "/assets/generated/story-river-clean-v2.png",
+      }, {
+        op: "add",
+        id: "clean-plate-foreground",
+        label: "Clean plate foreground",
+        assetId: "/assets/generated/story-city-boy-cutout-v3.png",
+        page: "left",
+      }],
+    }, "agent");
+    expect(patched).toMatchObject({ ok: true, changedIds: ["city-for-small-things:background", "clean-plate-foreground"] });
+    expect(engine.getSnapshot().document.spreads[0].artwork).toEqual({
+      sourceAssetId: "/assets/generated/city-spread.png",
+      cleanPlateAssetId: "/assets/generated/story-river-clean-v2.png",
+      separation: "inpainted-clean-plate",
+    });
+
+    const undone = engine.dispatch({
+      type: "undo",
+      requestId: "undo-clean-background",
+      expectedRevision: 2,
+      undoToken: patched.ok ? patched.undoToken : "",
+    }, "human");
+    expect(undone).toMatchObject({ ok: true, changedIds: ["clean-plate-foreground", "city-for-small-things:background"] });
+    expect(engine.getSnapshot().document.spreads[0].artwork).toEqual({
+      sourceAssetId: "/assets/generated/city-spread.png",
+      cleanPlateAssetId: "/assets/generated/story-city-clean-v2.png",
+      separation: "inpainted-clean-plate",
+    });
+    expect(engine.getSnapshot().document.spreads[0].elements.some((element) => element.id === "clean-plate-foreground")).toBe(false);
   });
 
   it("accepts a cross-book local asset only after the trusted asset adapter validated it", () => {
@@ -478,9 +537,43 @@ describe("BookEngine document contract", () => {
     expect(engine.getSnapshot().document.spreads[0].elements.at(-1)).toMatchObject({ assetId, provenance: "agent" });
   });
 
+  it("sets a dedicated local cover only after validation and supports safe undo", () => {
+    const engine = new BookEngine();
+    const assetId = "asset:12345678-1234-1234-1234-123456789abc";
+
+    const rejected = engine.dispatch({
+      type: "set-book-cover",
+      requestId: "unvalidated-cover",
+      expectedRevision: 1,
+      assetId,
+      validatedLocalAssetIds: [],
+    }, "agent");
+    expect(rejected).toMatchObject({ ok: false, code: "invalid" });
+
+    const applied = engine.dispatch({
+      type: "set-book-cover",
+      requestId: "validated-cover",
+      expectedRevision: 1,
+      assetId,
+      validatedLocalAssetIds: [assetId],
+    }, "agent");
+    expect(applied).toMatchObject({ ok: true, revision: 2 });
+    expect(engine.getSnapshot().document.coverAssetId).toBe(assetId);
+    expect(engine.getLibrary().books.find((book) => book.id === engine.getSnapshot().document.id)?.coverAssetId).toBe(assetId);
+
+    const undone = engine.dispatch({
+      type: "undo",
+      requestId: "undo-cover",
+      expectedRevision: 2,
+      undoToken: applied.ok ? applied.undoToken : "",
+    }, "agent");
+    expect(undone).toMatchObject({ ok: true, revision: 3 });
+    expect(engine.getSnapshot().document.coverAssetId).toBeUndefined();
+  });
+
   it("keeps each sample book independent while switching the active shelf item", () => {
     const engine = cityEngine();
-    expect(engine.getLibrary().books.find((book) => book.id === "apertale-atlas-of-wonders")?.coverTextureUrl).toBe("/assets/covers/atlas-of-living-wonders.jpg");
+    expect(engine.getLibrary().books.find((book) => book.id === "apertale-atlas-of-wonders")?.coverTextureUrl).toBe("/assets/covers/atlas-of-living-wonders-v2.png");
     const edited = engine.dispatch({
       type: "edit",
       requestId: "move-city-bird",
@@ -492,7 +585,7 @@ describe("BookEngine document contract", () => {
 
     expect(engine.openBook("apertale-atlas-of-wonders")).toBe(true);
     expect(engine.getSnapshot().document).toMatchObject({ id: "apertale-atlas-of-wonders", revision: 1 });
-    expect(engine.getSnapshot().document.spreads[0].elements[0].id).toBe("colosseum");
+    expect(engine.getSnapshot().document.spreads[0].elements.map((element) => element.id)).toEqual(["colosseum-procession", "colosseum-cypress", "colosseum-arena"]);
 
     expect(engine.openBook("apertale-your-story")).toBe(true);
     expect(engine.getSnapshot().document.revision).toBe(2);

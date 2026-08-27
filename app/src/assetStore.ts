@@ -3,7 +3,7 @@ const DATABASE_VERSION = 1;
 const STORE_NAME = "assets";
 const ASSET_PREFIX = "asset:";
 
-export type StoredAssetMetadata = {
+type StoredAssetMetadata = {
   id: string;
   name: string;
   type: string;
@@ -39,13 +39,24 @@ async function withStore<T>(mode: IDBTransactionMode, operation: (store: IDBObje
   return new Promise<T>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, mode);
     const request = operation(transaction.objectStore(STORE_NAME));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("The Apertale asset operation failed."));
-    transaction.oncomplete = () => database.close();
-    transaction.onerror = () => {
+    let result: T;
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
       database.close();
-      reject(transaction.error ?? new Error("The Apertale asset transaction failed."));
+      reject(error);
     };
+    request.onsuccess = () => { result = request.result; };
+    request.onerror = () => fail(request.error ?? new Error("The Apertale asset operation failed."));
+    transaction.oncomplete = () => {
+      if (settled) return;
+      settled = true;
+      database.close();
+      resolve(result);
+    };
+    transaction.onerror = () => fail(transaction.error ?? new Error("The Apertale asset transaction failed."));
+    transaction.onabort = () => fail(transaction.error ?? new Error("The Apertale asset transaction was aborted."));
   });
 }
 

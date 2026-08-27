@@ -2,11 +2,8 @@ import { bookEngine } from "./bookEngine";
 import { getAssetMetadata, listAssetMetadata } from "./assetStore";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
-import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, RevealKind, RevealSpec, SceneModelId, ScenePatchOperation, ThemeId, Transform2D } from "./types";
-
-const MOTION_PRESETS: string[] = ["gentle-float", "fly-across", "soft-pulse", "slow-orbit", "none"];
-const SCENE_MODEL_IDS: SceneModelId[] = ["flavian-amphitheatre", "great-pyramid", "volcano-cross-section"];
-
+import { MOTION_PRESETS } from "./types";
+import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 const compact = (value: unknown) => JSON.stringify(value);
 
 type ToolInput = Record<string, unknown>;
@@ -56,7 +53,7 @@ function optionalBoundedNumber(input: ToolInput, key: string, minimum: number, m
   return value;
 }
 
-async function runTool(name: string, input: ToolInput, signal: AbortSignal, operation: () => unknown) {
+async function runTool(name: string, signal: AbortSignal, operation: () => unknown) {
   recordDiagnostic("webmcp:tool-start", { name });
   try {
     canceled(signal);
@@ -129,7 +126,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: "get_project_context",
         title: "Get project context",
-        description: "Inspect the open Apertale project, current spread, selected element, presentation theme, capabilities, and document revision before making an edit.",
+        description: "Inspect the live Apertale shelf, open book, current spread, selected element, reusable browser-local assets, presentation theme, capabilities, and document revision before editing. Apertale is the shared canvas; planning and generation stay in the user's current Codex/ChatGPT conversation.",
         inputSchema: {
           type: "object",
           properties: {
@@ -142,16 +139,18 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("get_project_context", input, signal, async () => {
+        execute: (input, { signal }) => runTool("get_project_context", signal, async () => {
           assertOnly(input, ["detail"]);
           const detail = typeof input.detail === "undefined" ? "compact" : requiredString(input, "detail");
           if (!["compact", "selected-reveal", "assets"].includes(detail)) invalid("detail is not supported.");
           const context = bookEngine.getContext(detail === "selected-reveal");
+          const snapshot = bookEngine.getSnapshot();
+          const currentSpread = snapshot.document.spreads[snapshot.session.currentSpreadIndex];
           return {
             ...context,
             assets: detail === "assets"
               ? await listAssetMetadata()
-              : await getAssetMetadata(context.currentSpread.elements.map((element) => element.assetId)),
+              : await getAssetMetadata(currentSpread.elements.map((element) => element.assetId)),
           };
         }),
       },
@@ -160,14 +159,15 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     register(
       {
         name: "manage_book",
-        title: "Open or create book",
-        description: "Open one existing shelf book or create a new independent Apertale book with 1–12 text spreads. Inspect get_project_context first.",
+        title: "Manage book",
+        description: "Open an existing library book, create an independent book with 1–12 planned spreads, or assign a browser-local portrait cover. Inspect context first. Ask for the story and any photos in the Agent conversation; do not make the user repeat the brief in Apertale. Draft the full book before scene edits.",
         inputSchema: {
           type: "object",
           properties: {
             ...requiredMutation,
-            action: { type: "string", enum: ["open", "create"] },
+            action: { type: "string", enum: ["open", "create", "set-cover"] },
             bookId: { type: "string", description: "Stable id from library.books when action is open." },
+            coverAssetId: { type: "string", description: "Browser-local portrait image id returned by get_project_context(detail: assets)." },
             title: { type: "string", minLength: 1, maxLength: 100 },
             spreads: {
               type: "array",
@@ -189,8 +189,8 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("manage_book", input, signal, () => {
-          assertOnly(input, ["requestId", "expectedRevision", "action", "bookId", "title", "spreads"]);
+        execute: (input, { signal }) => runTool("manage_book", signal, async () => {
+          assertOnly(input, ["requestId", "expectedRevision", "action", "bookId", "coverAssetId", "title", "spreads"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
@@ -202,7 +202,21 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             sessionResults.set(requestId, result);
             return result;
           }
-          if (action !== "create") invalid("action must be open or create.");
+          if (action === "set-cover") {
+            const coverAssetId = requiredString(input, "coverAssetId");
+            const validatedAssets = await getAssetMetadata([coverAssetId]);
+            canceled(signal);
+            const result = bookEngine.dispatch({
+              type: "set-book-cover",
+              requestId,
+              expectedRevision: requiredRevision(input),
+              assetId: coverAssetId,
+              validatedLocalAssetIds: validatedAssets.map((asset) => asset.id),
+            }, "agent");
+            sessionResults.set(requestId, result);
+            return result;
+          }
+          if (action !== "create") invalid("action must be open, create, or set-cover.");
           const title = boundedString(input, "title", 100);
           if (!Array.isArray(input.spreads) || input.spreads.length < 1 || input.spreads.length > 12) invalid("spreads must contain 1–12 spread drafts.");
           const spreads = input.spreads.map((raw, index) => {
@@ -249,7 +263,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("compose_spread", input, signal, () => {
+        execute: (input, { signal }) => runTool("compose_spread", signal, () => {
           assertOnly(input, ["requestId", "expectedRevision", "spreadId", "title", "body", "kicker"]);
           return bookEngine.dispatch({
             type: "compose-spread",
@@ -268,7 +282,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: "apply_scene_patch",
         title: "Apply atomic scene patch",
-        description: "Atomically add, update, remove, or reorder up to 24 elements on the visible spread. Use assets and element ids returned by get_project_context; arbitrary URLs and executable content are rejected.",
+        description: "Atomically set an inpainted clean background and add, update, remove, or reorder up to 24 foreground layers. For image-led pages, set the repaired clean plate, then add 2–4 extracted transparent subjects so lifting one never reveals a duplicate. Use validated browser-local asset ids from context. Image work stays in the user's Agent conversation; use explicit media handoff only when required. Arbitrary URLs and executable content are rejected.",
         inputSchema: {
           type: "object",
           properties: {
@@ -281,12 +295,14 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
               items: {
                 type: "object",
                 properties: {
-                  op: { type: "string", enum: ["add", "update", "remove", "reorder"] },
+                  op: { type: "string", enum: ["set-background", "add", "update", "remove", "reorder"] },
+                  cleanPlateAssetId: { type: "string", description: "Repaired full-spread background with every extracted foreground subject removed and hidden pixels inpainted." },
+                  sourceAssetId: { type: "string", description: "Optional original composite image retained as the separation reference." },
                   id: { type: "string" },
                   elementId: { type: "string" },
                   label: { type: "string", maxLength: 64 },
-                  assetId: { type: "string", description: "Existing local asset id, or model:<modelId> when adding a built-in model." },
-                  modelId: { type: "string", enum: SCENE_MODEL_IDS, description: "Built-in 3D model. assetId must be the matching model:<modelId>." },
+                  assetId: { type: "string", description: "Existing browser-local image asset id returned by get_project_context(detail: assets)." },
+                  frameAssetIds: { type: ["array", "null"], minItems: 2, maxItems: 6, items: { type: "string" }, description: "Optional 2–6 browser-local image frames." },
                   page: { type: "string", enum: ["left", "right"] },
                   kind: { type: "string", enum: ["embedded", "lifted", "decoration"] },
                   transform: {
@@ -305,7 +321,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
                   motion: {
                     type: ["object", "null"],
                     properties: {
-                      preset: { type: "string", enum: MOTION_PRESETS.filter((preset) => preset !== "none") },
+                      preset: { type: "string", enum: [...MOTION_PRESETS] },
                       durationMs: { type: "integer", minimum: 400, maximum: 20000 },
                       loop: { type: "boolean" },
                     },
@@ -326,7 +342,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("apply_scene_patch", input, signal, async () => {
+        execute: (input, { signal }) => runTool("apply_scene_patch", signal, async () => {
           assertOnly(input, ["requestId", "expectedRevision", "spreadId", "operations"]);
           if (!Array.isArray(input.operations) || input.operations.length < 1 || input.operations.length > 24) invalid("operations must contain 1–24 scene operations.");
           const parseTransform = (raw: unknown) => {
@@ -380,17 +396,31 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("motion must be an object or null.");
             const value = raw as ToolInput;
             assertOnly(value, ["preset", "durationMs", "loop"]);
-            const preset = pick<MotionPreset>(value.preset, "motion.preset", MOTION_PRESETS.filter((item): item is MotionPreset => item !== "none"));
+            const preset = pick<MotionPreset>(value.preset, "motion.preset", [...MOTION_PRESETS]);
             const durationMs = optionalBoundedNumber(value, "durationMs", 400, 20000);
             if (!preset || !Number.isInteger(durationMs) || typeof value.loop !== "boolean") invalid("motion requires preset, integer durationMs, and loop.");
             return { preset, durationMs: Number(durationMs), loop: value.loop };
+          };
+          const parseFrames = (raw: unknown): string[] | null | undefined => {
+            if (typeof raw === "undefined" || raw === null) return raw;
+            if (!Array.isArray(raw) || raw.length < 2 || raw.length > 6 || raw.some((item) => typeof item !== "string" || item.trim().length === 0)) {
+              invalid("frameAssetIds must contain 2–6 asset ids.");
+            }
+            return raw.map((item) => String(item));
           };
           const operations = input.operations.map((raw, index): ScenePatchOperation => {
             if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`operations[${index}] must be an object.`);
             const value = raw as ToolInput;
             const op = requiredString(value, "op");
-            const common = ["op", "id", "elementId", "label", "assetId", "modelId", "page", "kind", "transform", "depth", "locked", "motion", "hover", "focus", "reveal", "index"];
+            const common = ["op", "cleanPlateAssetId", "sourceAssetId", "id", "elementId", "label", "assetId", "frameAssetIds", "page", "kind", "transform", "depth", "locked", "motion", "hover", "focus", "reveal", "index"];
             assertOnly(value, common);
+            if (op === "set-background") {
+              return {
+                op,
+                cleanPlateAssetId: requiredString(value, "cleanPlateAssetId"),
+                sourceAssetId: boundedString(value, "sourceAssetId", 200, true),
+              };
+            }
             if (op === "remove") return { op, elementId: requiredString(value, "elementId") };
             if (op === "reorder") {
               const order = optionalBoundedNumber(value, "index", 0, 23);
@@ -404,6 +434,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             const depth = optionalBoundedNumber(value, "depth", 0, 0.5);
             if (typeof value.locked !== "undefined" && typeof value.locked !== "boolean") invalid("locked must be boolean.");
             const motion = parseMotion(value.motion);
+            const frameAssetIds = parseFrames(value.frameAssetIds);
             if (op === "add") {
               const page = pick(value.page, "page", ["left", "right"] as const);
               if (!page) invalid("add requires page.");
@@ -412,7 +443,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
                 id: requiredString(value, "id"),
                 label: boundedString(value, "label", 64),
                 assetId: requiredString(value, "assetId"),
-                modelId: pick<SceneModelId>(value.modelId, "modelId", SCENE_MODEL_IDS),
+                frameAssetIds: frameAssetIds ?? undefined,
                 page,
                 kind: pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const),
                 transform,
@@ -424,16 +455,21 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
                 reveal,
               };
             }
-            if (op !== "update") invalid("op must be add, update, remove, or reorder.");
+            if (op !== "update") invalid("op must be set-background, add, update, remove, or reorder.");
             const kind = pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const);
-            if (!kind && !transform && typeof depth === "undefined" && typeof value.locked === "undefined" && typeof motion === "undefined" && !hover && !focus && !reveal) {
+            if (!kind && !transform && typeof depth === "undefined" && typeof value.locked === "undefined" && typeof motion === "undefined" && typeof frameAssetIds === "undefined" && !hover && !focus && !reveal) {
               invalid("update requires at least one change.");
             }
-            return { op, elementId: requiredString(value, "elementId"), kind, transform, depth, locked: value.locked as boolean | undefined, motion, hover, focus, reveal };
+            return { op, elementId: requiredString(value, "elementId"), kind, transform, depth, locked: value.locked as boolean | undefined, motion, frameAssetIds, hover, focus, reveal };
           });
-          const requestedLocalAssetIds = [...new Set(operations.flatMap((operation) => (
-            operation.op === "add" && operation.assetId.startsWith("asset:") ? [operation.assetId] : []
-          )))];
+          const requestedLocalAssetIds = [...new Set(operations.flatMap((operation) => {
+            const ids = operation.op === "set-background"
+              ? [operation.cleanPlateAssetId, operation.sourceAssetId].filter((assetId): assetId is string => Boolean(assetId))
+              : operation.op === "add"
+                ? [operation.assetId, ...(operation.frameAssetIds ?? [])]
+                : operation.op === "update" ? (operation.frameAssetIds ?? []) : [];
+            return ids.filter((assetId) => assetId.startsWith("asset:"));
+          }))];
           const validatedLocalAssets = await getAssetMetadata(requestedLocalAssetIds);
           if (validatedLocalAssets.length !== requestedLocalAssetIds.length) invalid("one or more local asset ids do not exist in this browser.");
           canceled(signal);
@@ -465,7 +501,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
-        execute: (input, { signal }) => runTool("set_presentation", input, signal, () => {
+        execute: (input, { signal }) => runTool("set_presentation", signal, () => {
           assertOnly(input, ["requestId", "theme", "preview"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
@@ -499,7 +535,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("undo_project_change", input, signal, () => {
+        execute: (input, { signal }) => runTool("undo_project_change", signal, () => {
           assertOnly(input, ["requestId", "expectedRevision", "undoToken"]);
           return bookEngine.dispatch({
             type: "undo",

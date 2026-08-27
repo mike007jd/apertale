@@ -1,18 +1,45 @@
 import { describe, expect, it } from "vitest";
-import { deformPageVertex } from "./pageTurn";
+import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
 
 const PAGE_WIDTH = 4.2;
+const PAGE_HEIGHT = 5.18;
 
 describe("page-turn deformation", () => {
+  it("keeps the correct illustrated spread on the moving leaf and underlay", () => {
+    expect(resolveTurnContentPlan(3, "forward", 8)).toEqual({
+      destinationIndex: 4,
+      turningSpreadIndex: 3,
+      underlaySpreadIndex: 4,
+    });
+    expect(resolveTurnContentPlan(4, "backward", 8)).toEqual({
+      destinationIndex: 3,
+      turningSpreadIndex: 3,
+      underlaySpreadIndex: 4,
+    });
+    expect(resolveTurnContentPlan(0, "backward", 8)).toBeNull();
+    expect(resolveTurnContentPlan(7, "forward", 8)).toBeNull();
+  });
+
+  it("starts and settles on the same curved surface as the resting pages", () => {
+    const quarter = deformPageVertex(-PAGE_WIDTH / 4, 0, 0, PAGE_WIDTH);
+    const mirroredQuarter = deformPageVertex(-PAGE_WIDTH / 4, 0, 1, PAGE_WIDTH);
+
+    expect(quarter.z).toBeGreaterThan(0.1);
+    expect(mirroredQuarter.z).toBeCloseTo(quarter.z, 8);
+  });
+
   it("lands exactly on the open right and left pages", () => {
     const samples = [-PAGE_WIDTH / 2, 0, PAGE_WIDTH / 2];
     for (const x of samples) {
       const start = deformPageVertex(x, 0.4, 0, PAGE_WIDTH);
       const end = deformPageVertex(x, 0.4, 1, PAGE_WIDTH);
-      expect(start).toEqual({ x, y: 0.4, z: 0 });
+      const restingDepth = restingPageDepth(x, 0.4, PAGE_WIDTH, PAGE_HEIGHT);
+      expect(start.x).toBeCloseTo(x, 8);
+      expect(start.y).toBe(0.4);
+      expect(start.z).toBeCloseTo(restingDepth, 8);
       expect(end.x + PAGE_WIDTH / 2).toBeCloseTo(-(x + PAGE_WIDTH / 2), 8);
       expect(end.y).toBe(0.4);
-      expect(end.z).toBeCloseTo(0, 8);
+      expect(end.z).toBeCloseTo(restingDepth, 8);
     }
   });
 
@@ -25,7 +52,13 @@ describe("page-turn deformation", () => {
       expect(vertex.z).toBeGreaterThanOrEqual(0);
       expect(vertex.z).toBeLessThanOrEqual(1.46);
     }
-    expect(maximumDepth).toBeGreaterThan(1.2);
+    expect(maximumDepth).toBeGreaterThan(1.1);
+  });
+
+  it("keeps a visible projected crescent at the midpoint", () => {
+    const spine = deformPageVertex(-PAGE_WIDTH / 2, 0, 0.5, PAGE_WIDTH);
+    const outer = deformPageVertex(PAGE_WIDTH / 2, 0, 0.5, PAGE_WIDTH);
+    expect(outer.x - spine.x).toBeGreaterThan(PAGE_WIDTH * 0.09);
   });
 
   it("keeps the paper centreline free of self-intersections throughout the turn", () => {

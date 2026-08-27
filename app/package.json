@@ -9,7 +9,10 @@
     "test": "vitest run",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
-    "test:sites": "node --test tests/*.test.mjs",
+    "test:sites": "npm run build && npm run test:sites:built",
+    "test:sites:built": "node --test tests/*.test.mjs",
+    "audit:cutouts": "node scripts/audit-cutout-alpha.mjs",
+    "verify:release": "npm run typecheck && npm test && npm run test:sites && npm run audit:cutouts",
     "verify:deployment": "node scripts/verify-deployment.mjs"
   },
   "dependencies": {

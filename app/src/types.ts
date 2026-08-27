@@ -1,6 +1,7 @@
 export type ThemeId = "paper-atelier" | "midnight-desk";
 export type QualityTier = "balanced" | "reduced";
-export type MotionPreset = "gentle-float" | "fly-across" | "soft-pulse" | "slow-orbit";
+export const MOTION_PRESETS = ["gentle-float", "fly-across", "water-bob", "soft-pulse", "slow-orbit"] as const;
+export type MotionPreset = (typeof MOTION_PRESETS)[number];
 export type CommandSource = "human" | "agent";
 
 export type Transform2D = {
@@ -29,7 +30,7 @@ export type HoverResponse = "none" | "lift-glow" | "tilt-toward-pointer" | "warm
 export type FocusResponse = "none" | "spotlight" | "rise-and-center" | "orbit-inspect";
 export type RevealKind = "none" | "caption" | "fact-card";
 
-export type RevealFact = {
+type RevealFact = {
   label: string;
   value: string;
 };
@@ -50,15 +51,13 @@ export type InteractionSpec = {
   hint?: string;
 };
 
-/** Procedural Three.js centrepieces owned by the repository, keyed by id. */
-export type SceneModelId = "flavian-amphitheatre" | "great-pyramid" | "volcano-cross-section";
-
 export type BookElement = {
   id: string;
   label: string;
   kind: "embedded" | "lifted" | "decoration";
   assetId: string;
-  modelId?: SceneModelId;
+  /** Optional 2–6 frame image sequence; the first frame is the resting image. */
+  frameAssetIds?: string[];
   page: "left" | "right";
   transform: Transform2D;
   depth: number;
@@ -68,11 +67,25 @@ export type BookElement = {
   provenance: "sample" | "human" | "agent";
 };
 
+/**
+ * A full-spread illustration prepared for layered interaction.
+ *
+ * `sourceAssetId` is the original composite reference. `cleanPlateAssetId`
+ * is the repaired background after the interactive subjects have been
+ * removed and their hidden pixels inpainted. Foreground subjects live in
+ * `Spread.elements`, so lifting one never reveals a duplicate underneath.
+ */
+export type LayeredArtwork = {
+  cleanPlateAssetId: string;
+  sourceAssetId?: string;
+  separation: "inpainted-clean-plate";
+};
+
 export type Spread = {
   id: string;
   order: number;
-  /** Omitted on typographic plate spreads whose hero is a real 3D centrepiece. */
   textureUrl?: string;
+  artwork?: LayeredArtwork;
   title: string;
   body: string;
   kicker?: string;
@@ -83,6 +96,8 @@ export type DocumentState = {
   id: string;
   revision: number;
   title: string;
+  /** Browser-local image selected as this book's dedicated portrait cover. */
+  coverAssetId?: string;
   coverTextureUrl?: string;
   spreads: Spread[];
 };
@@ -134,14 +149,6 @@ export type LiftCommand = {
   elementId: string;
 };
 
-export type AddElementCommand = {
-  type: "add";
-  requestId: string;
-  expectedRevision: number;
-  spreadId: string;
-  element: BookElement;
-};
-
 export type CreateBookCommand = {
   type: "create-book";
   requestId: string;
@@ -149,6 +156,15 @@ export type CreateBookCommand = {
   documentId: string;
   title: string;
   spreads: Array<Pick<Spread, "id" | "title" | "body" | "kicker">>;
+};
+
+export type SetBookCoverCommand = {
+  type: "set-book-cover";
+  requestId: string;
+  expectedRevision: number;
+  assetId: string;
+  /** Asset ids independently resolved by the trusted IndexedDB adapter. */
+  validatedLocalAssetIds: string[];
 };
 
 export type ComposeSpreadCommand = {
@@ -163,11 +179,16 @@ export type ComposeSpreadCommand = {
 
 export type ScenePatchOperation =
   | {
+      op: "set-background";
+      cleanPlateAssetId: string;
+      sourceAssetId?: string;
+    }
+  | {
       op: "add";
       id: string;
       label: string;
       assetId: string;
-      modelId?: SceneModelId;
+      frameAssetIds?: string[];
       page: "left" | "right";
       kind?: BookElement["kind"];
       transform?: Partial<Transform2D>;
@@ -186,6 +207,7 @@ export type ScenePatchOperation =
       depth?: number;
       locked?: boolean;
       motion?: MotionSpec | null;
+      frameAssetIds?: string[] | null;
       hover?: HoverResponse;
       focus?: FocusResponse;
       reveal?: RevealSpec;
@@ -237,8 +259,8 @@ export type UndoCommand = {
 };
 
 export type DocumentCommand =
-  | AddElementCommand
   | CreateBookCommand
+  | SetBookCoverCommand
   | ComposeSpreadCommand
   | ScenePatchCommand
   | LiftCommand

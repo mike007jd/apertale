@@ -5,27 +5,27 @@ Use only the source-true captures below for repository, Devpost, and video mater
 ## Primary project image
 
 - **File:** [`app/qa/apertale-atlas-day-current.png`](../app/qa/apertale-atlas-day-current.png)
-- **Size:** 1280 × 720
+- **Size:** 1092 × 889
 - **Use:** GitHub README hero, Devpost project image, opening video frame.
-- **Caption:** Apertale turns a page into an interactive dimensional scene: here, a procedural Colosseum rises from the Day presentation.
-- **Alt text:** Apertale Day presentation showing a dimensional Colosseum rising from an open book.
+- **Caption:** Apertale turns a page into a continuous illustrated world: here, Rome crosses both pages in the Day presentation.
+- **Alt text:** Apertale Day presentation showing a panoramic paper-collage Rome spread inside an open book.
 
 ## Supporting gallery
 
 | File | Size | Use | Caption / alt text |
 |---|---:|---|---|
-| [`apertale-library-current.png`](../app/qa/apertale-library-current.png) | 1003 × 871 | Independent-book proof | Apertale shelf with four independent Sample Books, each owning its own spreads and state. |
-| [`apertale-atlas-night-current.png`](../app/qa/apertale-atlas-night-current.png) | 1003 × 871 | Day/Night proof | Apertale Night presentation with warm paper, cinematic desk lighting, and the dimensional Colosseum. |
-| [`apertale-science-day-current.png`](../app/qa/apertale-science-day-current.png) | 1280 × 720 | Knowledge-book proof | A procedural volcano cross-section turns an explanation into an explorable 3D science spread. |
+| [`apertale-library-current.png`](../app/qa/apertale-library-current.png) | 1092 × 889 | Independent-book proof | Apertale's editorial cover gallery puts the Field Guide first, followed by four independent curated Sample Books. |
+| [`apertale-atlas-night-current.png`](../app/qa/apertale-atlas-night-current.png) | 1092 × 889 | Day/Night proof | Apertale's cool moonlit Night presentation over a continuous generated landmark illustration. |
+| [`apertale-science-day-current.png`](../app/qa/apertale-science-day-current.png) | 1092 × 889 | Knowledge-book proof | A generated cut-paper volcano cross-section turns an explanation into a full-spread science scene. |
 | [`apertale-atlas-preview-cover.png`](../app/qa/apertale-atlas-preview-cover.png) | 1280 × 720 | Clean Atlas frame | Atlas of Living Wonders in Preview, without editor chrome. |
-| [`apertale-science-preview-cover.png`](../app/qa/apertale-science-preview-cover.png) | 1280 × 720 | Clean science frame | How the World Works in Preview, showing the volcano knowledge model. |
+| [`apertale-science-preview-cover.png`](../app/qa/apertale-science-preview-cover.png) | 1280 × 720 | Clean science frame | How the World Works in Preview, showing the illustrated volcano spread. |
 
 ## Video evidence sequence
 
 The final public video must remain under three minutes and include audio. Use these source-true visual beats:
 
-1. Shelf — `apertale-library-current.png` establishes four independent books.
-2. Day Atlas — `apertale-atlas-day-current.png` establishes the tactile book and 3D model.
+1. Library — `apertale-library-current.png` establishes the Field Guide plus four independent Sample Books and the explicit Create Your Own path.
+2. Day Atlas — `apertale-atlas-day-current.png` establishes the tactile book and continuous two-page illustration.
 3. Live Site Tools — record the ChatGPT built-in browser's six-tool list and calls; a static screenshot cannot replace this evidence.
 4. Human correction — record a manual drag after an Agent patch.
 5. Exact undo — record motion disappearing while the manual transform remains.

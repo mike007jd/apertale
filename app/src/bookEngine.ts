@@ -1,9 +1,9 @@
 import { initialDocument, initialSession, sampleBooks } from "./sampleBook";
 import { recordDiagnostic } from "./diagnostics";
 import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS, resolveInteraction } from "./interaction";
+import { MOTION_PRESETS } from "./types";
 import type {
   AnimateCommand,
-  AddElementCommand,
   BookElement,
   BookSnapshot,
   CommandSource,
@@ -14,12 +14,13 @@ import type {
   DocumentState,
   EditCommand,
   InteractCommand,
+  LayeredArtwork,
   MotionSpec,
   MutationResult,
   QualityTier,
   RevealSpec,
   ScenePatchCommand,
-  SessionState,
+  SetBookCoverCommand,
   Spread,
   ThemeId,
   Transform2D,
@@ -27,6 +28,7 @@ import type {
 } from "./types";
 
 const STORAGE_KEY = "apertale.library.v4";
+const SAMPLE_SOURCE_VERSION = 3;
 
 type ElementField = "kind" | "depth" | "locked" | "motion" | "transform" | "interaction" | "provenance";
 
@@ -37,23 +39,6 @@ type ElementUndoRecord = {
   fields: ElementField[];
   before: Partial<BookElement>;
   after: Partial<BookElement>;
-};
-
-type AddUndoRecord = {
-  operation: "add";
-  token: string;
-  spreadId: string;
-  elementId: string;
-  after: BookElement;
-};
-
-type RemoveUndoRecord = {
-  operation: "remove";
-  token: string;
-  spreadId: string;
-  elementId: string;
-  before: BookElement;
-  index: number;
 };
 
 type SpreadField = "title" | "body" | "kicker";
@@ -75,6 +60,13 @@ type CreateBookUndoRecord = {
   created: DocumentState;
 };
 
+type BookCoverUndoRecord = {
+  operation: "set-cover";
+  token: string;
+  before?: string;
+  after?: string;
+};
+
 type ScenePatchElementUndo = {
   elementId: string;
   fields: ElementField[];
@@ -89,9 +81,13 @@ type ScenePatchUndoRecord = {
   beforeOrder: string[];
   afterOrder: string[];
   elements: ScenePatchElementUndo[];
+  artwork?: {
+    before?: LayeredArtwork;
+    after?: LayeredArtwork;
+  };
 };
 
-type UndoRecord = ElementUndoRecord | AddUndoRecord | RemoveUndoRecord | ComposeSpreadUndoRecord | CreateBookUndoRecord | ScenePatchUndoRecord;
+type UndoRecord = ElementUndoRecord | ComposeSpreadUndoRecord | CreateBookUndoRecord | BookCoverUndoRecord | ScenePatchUndoRecord;
 
 const clone = <T,>(value: T): T => structuredClone(value);
 
@@ -100,6 +96,7 @@ const freshRequestId = () => crypto.randomUUID();
 type StoredLibrary = {
   activeBookId: string;
   documents: DocumentState[];
+  sampleSourceVersion?: number;
 };
 
 function validDocument(parsed: DocumentState) {
@@ -120,7 +117,7 @@ function validDocument(parsed: DocumentState) {
 }
 
 function defaultLibrary(): StoredLibrary {
-  return { activeBookId: initialDocument.id, documents: clone(sampleBooks) };
+  return { activeBookId: initialDocument.id, documents: clone(sampleBooks), sampleSourceVersion: SAMPLE_SOURCE_VERSION };
 }
 
 function loadLibrary(): StoredLibrary {
@@ -130,21 +127,74 @@ function loadLibrary(): StoredLibrary {
     const parsed = JSON.parse(raw) as StoredLibrary;
     if (!Array.isArray(parsed.documents) || !parsed.documents.every(validDocument)) return defaultLibrary();
     const documents = clone(parsed.documents);
+    const shouldMigrateSampleSemantics = (parsed.sampleSourceVersion ?? 0) < SAMPLE_SOURCE_VERSION;
     sampleBooks.forEach((sample) => {
       const storedSample = documents.find((book) => book.id === sample.id);
       if (!storedSample) {
         documents.push(clone(sample));
         return;
       }
+      // Untouched curated demos follow the version shipped with the app. Once
+      // a reader has edited a sample (revision > 1), preserve their local fork
+      // and keep Reset sample as the explicit way back to source truth.
+      if (storedSample.revision === 1) {
+        const sampleIndex = documents.indexOf(storedSample);
+        documents[sampleIndex] = clone(sample);
+        return;
+      }
       storedSample.coverTextureUrl = sample.coverTextureUrl;
       sample.spreads.forEach((spread) => {
-        if (!storedSample.spreads.some((storedSpread) => storedSpread.id === spread.id)) storedSample.spreads.push(clone(spread));
+        const storedSpread = storedSample.spreads.find((candidate) => candidate.id === spread.id);
+        if (!storedSpread) {
+          storedSample.spreads.push(clone(spread));
+          return;
+        }
+        const removedLegacyModel = storedSpread.elements.some((element) => element.assetId.startsWith("model:"));
+        storedSpread.elements = storedSpread.elements.filter((element) => !element.assetId.startsWith("model:"));
+        spread.elements.forEach((element) => {
+          const storedElement = storedSpread.elements.find((candidate) => candidate.id === element.id);
+          if (!storedElement) {
+            storedSpread.elements.push(clone(element));
+          } else if (shouldMigrateSampleSemantics) {
+            // Curated books receive shipped interaction/asset bug fixes once,
+            // independently of the reader's document revision. Preserve the
+            // reader's transform and lock state while replacing stale motion,
+            // focus, and generated-asset contracts.
+            storedElement.assetId = element.assetId;
+            storedElement.frameAssetIds = clone(element.frameAssetIds);
+            storedElement.kind = element.kind;
+            storedElement.motion = clone(element.motion);
+            storedElement.interaction = clone(element.interaction);
+          } else if (element.frameAssetIds?.length) {
+            // Frame sequences are a shipped capability upgrade. Preserve the
+            // reader's transform and interaction edits while ensuring older
+            // browser-local sample forks receive the compatible frame assets.
+            storedElement.assetId = element.assetId;
+            storedElement.frameAssetIds = clone(element.frameAssetIds);
+          }
+        });
+        storedSpread.textureUrl = spread.textureUrl;
+        storedSpread.artwork = clone(spread.artwork);
+        if (removedLegacyModel) {
+          storedSpread.title = spread.title;
+          storedSpread.body = spread.body;
+          storedSpread.kicker = spread.kicker;
+        }
       });
       storedSample.spreads.forEach((spread, order) => { spread.order = order; });
     });
+    const sampleOrder = new Map(sampleBooks.map((sample, index) => [sample.id, index]));
+    documents.sort((left, right) => {
+      const leftOrder = sampleOrder.get(left.id);
+      const rightOrder = sampleOrder.get(right.id);
+      if (typeof leftOrder === "number" && typeof rightOrder === "number") return leftOrder - rightOrder;
+      if (typeof leftOrder === "number") return -1;
+      if (typeof rightOrder === "number") return 1;
+      return 0;
+    });
     const activeBookId = documents.some((book) => book.id === parsed.activeBookId) ? parsed.activeBookId : documents[0]?.id;
     if (!activeBookId) return defaultLibrary();
-    return { activeBookId, documents };
+    return { activeBookId, documents, sampleSourceVersion: SAMPLE_SOURCE_VERSION };
   } catch {
     return defaultLibrary();
   }
@@ -171,6 +221,7 @@ export class BookEngine {
   private requestResults = new Map<string, DocumentResult>();
   private undoRecords = new Map<string, UndoRecord>();
   private snapshot: BookSnapshot = this.makeSnapshot();
+  private storageWarningPending = false;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -199,8 +250,17 @@ export class BookEngine {
       else this.libraryState.documents.push(clone(this.documentState));
       this.libraryState.activeBookId = this.documentState.id;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.libraryState));
-    } catch {
-      // Storage is a progressive enhancement; the live document remains usable.
+    } catch (error) {
+      recordDiagnostic("storage:persist-failed", {
+        error: error instanceof Error ? error.name : "UnknownError",
+      });
+      if (typeof localStorage !== "undefined" && !this.storageWarningPending) {
+        this.storageWarningPending = true;
+        queueMicrotask(() => {
+          this.storageWarningPending = false;
+          this.showAction("human", "error", "Change is live, but this browser could not save it");
+        });
+      }
     }
   }
 
@@ -234,7 +294,12 @@ export class BookEngine {
       ? spread.elements.find((element) => element.id === this.sessionState.selectionId) ?? null
       : null;
     return {
-      book: { id: this.documentState.id, title: this.documentState.title, revision: this.documentState.revision },
+      book: {
+        id: this.documentState.id,
+        title: this.documentState.title,
+        revision: this.documentState.revision,
+        coverAssetId: this.documentState.coverAssetId ?? null,
+      },
       library: {
         activeBookId: this.documentState.id,
         books: this.libraryState.documents.map((book) => ({ id: book.id, title: book.title, spreadCount: book.spreads.length })),
@@ -243,17 +308,23 @@ export class BookEngine {
         id: item.id,
         title: item.title,
         order: item.order + 1,
-        elementIds: item.elements.map((element) => element.id),
+        elementCount: item.elements.length,
       })),
       currentSpread: {
         id: spread.id,
         title: spread.title,
         order: spread.order + 1,
+        artwork: spread.artwork
+          ? {
+              cleanPlateAssetId: spread.artwork.cleanPlateAssetId,
+              sourceAssetId: spread.artwork.sourceAssetId ?? null,
+              foregroundLayerCount: spread.elements.filter((element) => !element.assetId.startsWith("procedural:")).length,
+            }
+          : null,
         elements: spread.elements.map((element) => ({
           id: element.id,
           label: element.label,
           kind: element.kind,
-          assetId: element.assetId,
           locked: element.locked,
         })),
       },
@@ -276,7 +347,7 @@ export class BookEngine {
           }
         : null,
       theme: this.sessionState.sceneThemeId,
-      capabilities: ["create-book", "compose-spread", "cross-book-local-assets", "lift-structured-element", "edit-transform", "named-motion", "structured-reveal", "set-interaction", "theme", "undo"],
+      capabilities: ["create-book", "set-book-cover", "compose-spread", "full-spread-illustration-stage", "clean-plate-background", "layered-image-interaction", "presentation", "undo"],
     };
   }
 
@@ -287,6 +358,7 @@ export class BookEngine {
         id: book.id,
         title: book.title,
         spreadCount: book.spreads.length,
+        coverAssetId: book.coverAssetId,
         coverTextureUrl: book.coverTextureUrl ?? book.spreads[0]?.textureUrl ?? "/assets/generated/day-background.png",
         firstSpreadTitle: book.spreads[0]?.title ?? "Untitled spread",
         sample: sampleBooks.some((sample) => sample.id === book.id),
@@ -364,11 +436,11 @@ export class BookEngine {
 
     if (command.type === "create-book") return this.applyCreateBook(command, source);
 
+    if (command.type === "set-book-cover") return this.applySetBookCover(command, source);
+
     if (command.type === "compose-spread") return this.applyComposeSpread(command, source);
 
     if (command.type === "scene-patch") return this.applyScenePatch(command, source);
-
-    if (command.type === "add") return this.applyAdd(command, source);
 
     const location = findElement(this.documentState, command.elementId);
     if (!location) {
@@ -436,53 +508,6 @@ export class BookEngine {
     return result;
   }
 
-  private applyAdd(command: AddElementCommand, source: CommandSource): DocumentResult {
-    const spreadIndex = this.documentState.spreads.findIndex((spread) => spread.id === command.spreadId);
-    const currentSpread = this.documentState.spreads[this.sessionState.currentSpreadIndex];
-    if (spreadIndex < 0 || currentSpread.id !== command.spreadId) {
-      const result = this.conflict("invalid", "New elements can only be added to the visible spread.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
-    }
-    if (findElement(this.documentState, command.element.id)) {
-      const result = this.conflict("invalid", `Element ${command.element.id} already exists.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
-    }
-    const validLocalAsset = /^asset:[0-9a-f-]{36}$/.test(command.element.assetId);
-    const validLegacyDataAsset = command.element.assetId.startsWith("data:image/") && command.element.assetId.length <= 2_100_000;
-    if (!validLocalAsset && !validLegacyDataAsset) {
-      const result = this.conflict("invalid", "Imported elements require a validated local image asset.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
-    }
-
-    const element = clone(command.element);
-    const nextDocument = clone(this.documentState);
-    nextDocument.spreads[spreadIndex].elements.push(element);
-    nextDocument.revision += 1;
-    this.documentState = nextDocument;
-
-    const undoToken = crypto.randomUUID();
-    this.undoRecords.set(undoToken, {
-      operation: "add",
-      token: undoToken,
-      spreadId: command.spreadId,
-      elementId: element.id,
-      after: clone(element),
-    });
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} added ${element.label}`;
-    const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds: [element.id], undoToken, summary };
-    this.requestResults.set(command.requestId, result);
-    this.sessionState = { ...this.sessionState, selectionId: element.id };
-    this.persist();
-    this.showAction(source, "success", summary, element.id, undoToken);
-    return result;
-  }
-
   private applyCreateBook(command: CreateBookCommand, source: CommandSource): DocumentResult {
     const title = command.title.trim();
     const validSpreads = command.spreads.length >= 1
@@ -537,6 +562,43 @@ export class BookEngine {
       ok: true,
       revision: nextDocument.revision,
       changedIds: nextDocument.spreads.map((spread) => spread.id),
+      undoToken,
+      summary,
+    };
+    this.requestResults.set(command.requestId, result);
+    this.persist();
+    this.showAction(source, "success", summary, undefined, undoToken);
+    return result;
+  }
+
+  private applySetBookCover(command: SetBookCoverCommand, source: CommandSource): DocumentResult {
+    const validAssetId = /^asset:[0-9a-f-]{36}$/.test(command.assetId)
+      && command.validatedLocalAssetIds.includes(command.assetId);
+    if (!validAssetId) {
+      const result = this.conflict("invalid", "Book covers require a validated browser-local image asset.");
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+
+    const before = this.documentState.coverAssetId;
+    const nextDocument = clone(this.documentState);
+    nextDocument.coverAssetId = command.assetId;
+    nextDocument.revision += 1;
+    this.documentState = nextDocument;
+
+    const undoToken = crypto.randomUUID();
+    this.undoRecords.set(undoToken, {
+      operation: "set-cover",
+      token: undoToken,
+      before,
+      after: command.assetId,
+    });
+    const summary = `${source === "agent" ? "ChatGPT" : "You"} set the cover for ${nextDocument.title}`;
+    const result: MutationResult = {
+      ok: true,
+      revision: nextDocument.revision,
+      changedIds: [nextDocument.id],
       undoToken,
       summary,
     };
@@ -603,9 +665,27 @@ export class BookEngine {
 
     const before = clone(this.documentState);
     const nextDocument = clone(this.documentState);
-    const elements = nextDocument.spreads[spreadIndex].elements;
-    const knownAssetIds = new Set(this.documentState.spreads.flatMap((spread) => spread.elements.map((element) => element.assetId)));
+    const spread = nextDocument.spreads[spreadIndex];
+    const elements = spread.elements;
+    const knownAssetIds = new Set(this.libraryState.documents.flatMap((document) => (
+      document.spreads.flatMap((candidate) => [
+        candidate.textureUrl,
+        candidate.artwork?.sourceAssetId,
+        candidate.artwork?.cleanPlateAssetId,
+        ...candidate.elements.map((element) => element.assetId),
+      ].filter((assetId): assetId is string => Boolean(assetId)))
+    )));
+    this.libraryState.documents.forEach((document) => document.spreads.forEach((spread) => spread.elements.forEach((element) => {
+      element.frameAssetIds?.forEach((assetId) => knownAssetIds.add(assetId));
+    })));
     const validatedLocalAssetIds = new Set(command.validatedLocalAssetIds ?? []);
+    const validAssetId = (assetId: string) => !assetId.startsWith("model:") && (
+      knownAssetIds.has(assetId)
+      || (/^asset:[0-9a-f-]{36}$/.test(assetId) && validatedLocalAssetIds.has(assetId))
+    );
+    const validFrameAssets = (assetIds: string[] | null | undefined) => typeof assetIds === "undefined"
+      || assetIds === null
+      || (assetIds.length >= 2 && assetIds.length <= 6 && assetIds.every(validAssetId));
     const changedIds: string[] = [];
     const fail = (summary: string) => {
       const result = this.conflict("invalid", summary);
@@ -631,7 +711,7 @@ export class BookEngine {
     );
     const validMotion = (motion: MotionSpec | null | undefined) => typeof motion === "undefined"
       || motion === null
-      || (["gentle-float", "fly-across", "soft-pulse", "slow-orbit"].includes(motion.preset)
+      || (MOTION_PRESETS.includes(motion.preset)
         && motion.durationMs >= 400
         && motion.durationMs <= 20_000
         && typeof motion.loop === "boolean");
@@ -644,15 +724,20 @@ export class BookEngine {
     });
 
     for (const operation of command.operations) {
+      if (operation.op === "set-background") {
+        if (!validAssetId(operation.cleanPlateAssetId) || (operation.sourceAssetId && !validAssetId(operation.sourceAssetId))) {
+          return fail("The clean plate and source must be known browser-local image assets.");
+        }
+        spread.artwork = {
+          cleanPlateAssetId: operation.cleanPlateAssetId,
+          sourceAssetId: operation.sourceAssetId,
+          separation: "inpainted-clean-plate",
+        };
+        changedIds.push(`${spread.id}:background`);
+        continue;
+      }
       if (operation.op === "add") {
-        const validModelIds = ["flavian-amphitheatre", "great-pyramid", "volcano-cross-section"];
-        const validModel = Boolean(operation.modelId)
-          && validModelIds.includes(operation.modelId ?? "")
-          && operation.assetId === `model:${operation.modelId}`;
-        const validStoredAsset = /^asset:[0-9a-f-]{36}$/.test(operation.assetId) && validatedLocalAssetIds.has(operation.assetId);
-        const validAsset = operation.assetId.startsWith("model:") || operation.modelId
-          ? validModel
-          : knownAssetIds.has(operation.assetId) || validStoredAsset;
+        const validAsset = validAssetId(operation.assetId);
         if (
           elements.length >= 24
           || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(operation.id)
@@ -662,6 +747,7 @@ export class BookEngine {
           || !["left", "right"].includes(operation.page)
           || (operation.kind && !["embedded", "lifted", "decoration"].includes(operation.kind))
           || !validAsset
+          || !validFrameAssets(operation.frameAssetIds)
           || !validTransform(operation.transform)
           || (typeof operation.depth === "number" && (operation.depth < 0 || operation.depth > 0.5))
           || !validMotion(operation.motion)
@@ -674,7 +760,7 @@ export class BookEngine {
           id: operation.id,
           label: operation.label.trim(),
           assetId: operation.assetId,
-          modelId: operation.modelId,
+          frameAssetIds: operation.frameAssetIds,
           page: operation.page,
           kind: operation.kind ?? "lifted",
           transform,
@@ -692,6 +778,7 @@ export class BookEngine {
           provenance: source,
         });
         knownAssetIds.add(operation.assetId);
+        operation.frameAssetIds?.forEach((assetId) => knownAssetIds.add(assetId));
         changedIds.push(operation.id);
         continue;
       }
@@ -712,6 +799,7 @@ export class BookEngine {
           || (operation.kind && !["embedded", "lifted", "decoration"].includes(operation.kind))
           || (typeof operation.depth === "number" && (operation.depth < 0 || operation.depth > 0.5))
           || !validMotion(operation.motion)
+          || !validFrameAssets(operation.frameAssetIds)
           || (operation.hover && !HOVER_RESPONSES.includes(operation.hover))
           || (operation.focus && !FOCUS_RESPONSES.includes(operation.focus))
           || !validReveal(operation.reveal)
@@ -721,6 +809,7 @@ export class BookEngine {
         if (typeof operation.depth === "number") element.depth = operation.depth;
         if (typeof operation.locked === "boolean") element.locked = operation.locked;
         if (typeof operation.motion !== "undefined") element.motion = operation.motion ?? undefined;
+        if (typeof operation.frameAssetIds !== "undefined") element.frameAssetIds = operation.frameAssetIds ?? undefined;
         if (operation.hover || operation.focus || operation.reveal) {
           const interaction = resolveInteraction(element);
           element.interaction = {
@@ -735,6 +824,13 @@ export class BookEngine {
       changedIds.push(operation.elementId);
     }
 
+    if (
+      command.operations.some((operation) => operation.op === "set-background")
+      && elements.filter((element) => !element.assetId.startsWith("procedural:")).length < 2
+    ) {
+      return fail("A clean background requires at least two extracted foreground image layers in the same finished scene.");
+    }
+
     nextDocument.revision += 1;
     this.documentState = nextDocument;
     if (this.sessionState.selectionId && !findElement(nextDocument, this.sessionState.selectionId)) {
@@ -743,6 +839,8 @@ export class BookEngine {
     const undoToken = crypto.randomUUID();
     const beforeElements = before.spreads[spreadIndex].elements;
     const afterElements = nextDocument.spreads[spreadIndex].elements;
+    const beforeArtwork = before.spreads[spreadIndex].artwork;
+    const afterArtwork = nextDocument.spreads[spreadIndex].artwork;
     const beforeById = new Map(beforeElements.map((element) => [element.id, element]));
     const afterById = new Map(afterElements.map((element) => [element.id, element]));
     // Provenance describes the latest operator, so a later non-overlapping
@@ -762,6 +860,9 @@ export class BookEngine {
       beforeOrder: beforeElements.map((element) => element.id),
       afterOrder: afterElements.map((element) => element.id),
       elements: elementDiffs,
+      artwork: equalField(beforeArtwork, afterArtwork)
+        ? undefined
+        : { before: clone(beforeArtwork), after: clone(afterArtwork) },
     });
     const uniqueChangedIds = [...new Set(changedIds)];
     const summary = `${source === "agent" ? "ChatGPT" : "You"} patched ${uniqueChangedIds.length} scene ${uniqueChangedIds.length === 1 ? "element" : "elements"}`;
@@ -806,10 +907,9 @@ export class BookEngine {
       return result;
     }
     if (record.operation === "create-book") return this.applyCreateBookUndo(command, record, source);
+    if (record.operation === "set-cover") return this.applyBookCoverUndo(command, record, source);
     if (record.operation === "scene-patch") return this.applyScenePatchUndo(command, record, source);
     if (record.operation === "compose") return this.applyComposeSpreadUndo(command, record, source);
-    if (record.operation !== "update") return this.applyStructuralUndo(command, record, source);
-
     const location = findElement(this.documentState, record.elementId);
     if (!location) return this.conflict("not_found", `Element ${record.elementId} was not found.`);
     const current = this.documentState.spreads[location.spreadIndex].elements[location.elementIndex];
@@ -854,11 +954,18 @@ export class BookEngine {
     const spreadIndex = this.documentState.spreads.findIndex((spread) => spread.id === record.spreadId);
     if (spreadIndex < 0) return this.conflict("not_found", `Spread ${record.spreadId} was not found.`);
     const currentElements = this.documentState.spreads[spreadIndex].elements;
+    const currentArtwork = this.documentState.spreads[spreadIndex].artwork;
     const currentById = new Map(currentElements.map((element) => [element.id, element]));
     const structureChanged = !equalField(record.beforeOrder, record.afterOrder)
       || record.elements.some((change) => !change.before || !change.after);
     if (structureChanged && !equalField(currentElements.map((element) => element.id), record.afterOrder)) {
       const result = this.conflict("undo_conflict", "The scene structure changed again; undo did not overwrite newer work.");
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+    if (record.artwork && !equalField(currentArtwork, record.artwork.after)) {
+      const result = this.conflict("undo_conflict", "The clean background changed again; undo preserved the newer artwork.");
       this.requestResults.set(command.requestId, result);
       this.showAction(source, "error", result.summary);
       return result;
@@ -907,6 +1014,8 @@ export class BookEngine {
     });
     if (structureChanged) nextSpread.elements = record.beforeOrder.map((id) => nextById.get(id)).filter((element): element is BookElement => Boolean(element));
     else nextSpread.elements = nextSpread.elements.map((element) => nextById.get(element.id) ?? element);
+    if (record.artwork?.before) nextSpread.artwork = clone(record.artwork.before);
+    else if (record.artwork) delete nextSpread.artwork;
     nextDocument.revision += 1;
     this.documentState = nextDocument;
     if (this.sessionState.selectionId && !findElement(nextDocument, this.sessionState.selectionId)) this.sessionState = { ...this.sessionState, selectionId: null };
@@ -924,13 +1033,59 @@ export class BookEngine {
         before: clone(change.after),
         after: clone(change.before),
       })),
+      artwork: record.artwork
+        ? { before: clone(record.artwork.after), after: clone(record.artwork.before) }
+        : undefined,
     });
-    const changedIds = record.elements.map((change) => change.elementId);
+    const changedIds = [
+      ...record.elements.map((change) => change.elementId),
+      ...(record.artwork ? [`${record.spreadId}:background`] : []),
+    ];
     const summary = `${source === "agent" ? "ChatGPT" : "You"} undid a scene patch`;
     const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds, undoToken: token, summary };
     this.requestResults.set(command.requestId, result);
     this.persist();
     this.showAction(source, "success", summary, changedIds.length === 1 ? changedIds[0] : undefined, token);
+    return result;
+  }
+
+  private applyBookCoverUndo(
+    command: Extract<DocumentCommand, { type: "undo" }>,
+    record: BookCoverUndoRecord,
+    source: CommandSource,
+  ): DocumentResult {
+    if (this.documentState.coverAssetId !== record.after) {
+      const result = this.conflict("undo_conflict", "The book cover changed again; undo preserved the newer cover.");
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+
+    const nextDocument = clone(this.documentState);
+    if (record.before) nextDocument.coverAssetId = record.before;
+    else delete nextDocument.coverAssetId;
+    nextDocument.revision += 1;
+    this.documentState = nextDocument;
+    this.undoRecords.delete(record.token);
+
+    const token = crypto.randomUUID();
+    this.undoRecords.set(token, {
+      operation: "set-cover",
+      token,
+      before: record.after,
+      after: record.before,
+    });
+    const summary = `${source === "agent" ? "ChatGPT" : "You"} restored the previous cover for ${nextDocument.title}`;
+    const result: MutationResult = {
+      ok: true,
+      revision: nextDocument.revision,
+      changedIds: [nextDocument.id],
+      undoToken: token,
+      summary,
+    };
+    this.requestResults.set(command.requestId, result);
+    this.persist();
+    this.showAction(source, "success", summary, undefined, token);
     return result;
   }
 
@@ -954,7 +1109,7 @@ export class BookEngine {
     if (record.direction === "undo") {
       const createdIndex = this.libraryState.documents.findIndex((book) => book.id === record.created.id);
       if (createdIndex < 0 || !equalField(this.libraryState.documents[createdIndex], record.created)) {
-        const result = this.conflict("undo_conflict", "The created shelf book changed again; undo did not remove it.");
+        const result = this.conflict("undo_conflict", "The created library book changed again; undo did not remove it.");
         this.requestResults.set(command.requestId, result);
         this.showAction(source, "error", result.summary);
         return result;
@@ -1040,72 +1195,6 @@ export class BookEngine {
     return result;
   }
 
-  private applyStructuralUndo(
-    command: Extract<DocumentCommand, { type: "undo" }>,
-    record: AddUndoRecord | RemoveUndoRecord,
-    source: CommandSource,
-  ): DocumentResult {
-    const spreadIndex = this.documentState.spreads.findIndex((spread) => spread.id === record.spreadId);
-    if (spreadIndex < 0) return this.conflict("not_found", `Spread ${record.spreadId} was not found.`);
-    const nextDocument = clone(this.documentState);
-    const elements = nextDocument.spreads[spreadIndex].elements;
-    const currentIndex = elements.findIndex((element) => element.id === record.elementId);
-
-    if (record.operation === "add") {
-      if (currentIndex < 0 || !equalField(elements[currentIndex], record.after)) {
-        const result = this.conflict("undo_conflict", `${record.after.label} changed after import; undo did not remove the newer state.`);
-        this.requestResults.set(command.requestId, result);
-        this.showAction(source, "error", result.summary, record.elementId);
-        return result;
-      }
-      const [removed] = elements.splice(currentIndex, 1);
-      const token = crypto.randomUUID();
-      this.undoRecords.delete(record.token);
-      this.undoRecords.set(token, {
-        operation: "remove",
-        token,
-        spreadId: record.spreadId,
-        elementId: record.elementId,
-        before: clone(removed),
-        index: currentIndex,
-      });
-      nextDocument.revision += 1;
-      this.documentState = nextDocument;
-      this.sessionState = { ...this.sessionState, selectionId: null };
-      const summary = `${source === "agent" ? "ChatGPT" : "You"} removed ${removed.label}`;
-      const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds: [removed.id], undoToken: token, summary };
-      this.requestResults.set(command.requestId, result);
-      this.persist();
-      this.showAction(source, "success", summary, removed.id, token);
-      return result;
-    }
-
-    if (currentIndex >= 0) {
-      const result = this.conflict("undo_conflict", `${record.before.label} already exists; undo did not replace it.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary, record.elementId);
-      return result;
-    }
-    elements.splice(Math.min(record.index, elements.length), 0, clone(record.before));
-    const token = crypto.randomUUID();
-    this.undoRecords.delete(record.token);
-    this.undoRecords.set(token, {
-      operation: "add",
-      token,
-      spreadId: record.spreadId,
-      elementId: record.elementId,
-      after: clone(record.before),
-    });
-    nextDocument.revision += 1;
-    this.documentState = nextDocument;
-    this.sessionState = { ...this.sessionState, selectionId: record.elementId };
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} restored ${record.before.label}`;
-    const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds: [record.elementId], undoToken: token, summary };
-    this.requestResults.set(command.requestId, result);
-    this.persist();
-    this.showAction(source, "success", summary, record.elementId, token);
-    return result;
-  }
 }
 
 export const bookEngine = new BookEngine();
@@ -1123,32 +1212,4 @@ export function humanAnimate(elementId: string, motion: AnimateCommand["motion"]
 export function humanInteract(elementId: string, interaction: InteractCommand["interaction"]) {
   const snapshot = bookEngine.getSnapshot();
   return bookEngine.dispatch({ type: "interact", requestId: freshRequestId(), expectedRevision: snapshot.document.revision, elementId, interaction }, "human");
-}
-
-export function humanAddImage(spreadId: string, label: string, assetId: string) {
-  const snapshot = bookEngine.getSnapshot();
-  const elementId = `photo-${crypto.randomUUID()}`;
-  return bookEngine.dispatch({
-    type: "add",
-    requestId: freshRequestId(),
-    expectedRevision: snapshot.document.revision,
-    spreadId,
-    element: {
-      id: elementId,
-      label,
-      kind: "lifted",
-      assetId,
-      page: "right",
-      transform: { x: 0.23, y: 0.28, scaleX: 0.52, scaleY: 0.52, rotationDeg: -3 },
-      depth: 0.12,
-      locked: false,
-      interaction: {
-        hover: "lift-glow",
-        focus: "spotlight",
-        reveal: { kind: "caption", title: label, summary: "A locally imported image, ready for the Agent to compose.", facts: [] },
-        hint: `Explore ${label}`,
-      },
-      provenance: "human",
-    },
-  }, "human");
 }

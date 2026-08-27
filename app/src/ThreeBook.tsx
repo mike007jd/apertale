@@ -1,39 +1,33 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { isStoredAssetId, resolveAssetUrl } from "./assetStore";
 import { recordDiagnostic } from "./diagnostics";
-import { focusTraits, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
-import { createFlavianAmphitheatre, type LandmarkModel } from "./models/flavianAmphitheatre";
-import { createGreatPyramid } from "./models/greatPyramid";
-import { createVolcanoCrossSection } from "./models/volcanoCrossSection";
-import { deformPageVertex } from "./pageTurn";
+import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
+import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
 import type { BookElement, BookSnapshot, Spread, TurnState } from "./types";
-
-export type BookSceneHandle = {
-  canvas: HTMLCanvasElement | null;
-};
 
 type Props = {
   snapshot: BookSnapshot;
   turn: TurnState;
+  mode?: "reader" | "workshop";
   onSelect: (elementId: string | null) => void;
   onHover: (elementId: string | null) => void;
   onMoveElement: (elementId: string, x: number, y: number) => void;
   onPageGesture: (direction: "forward" | "backward", phase: "start" | "move" | "end", amount: number) => void;
+  onLoading: (documentId: string) => void;
+  onReady: (documentId: string) => void;
   onFailure: () => void;
 };
 
 type PagePair = {
-  left: THREE.CanvasTexture;
-  right: THREE.CanvasTexture;
-  leftBack: THREE.CanvasTexture;
-  rightBack: THREE.CanvasTexture;
+  spread: THREE.CanvasTexture;
+  overlay: THREE.CanvasTexture;
 };
 
 const PAGE_W = 4.2;
 const PAGE_H = 5.18;
+const PAGE_THICKNESS = 0.024;
 /** How far a pop-up leans out of the page, in radians. */
-const POPUP_TILT = THREE.MathUtils.degToRad(44);
 
 function clamp(value: number, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value));
@@ -53,7 +47,18 @@ function wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: num
   return lines;
 }
 
-function createPageCanvas(image: HTMLImageElement | null, spread: Spread, side: "left" | "right") {
+function sampleCanvasLuminance(context: CanvasRenderingContext2D) {
+  const samples = context.getImageData(96, 110, 600, 900).data;
+  let weighted = 0;
+  let count = 0;
+  for (let index = 0; index < samples.length; index += 4 * 64) {
+    weighted += samples[index] * 0.2126 + samples[index + 1] * 0.7152 + samples[index + 2] * 0.0722;
+    count += 1;
+  }
+  return count > 0 ? weighted / count : 255;
+}
+
+function createPageBackgroundCanvas(image: HTMLImageElement | null, side: "left" | "right") {
   const canvas = document.createElement("canvas");
   canvas.width = 1024;
   canvas.height = 1264;
@@ -64,21 +69,48 @@ function createPageCanvas(image: HTMLImageElement | null, spread: Spread, side: 
     const sourceX = side === "left" ? 0 : image.naturalWidth / 2;
     context.drawImage(image, sourceX, 0, image.naturalWidth / 2, image.naturalHeight, 0, 0, canvas.width, canvas.height);
   } else {
-    // Typographic plate: warm uncoated paper, no illustration, so the real
-    // three-dimensional centrepiece carries the spread.
+    // Warm uncoated paper fallback for books that have not received a generated
+    // full-spread illustration yet.
     const wash = context.createLinearGradient(0, 0, side === "left" ? canvas.width : 0, canvas.height);
     wash.addColorStop(0, "#fbf5e7");
     wash.addColorStop(1, "#f0e6d1");
     context.fillStyle = wash;
     context.fillRect(0, 0, canvas.width, canvas.height);
   }
+  return canvas;
+}
+
+function createPageOverlayCanvas(background: HTMLCanvasElement, spread: Spread, side: "left" | "right", illustrated: boolean) {
+  const canvas = document.createElement("canvas");
+  canvas.width = background.width;
+  canvas.height = background.height;
+  const context = canvas.getContext("2d");
+  const backgroundContext = background.getContext("2d");
+  if (!context || !backgroundContext) return canvas;
 
   if (side === "left") {
-    const darkSpread = spread.id === "lantern-garden";
+    const darkSpread = illustrated && sampleCanvasLuminance(backgroundContext) < 126;
     context.save();
     context.fillStyle = darkSpread ? "rgba(244, 232, 203, .95)" : "rgba(18, 20, 18, .96)";
     context.textBaseline = "top";
-    let top = darkSpread ? 268 : 190;
+    let top = 190;
+
+    context.font = `${darkSpread ? 72 : 76}px Georgia, serif`;
+    const titleLines = wrapText(context, spread.title, 560);
+    context.font = "31px Avenir Next, Arial, sans-serif";
+    const bodyLines = wrapText(context, spread.body, 470);
+
+    if (illustrated) {
+      const scrim = context.createLinearGradient(64, 0, 730, 0);
+      scrim.addColorStop(0, darkSpread ? "rgba(9, 14, 13, .74)" : "rgba(255, 251, 242, .88)");
+      scrim.addColorStop(0.72, darkSpread ? "rgba(9, 14, 13, .54)" : "rgba(255, 251, 242, .70)");
+      scrim.addColorStop(1, darkSpread ? "rgba(9, 14, 13, 0)" : "rgba(255, 251, 242, 0)");
+      context.fillStyle = scrim;
+      context.beginPath();
+      context.roundRect(62, 92, 690, Math.min(1070, 226 + titleLines.length * 84 + bodyLines.length * 45), 34);
+      context.fill();
+      context.fillStyle = darkSpread ? "rgba(244, 232, 203, .96)" : "rgba(18, 20, 18, .96)";
+    }
 
     if (spread.kicker) {
       context.font = "28px Avenir Next, Arial, sans-serif";
@@ -88,15 +120,14 @@ function createPageCanvas(image: HTMLImageElement | null, spread: Spread, side: 
     }
 
     context.font = `${darkSpread ? 72 : 76}px Georgia, serif`;
-    const titleLines = wrapText(context, spread.title, 560);
     titleLines.forEach((titleLine, index) => context.fillText(titleLine, 112, top + index * 84));
     context.font = "31px Avenir Next, Arial, sans-serif";
     context.globalAlpha = 0.88;
     top = top + titleLines.length * 86 + 40;
-    wrapText(context, spread.body, 470).forEach((bodyLine, index) => context.fillText(bodyLine, 116, top + index * 45));
+    bodyLines.forEach((bodyLine, index) => context.fillText(bodyLine, 116, top + index * 45));
 
     if (!spread.textureUrl) {
-      const rule = top + wrapText(context, spread.body, 470).length * 45 + 46;
+      const rule = top + bodyLines.length * 45 + 46;
       context.globalAlpha = 0.16;
       context.fillRect(116, rule, 300, 2);
       context.globalAlpha = 0.6;
@@ -108,40 +139,52 @@ function createPageCanvas(image: HTMLImageElement | null, spread: Spread, side: 
   return canvas;
 }
 
-async function loadPagePairs(spreads: Spread[]) {
+async function loadPagePairs(spreads: Spread[], mode: "reader" | "workshop") {
   const entries = await Promise.all(
     spreads.map(async (spread) => {
       let image: HTMLImageElement | null = null;
-      if (spread.textureUrl) {
+      const artworkUrl = spread.artwork?.cleanPlateAssetId
+        ? await resolveAssetUrl(spread.artwork.cleanPlateAssetId)
+        : spread.textureUrl;
+      if (artworkUrl) {
         image = new Image();
         image.decoding = "async";
-        image.src = spread.textureUrl;
+        image.src = artworkUrl;
         await image.decode();
       }
-      const leftCanvas = createPageCanvas(image, spread, "left");
-      const rightCanvas = createPageCanvas(image, spread, "right");
-      const flipCanvas = (source: HTMLCanvasElement) => {
-        const canvas = document.createElement("canvas");
-        canvas.width = source.width;
-        canvas.height = source.height;
-        const context = canvas.getContext("2d");
-        if (context) {
-          context.translate(canvas.width, 0);
-          context.scale(-1, 1);
-          context.drawImage(source, 0, 0);
-        }
-        return canvas;
-      };
-      const left = new THREE.CanvasTexture(leftCanvas);
-      const right = new THREE.CanvasTexture(rightCanvas);
-      const leftBack = new THREE.CanvasTexture(flipCanvas(leftCanvas));
-      const rightBack = new THREE.CanvasTexture(flipCanvas(rightCanvas));
-      [left, right, leftBack, rightBack].forEach((texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.anisotropy = 8;
-        texture.needsUpdate = true;
-      });
-      return [spread.id, { left, right, leftBack, rightBack }] as const;
+      const leftCanvas = createPageBackgroundCanvas(image, "left");
+      const rightCanvas = createPageBackgroundCanvas(image, "right");
+      const leftOverlay = mode === "workshop"
+        ? document.createElement("canvas")
+        : createPageOverlayCanvas(leftCanvas, spread, "left", Boolean(image));
+      const rightOverlay = mode === "workshop"
+        ? document.createElement("canvas")
+        : createPageOverlayCanvas(rightCanvas, spread, "right", Boolean(image));
+      if (mode === "workshop") {
+        leftOverlay.width = rightOverlay.width = leftCanvas.width;
+        leftOverlay.height = rightOverlay.height = leftCanvas.height;
+      }
+      const spreadCanvas = document.createElement("canvas");
+      spreadCanvas.width = leftCanvas.width + rightCanvas.width;
+      spreadCanvas.height = leftCanvas.height;
+      const spreadContext = spreadCanvas.getContext("2d");
+      spreadContext?.drawImage(leftCanvas, 0, 0);
+      spreadContext?.drawImage(rightCanvas, leftCanvas.width, 0);
+      const spreadTexture = new THREE.CanvasTexture(spreadCanvas);
+      spreadTexture.colorSpace = THREE.SRGBColorSpace;
+      spreadTexture.anisotropy = 8;
+      spreadTexture.needsUpdate = true;
+      const overlayCanvas = document.createElement("canvas");
+      overlayCanvas.width = spreadCanvas.width;
+      overlayCanvas.height = spreadCanvas.height;
+      const overlayContext = overlayCanvas.getContext("2d");
+      overlayContext?.drawImage(leftOverlay, 0, 0);
+      overlayContext?.drawImage(rightOverlay, leftOverlay.width, 0);
+      const overlayTexture = new THREE.CanvasTexture(overlayCanvas);
+      overlayTexture.colorSpace = THREE.SRGBColorSpace;
+      overlayTexture.anisotropy = 8;
+      overlayTexture.needsUpdate = true;
+      return [spread.id, { spread: spreadTexture, overlay: overlayTexture }] as const;
     }),
   );
   return new Map<string, PagePair>(entries);
@@ -152,6 +195,8 @@ function makePageMaterial(side: THREE.Side) {
     color: 0xfffbef,
     roughness: 0.82,
     metalness: 0,
+    emissive: new THREE.Color(0x6b3d1e),
+    emissiveIntensity: 0,
     side,
     polygonOffset: true,
     polygonOffsetFactor: side === THREE.FrontSide ? -1 : 1,
@@ -162,18 +207,152 @@ function makePageMaterial(side: THREE.Side) {
 function makeOpenPageGeometry(side: "left" | "right") {
   const geometry = new THREE.PlaneGeometry(PAGE_W, PAGE_H, 40, 8);
   const positions = geometry.attributes.position as THREE.BufferAttribute;
+  const uvs = geometry.attributes.uv as THREE.BufferAttribute;
   for (let index = 0; index < positions.count; index += 1) {
     const x = positions.getX(index);
     const y = positions.getY(index);
-    const normalized = (x + PAGE_W / 2) / PAGE_W;
-    const distanceFromSpine = side === "left" ? 1 - normalized : normalized;
-    const arch = Math.sin(Math.PI * distanceFromSpine) * 0.17;
-    const outerLift = Math.pow(distanceFromSpine, 5) * 0.055;
-    const cornerLift = Math.pow(Math.abs(y) / (PAGE_H / 2), 7) * 0.025;
-    positions.setZ(index, arch + outerLift + cornerLift);
+    const profileX = side === "left" ? -x : x;
+    positions.setZ(index, restingPageDepth(profileX, y, PAGE_W, PAGE_H));
+    const pageU = uvs.getX(index);
+    uvs.setX(index, side === "left" ? pageU * 0.5 : 0.5 + pageU * 0.5);
   }
+  uvs.needsUpdate = true;
   geometry.computeVertexNormals();
   return geometry;
+}
+
+type TurnLeaf = {
+  geometry: THREE.BufferGeometry;
+  update: (progress: number) => void;
+};
+
+/**
+ * One watertight paper leaf with separately textured front and back faces.
+ * The old implementation rendered two coplanar planes, which produced the
+ * dark seams and apparent tears visible when a leaf was nearly edge-on.
+ */
+function createTurnLeaf(): TurnLeaf {
+  const widthSegments = 48;
+  const heightSegments = 8;
+  const columns = widthSegments + 1;
+  const rows = heightSegments + 1;
+  const surfaceVertexCount = columns * rows;
+  const positions = new Float32Array(surfaceVertexCount * 2 * 3);
+  const uvs = new Float32Array(surfaceVertexCount * 2 * 2);
+  const base = new Float32Array(surfaceVertexCount * 2);
+  const indices: number[] = [];
+
+  for (let row = 0; row < rows; row += 1) {
+    const v = row / heightSegments;
+    const y = -PAGE_H / 2 + v * PAGE_H;
+    for (let column = 0; column < columns; column += 1) {
+      const u = column / widthSegments;
+      const x = -PAGE_W / 2 + u * PAGE_W;
+      const index = row * columns + column;
+      base[index * 2] = x;
+      base[index * 2 + 1] = y;
+      uvs[index * 2] = u;
+      uvs[index * 2 + 1] = v;
+      const backIndex = surfaceVertexCount + index;
+      uvs[backIndex * 2] = u;
+      uvs[backIndex * 2 + 1] = v;
+    }
+  }
+
+  const frontStart = indices.length;
+  for (let row = 0; row < heightSegments; row += 1) {
+    for (let column = 0; column < widthSegments; column += 1) {
+      const a = row * columns + column;
+      const b = a + 1;
+      const c = a + columns;
+      const d = c + 1;
+      indices.push(a, b, c, b, d, c);
+    }
+  }
+  const frontCount = indices.length - frontStart;
+
+  const backStart = indices.length;
+  for (let row = 0; row < heightSegments; row += 1) {
+    for (let column = 0; column < widthSegments; column += 1) {
+      const a = surfaceVertexCount + row * columns + column;
+      const b = a + 1;
+      const c = a + columns;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const backCount = indices.length - backStart;
+
+  const edgeStart = indices.length;
+  const connect = (frontA: number, frontB: number) => {
+    const backA = surfaceVertexCount + frontA;
+    const backB = surfaceVertexCount + frontB;
+    indices.push(frontA, backA, frontB, frontB, backA, backB);
+  };
+  for (let column = 0; column < widthSegments; column += 1) {
+    connect(column, column + 1);
+    const bottom = heightSegments * columns + column;
+    connect(bottom + 1, bottom);
+  }
+  for (let row = 0; row < heightSegments; row += 1) {
+    connect((row + 1) * columns, row * columns);
+    connect(row * columns + widthSegments, (row + 1) * columns + widthSegments);
+  }
+  const edgeCount = indices.length - edgeStart;
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.addGroup(frontStart, frontCount, 0);
+  geometry.addGroup(backStart, backCount, 1);
+  geometry.addGroup(edgeStart, edgeCount, 2);
+
+  const point = new THREE.Vector3();
+  const beforeX = new THREE.Vector3();
+  const afterX = new THREE.Vector3();
+  const beforeY = new THREE.Vector3();
+  const afterY = new THREE.Vector3();
+  const tangentX = new THREE.Vector3();
+  const tangentY = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const xStep = PAGE_W / widthSegments;
+  const yStep = PAGE_H / heightSegments;
+
+  const sample = (target: THREE.Vector3, x: number, y: number, progress: number) => {
+    const deformed = deformPageVertex(x, y, progress, PAGE_W, PAGE_H);
+    target.set(deformed.x, deformed.y, deformed.z);
+  };
+
+  const update = (progress: number) => {
+    for (let index = 0; index < surfaceVertexCount; index += 1) {
+      const x = base[index * 2];
+      const y = base[index * 2 + 1];
+      sample(point, x, y, progress);
+      sample(beforeX, Math.max(-PAGE_W / 2, x - xStep), y, progress);
+      sample(afterX, Math.min(PAGE_W / 2, x + xStep), y, progress);
+      sample(beforeY, x, Math.max(-PAGE_H / 2, y - yStep), progress);
+      sample(afterY, x, Math.min(PAGE_H / 2, y + yStep), progress);
+      tangentX.subVectors(afterX, beforeX);
+      tangentY.subVectors(afterY, beforeY);
+      normal.crossVectors(tangentX, tangentY).normalize();
+
+      const frontOffset = index * 3;
+      const backOffset = (surfaceVertexCount + index) * 3;
+      positions[frontOffset] = point.x + normal.x * PAGE_THICKNESS / 2;
+      positions[frontOffset + 1] = point.y + normal.y * PAGE_THICKNESS / 2;
+      positions[frontOffset + 2] = point.z + normal.z * PAGE_THICKNESS / 2;
+      positions[backOffset] = point.x - normal.x * PAGE_THICKNESS / 2;
+      positions[backOffset + 1] = point.y - normal.y * PAGE_THICKNESS / 2;
+      positions[backOffset + 2] = point.z - normal.z * PAGE_THICKNESS / 2;
+    }
+    const position = geometry.getAttribute("position") as THREE.BufferAttribute;
+    position.needsUpdate = true;
+    geometry.computeVertexNormals();
+  };
+
+  update(0);
+  return { geometry, update };
 }
 
 /**
@@ -191,7 +370,9 @@ type SceneElement = {
   /** Where the HTML reveal card anchors. */
   anchor: THREE.Object3D;
   materials: THREE.MeshStandardMaterial[];
-  model: LandmarkModel | null;
+  frameTextures: THREE.Texture[];
+  frameIndex: number;
+  seenFrameIndices: Set<number>;
   hoverAmount: number;
   focusAmount: number;
   spin: number;
@@ -200,7 +381,12 @@ type SceneElement = {
   dispose: () => void;
 };
 
-function buildSceneElement(element: BookElement, textureLoader: THREE.TextureLoader, resolvedAssetUrl = element.assetId): SceneElement {
+function buildSceneElement(
+  element: BookElement,
+  textureLoader: THREE.TextureLoader,
+  resolvedAssetUrl = element.assetId,
+  resolvedFrameUrls = element.frameAssetIds ?? [],
+): SceneElement {
   const root = new THREE.Group();
   const tilt = new THREE.Group();
   const yaw = new THREE.Group();
@@ -212,37 +398,81 @@ function buildSceneElement(element: BookElement, textureLoader: THREE.TextureLoa
   const anchor = new THREE.Object3D();
   root.add(anchor);
 
-  if (element.modelId) {
-    const model = element.modelId === "volcano-cross-section"
-      ? createVolcanoCrossSection()
-      : element.modelId === "great-pyramid"
-        ? createGreatPyramid()
-        : createFlavianAmphitheatre();
-    model.group.scale.setScalar(0.78);
-    yaw.add(model.group);
-    tilt.rotation.x = POPUP_TILT;
-    anchor.position.set(0, 1.34, 0.05);
+  if (resolvedAssetUrl.startsWith("procedural:hotspot:")) {
+    const tone = resolvedAssetUrl.split(":").at(-1) ?? "amber";
+    const colors: Record<string, number> = {
+      amber: 0xffc96b,
+      aqua: 0x7fd2df,
+      jade: 0x78c99a,
+      rose: 0xff8f79,
+    };
+    const color = new THREE.Color(colors[tone] ?? colors.amber);
+    const ringGeometry = new THREE.RingGeometry(0.105, 0.17, 40);
+    const coreGeometry = new THREE.CircleGeometry(0.064, 32);
+    const ringMaterial = new THREE.MeshStandardMaterial({
+      color,
+      transparent: true,
+      opacity: 0.88,
+      roughness: 0.44,
+      emissive: color,
+      emissiveIntensity: 0.08,
+      side: THREE.DoubleSide,
+    });
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: 0xfffbec,
+      transparent: true,
+      opacity: 0.96,
+      roughness: 0.32,
+      emissive: color,
+      emissiveIntensity: 0.08,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    core.position.z = 0.012;
+    yaw.add(ring, core);
+    anchor.position.set(0, 0.24, 0.05);
     return {
       id: element.id,
       root,
       tilt,
       yaw,
       anchor,
-      materials: model.emissiveMaterials,
-      model,
+      materials: [ringMaterial, coreMaterial],
+      frameTextures: [],
+      frameIndex: 0,
+      seenFrameIndices: new Set([0]),
       hoverAmount: 0,
       focusAmount: 0,
       spin: 0,
       motionKey: null,
       motionStartedAt: 0,
-      dispose: () => model.dispose(),
+      dispose: () => {
+        ringGeometry.dispose();
+        coreGeometry.dispose();
+        ringMaterial.dispose();
+        coreMaterial.dispose();
+      },
     };
   }
 
-  const texture = textureLoader.load(resolvedAssetUrl);
-  texture.colorSpace = THREE.SRGBColorSpace;
+  const frameUrls = resolvedFrameUrls.length > 1 ? resolvedFrameUrls : [resolvedAssetUrl];
+  let mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial> | null = null;
+  const fitTextureAspect = (texture: THREE.Texture) => {
+    if (!mesh) return;
+    const image = texture.image as { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number } | undefined;
+    const width = image?.naturalWidth ?? image?.width ?? 1;
+    const height = image?.naturalHeight ?? image?.height ?? 1;
+    const aspect = width / Math.max(1, height);
+    mesh.scale.set(aspect >= 1 ? 1 : aspect, aspect >= 1 ? 1 / aspect : 1, 1);
+  };
+  const frameTextures = frameUrls.map((url, index) => {
+    const frameTexture = textureLoader.load(url, index === 0 ? fitTextureAspect : undefined);
+    frameTexture.colorSpace = THREE.SRGBColorSpace;
+    return frameTexture;
+  });
   const material = new THREE.MeshStandardMaterial({
-    map: texture,
+    map: frameTextures[0],
     transparent: true,
     alphaTest: 0.04,
     roughness: 0.75,
@@ -252,7 +482,8 @@ function buildSceneElement(element: BookElement, textureLoader: THREE.TextureLoa
   });
   const size = element.id === "fox" ? 2 : 1.75;
   const geometry = new THREE.PlaneGeometry(size, size);
-  const mesh = new THREE.Mesh(geometry, material);
+  mesh = new THREE.Mesh(geometry, material);
+  if (frameTextures[0].image) fitTextureAspect(frameTextures[0]);
   mesh.castShadow = true;
   yaw.add(mesh);
   anchor.position.set(0, size * 0.34, 0.05);
@@ -263,7 +494,9 @@ function buildSceneElement(element: BookElement, textureLoader: THREE.TextureLoa
     yaw,
     anchor,
     materials: [material],
-    model: null,
+    frameTextures,
+    frameIndex: 0,
+    seenFrameIndices: new Set([0]),
     hoverAmount: 0,
     focusAmount: 0,
     spin: 0,
@@ -272,37 +505,35 @@ function buildSceneElement(element: BookElement, textureLoader: THREE.TextureLoa
     dispose: () => {
       geometry.dispose();
       material.dispose();
-      texture.dispose();
+      frameTextures.forEach((frameTexture) => frameTexture.dispose());
     },
   };
 }
 
-export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
-  { snapshot, turn, onSelect, onHover, onMoveElement, onPageGesture, onFailure },
-  forwardedRef,
-) {
+export function ThreeBook({ snapshot, turn, mode = "reader", onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const propsRef = useRef({ snapshot, turn, onSelect, onHover, onMoveElement, onPageGesture, onFailure });
-  propsRef.current = { snapshot, turn, onSelect, onHover, onMoveElement, onPageGesture, onFailure };
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const propsRef = useRef({ snapshot, turn, mode, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure });
+  propsRef.current = { snapshot, turn, mode, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure };
   const sceneStructureKey = JSON.stringify({
     id: snapshot.document.id,
+    mode,
     spreads: snapshot.document.spreads.map((spread) => ({
       id: spread.id,
       title: spread.title,
       body: spread.body,
       kicker: spread.kicker,
       textureUrl: spread.textureUrl,
-      elements: spread.elements.map((element) => [element.id, element.modelId]),
+      artwork: spread.artwork,
+      elements: spread.elements.map((element) => [element.id, element.assetId, ...(element.frameAssetIds ?? [])]),
     })),
   });
-
-  useImperativeHandle(forwardedRef, () => ({ canvas: canvasRef.current }), []);
 
   useEffect(() => {
     const maybeHost = hostRef.current;
     if (!maybeHost) return undefined;
     const host: HTMLDivElement = maybeHost;
+    const loadingDocumentId = propsRef.current.snapshot.document.id;
+    propsRef.current.onLoading(loadingDocumentId);
 
     const scene = new THREE.Scene();
     let renderer: THREE.WebGLRenderer;
@@ -324,7 +555,7 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.03;
-    renderer.domElement.setAttribute("aria-label", "Interactive three-dimensional Apertale book");
+    renderer.domElement.setAttribute("aria-label", mode === "workshop" ? "Blank Apertale book canvas" : "Interactive Apertale picture book");
     const onContextLost = (event: Event) => {
       event.preventDefault();
       recordDiagnostic("webgl:context-lost");
@@ -333,11 +564,50 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
     renderer.domElement.addEventListener("webglcontextlost", onContextLost);
     renderer.domElement.tabIndex = 0;
     host.appendChild(renderer.domElement);
-    canvasRef.current = renderer.domElement;
 
     const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
     camera.position.set(0, -2.25, 12.05);
     camera.lookAt(0, -0.08, 0);
+
+    // Every spread owns one illustrated coordinate system spanning both pages.
+    // It is rendered offscreen and the physical paper samples the left/right
+    // half of the same texture, including its interactive cut-paper layers.
+    const stageScene = new THREE.Scene();
+    const stageFlatScene = new THREE.Scene();
+    const stageFlatCamera = new THREE.OrthographicCamera(-PAGE_W, PAGE_W, PAGE_H / 2, -PAGE_H / 2, 0.1, 30);
+    stageFlatCamera.position.set(0, 0, 12);
+    const stageWorldCamera = new THREE.OrthographicCamera(-PAGE_W, PAGE_W, PAGE_H / 2, -PAGE_H / 2, 0.1, 30);
+    stageWorldCamera.position.set(0, 0, 12);
+    const stageBackgroundMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const stageBackgroundGeometry = new THREE.PlaneGeometry(PAGE_W * 2, PAGE_H);
+    const stageBackground = new THREE.Mesh(stageBackgroundGeometry, stageBackgroundMaterial);
+    stageBackground.position.z = -1.2;
+    stageFlatScene.add(stageBackground);
+    const stageOverlayMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const stageOverlayGeometry = new THREE.PlaneGeometry(PAGE_W * 2, PAGE_H);
+    const stageOverlay = new THREE.Mesh(stageOverlayGeometry, stageOverlayMaterial);
+    stageOverlay.position.z = 8;
+    stageOverlay.renderOrder = 100;
+    stageFlatScene.add(stageOverlay);
+
+    const makeSpreadTarget = () => {
+      const target = new THREE.WebGLRenderTarget(1536, Math.round(1536 * PAGE_H / (PAGE_W * 2)), {
+        depthBuffer: true,
+        stencilBuffer: false,
+      });
+      target.samples = 2;
+      target.texture.colorSpace = THREE.SRGBColorSpace;
+      target.texture.minFilter = THREE.LinearFilter;
+      target.texture.magFilter = THREE.LinearFilter;
+      return target;
+    };
+    const liveSpreadTarget = makeSpreadTarget();
+    const destinationSpreadTarget = makeSpreadTarget();
 
     const ambient = new THREE.HemisphereLight(0xfff4dc, 0x675b4b, 1.7);
     scene.add(ambient);
@@ -353,13 +623,32 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
     const rim = new THREE.PointLight(0x91b8cf, 0.6, 18);
     rim.position.set(4, 1, 5);
     scene.add(rim);
+    const pageHalo = new THREE.PointLight(0xffa84f, 0, 9, 1.8);
+    pageHalo.position.set(0.35, 0.4, 2.4);
+    scene.add(pageHalo);
+    // The night presentation is a dark room with a real, localised desk-lamp
+    // pool over the open book—not a uniform dark filter over the artwork.
+    const deskLampTarget = new THREE.Object3D();
+    deskLampTarget.position.set(0.2, 0.05, 0.1);
+    scene.add(deskLampTarget);
+    const deskLamp = new THREE.SpotLight(0xffc77d, 0, 22, Math.PI / 4.15, 0.72, 1.1);
+    deskLamp.position.set(-4.7, 5.5, 7.5);
+    deskLamp.target = deskLampTarget;
+    scene.add(deskLamp);
+
+    const stageAmbient = new THREE.HemisphereLight(0xfff4dc, 0x675b4b, 1.9);
+    const stageKey = new THREE.DirectionalLight(0xffe9c6, 4.2);
+    stageKey.position.set(-4.6, 5.8, 8.5);
+    const stageRim = new THREE.PointLight(0x91b8cf, 0.8, 20);
+    stageRim.position.set(4.4, 1.4, 6.2);
+    stageScene.add(stageAmbient, stageKey, stageRim);
 
     // Interaction light: driven entirely by the focus response of the element
     // that currently holds focus.
     const focusLight = new THREE.SpotLight(0xffd7a1, 0, 14, Math.PI / 7, 0.55, 1.4);
     focusLight.position.set(0, 3.4, 5.4);
     const focusTarget = new THREE.Object3D();
-    scene.add(focusLight, focusTarget);
+    stageScene.add(focusLight, focusTarget);
     focusLight.target = focusTarget;
 
     const book = new THREE.Group();
@@ -395,18 +684,37 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
     leftPage.receiveShadow = rightPage.receiveShadow = true;
     book.add(leftPage, rightPage);
 
-    const turnGeometry = new THREE.PlaneGeometry(PAGE_W, PAGE_H, 40, 4);
-    const basePositions = Float32Array.from(turnGeometry.attributes.position.array as ArrayLike<number>);
+    // Turning leaves use page-sized samples cut from the same full-spread RT.
+    // Front and back are frozen at gesture start, so the illustrated stage
+    // cannot tear or disappear while the paper geometry deforms.
+    const makeTurnCaptureTarget = () => {
+      const target = new THREE.WebGLRenderTarget(768, Math.round(768 * PAGE_H / PAGE_W), {
+        depthBuffer: true,
+        stencilBuffer: false,
+      });
+      target.samples = 2;
+      target.texture.colorSpace = THREE.SRGBColorSpace;
+      return target;
+    };
+    const turnCaptureTarget = makeTurnCaptureTarget();
+    const backwardBaseCaptureTarget = makeTurnCaptureTarget();
+
+    const turnLeaf = createTurnLeaf();
     const turnFrontMaterial = makePageMaterial(THREE.FrontSide);
-    const turnBackMaterial = makePageMaterial(THREE.BackSide);
-    const turnFront = new THREE.Mesh(turnGeometry, turnFrontMaterial);
-    const turnBack = new THREE.Mesh(turnGeometry, turnBackMaterial);
-    turnFront.position.set(PAGE_W / 2, 0, 0.13);
-    turnBack.position.copy(turnFront.position);
-    turnFront.castShadow = turnBack.castShadow = true;
-    turnFront.receiveShadow = turnBack.receiveShadow = true;
-    turnFront.visible = turnBack.visible = false;
-    book.add(turnFront, turnBack);
+    const turnBackMaterial = makePageMaterial(THREE.FrontSide);
+    const turnEdgeMaterial = new THREE.MeshStandardMaterial({ color: 0xe8dcc4, roughness: 0.94, metalness: 0 });
+    const turnPage = new THREE.Mesh(turnLeaf.geometry, [turnFrontMaterial, turnBackMaterial, turnEdgeMaterial]);
+    turnPage.position.set(PAGE_W / 2, 0, 0.08);
+    // The directional-light shadow of a near-vertical rectangular sheet read
+    // as a black hole in the book. The watertight leaf still receives scene
+    // light and its real thickness supplies the necessary edge definition.
+    turnPage.castShadow = false;
+    turnPage.receiveShadow = true;
+    // The page deforms every frame; bypassing repeated bounds reconstruction
+    // keeps the gesture smooth without risking transient frustum pop-out.
+    turnPage.frustumCulled = false;
+    turnPage.visible = false;
+    book.add(turnPage);
 
     const spine = new THREE.Mesh(
       new THREE.BoxGeometry(0.09, 5.22, 0.22),
@@ -430,20 +738,21 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
     let disposed = false;
     const mountSceneElement = (element: BookElement) => {
       if (sceneElements.has(element.id) || pendingAssets.has(element.id)) return;
-      if (!isStoredAssetId(element.assetId) || element.modelId) {
-        const sceneElement = buildSceneElement(element, textureLoader);
-        book.add(sceneElement.root);
+      const assetIds = [element.assetId, ...(element.frameAssetIds ?? [])];
+      if (!assetIds.some(isStoredAssetId)) {
+        const sceneElement = buildSceneElement(element, textureLoader, element.assetId, element.frameAssetIds);
+        stageScene.add(sceneElement.root);
         sceneElements.set(element.id, sceneElement);
         return;
       }
       pendingAssets.add(element.id);
-      resolveAssetUrl(element.assetId).then((assetUrl) => {
+      Promise.all(assetIds.map((assetId) => (isStoredAssetId(assetId) ? resolveAssetUrl(assetId) : Promise.resolve(assetId)))).then(([assetUrl, ...frameUrls]) => {
         pendingAssets.delete(element.id);
         if (disposed || sceneElements.has(element.id)) return;
         const stillExists = propsRef.current.snapshot.document.spreads.some((spread) => spread.elements.some((item) => item.id === element.id));
         if (!stillExists) return;
-        const sceneElement = buildSceneElement(element, textureLoader, assetUrl);
-        book.add(sceneElement.root);
+        const sceneElement = buildSceneElement(element, textureLoader, assetUrl, frameUrls);
+        stageScene.add(sceneElement.root);
         sceneElements.set(element.id, sceneElement);
       }).catch(() => {
         pendingAssets.delete(element.id);
@@ -453,6 +762,86 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
     propsRef.current.snapshot.document.spreads.forEach((spread) => {
       spread.elements.forEach(mountSceneElement);
     });
+
+    const placeStaticElement = (element: BookElement, sceneElement: SceneElement, scaleMultiplier = 1) => {
+      const pageCenter = element.page === "right" ? PAGE_W / 2 : -PAGE_W / 2;
+      sceneElement.root.position.set(
+        pageCenter + (element.transform.x - 0.5) * PAGE_W,
+        (0.5 - element.transform.y) * PAGE_H,
+        element.depth,
+      );
+      sceneElement.root.rotation.z = THREE.MathUtils.degToRad(-element.transform.rotationDeg);
+      sceneElement.root.scale.set(
+        element.transform.scaleX * scaleMultiplier,
+        element.transform.scaleY * scaleMultiplier,
+        element.transform.scaleX * scaleMultiplier,
+      );
+      sceneElement.tilt.rotation.x = 0;
+      sceneElement.tilt.position.y = 0;
+      sceneElement.yaw.rotation.y = 0;
+    };
+
+    let lastTurnCaptureKey = "";
+    const setStageCameraView = (view: "full" | "left" | "right") => {
+      [stageFlatCamera, stageWorldCamera].forEach((camera) => {
+        camera.left = view === "right" ? 0 : -PAGE_W;
+        camera.right = view === "left" ? 0 : PAGE_W;
+        camera.top = PAGE_H / 2;
+        camera.bottom = -PAGE_H / 2;
+        camera.updateProjectionMatrix();
+      });
+    };
+
+    const renderStageView = (
+      pair: PagePair,
+      target: THREE.WebGLRenderTarget,
+      view: "full" | "left" | "right",
+      night: boolean,
+    ) => {
+      const priorTarget = renderer.getRenderTarget();
+      const priorClearColor = renderer.getClearColor(new THREE.Color());
+      const priorClearAlpha = renderer.getClearAlpha();
+      const priorAutoClear = renderer.autoClear;
+      stageBackgroundMaterial.map = pair.spread;
+      stageBackgroundMaterial.color.set(night ? 0xf4e6ce : 0xffffff);
+      stageBackgroundMaterial.needsUpdate = true;
+      stageOverlayMaterial.map = pair.overlay;
+      stageOverlayMaterial.needsUpdate = true;
+      setStageCameraView(view);
+      stageScene.updateMatrixWorld(true);
+      renderer.setRenderTarget(target);
+      renderer.autoClear = false;
+      renderer.setClearColor(night ? 0x1a2029 : 0xf4ecd9, 1);
+      renderer.clear(true, true, true);
+      stageBackground.visible = true;
+      stageOverlay.visible = false;
+      renderer.render(stageFlatScene, stageFlatCamera);
+      renderer.clearDepth();
+      renderer.render(stageScene, stageWorldCamera);
+      renderer.clearDepth();
+      stageBackground.visible = false;
+      stageOverlay.visible = true;
+      renderer.render(stageFlatScene, stageFlatCamera);
+      stageBackground.visible = true;
+      stageOverlay.visible = true;
+      renderer.setRenderTarget(priorTarget);
+      renderer.autoClear = priorAutoClear;
+      renderer.setClearColor(priorClearColor, priorClearAlpha);
+    };
+
+    const configureStaticStage = (spread: Spread) => {
+      const visible = new Set(spread.elements.map((element) => element.id));
+      spread.elements.forEach((element) => {
+        mountSceneElement(element);
+        const sceneElement = sceneElements.get(element.id);
+        if (!sceneElement) return;
+        placeStaticElement(element, sceneElement, 1);
+        sceneElement.root.visible = true;
+      });
+      sceneElements.forEach((sceneElement, id) => {
+        if (!visible.has(id)) sceneElement.root.visible = false;
+      });
+    };
 
     const particleCount = 42;
     const particlePositions = new Float32Array(particleCount * 3);
@@ -468,17 +857,25 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
     book.add(particles);
 
     const raycaster = new THREE.Raycaster();
+    const pageRaycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
+    const stagePointer = new THREE.Vector2();
     const drag = { elementId: null as string | null, startX: 0, startY: 0, initialX: 0, initialY: 0, moved: false, pageDirection: null as "forward" | "backward" | null, amount: 0 };
     let hoveredId: string | null = null;
 
     let pagePairs = new Map<string, PagePair>();
-    loadPagePairs(propsRef.current.snapshot.document.spreads).then((pairs) => {
+    let readySent = false;
+    loadPagePairs(propsRef.current.snapshot.document.spreads, propsRef.current.mode).then((pairs) => {
       if (disposed) {
-        pairs.forEach(({ left, right, leftBack, rightBack }) => {
-          left.dispose(); right.dispose(); leftBack.dispose(); rightBack.dispose();
+        pairs.forEach(({ spread, overlay }) => {
+          spread.dispose();
+          overlay.dispose();
         });
       } else pagePairs = pairs;
+    }).catch(() => {
+      if (disposed) return;
+      recordDiagnostic("spread:load-failed", { documentId: loadingDocumentId });
+      propsRef.current.onFailure();
     });
 
     function resize() {
@@ -501,6 +898,10 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      pageRaycaster.setFromCamera(pointer, camera);
+      const pageHit = pageRaycaster.intersectObjects([leftPage, rightPage], false)[0];
+      if (pageHit?.uv) stagePointer.set(pageHit.uv.x * 2 - 1, pageHit.uv.y * 2 - 1);
+      else stagePointer.copy(pointer);
       return rect;
     }
 
@@ -510,7 +911,7 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
     }
 
     function pickElement() {
-      raycaster.setFromCamera(pointer, camera);
+      raycaster.setFromCamera(stagePointer, stageWorldCamera);
       const roots = currentSpread()
         .elements.map((element) => sceneElements.get(element.id))
         .filter((item): item is SceneElement => Boolean(item) && Boolean(item?.root.visible))
@@ -563,11 +964,11 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
       setPointer(event);
       if (drag.elementId) {
         const rect = renderer.domElement.getBoundingClientRect();
+        const element = currentSpread().elements.find((item) => item.id === drag.elementId);
         if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 2) drag.moved = true;
         const nextX = clamp(drag.initialX + (event.clientX - drag.startX) / (rect.width * 0.5));
         const nextY = clamp(drag.initialY + (event.clientY - drag.startY) / (rect.height * 0.72));
         const sceneElement = sceneElements.get(drag.elementId);
-        const element = currentSpread().elements.find((item) => item.id === drag.elementId);
         if (sceneElement && element) {
           const pageX = element.page === "right" ? PAGE_W / 2 : -PAGE_W / 2;
           sceneElement.root.position.x = pageX + (nextX - 0.5) * PAGE_W;
@@ -617,77 +1018,67 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
     let frame = 0;
     let raf = 0;
     let lastSpreadId = "";
-
-    function updateTurn(progress: number) {
-      const positions = turnGeometry.attributes.position as THREE.BufferAttribute;
-      for (let index = 0; index < positions.count; index += 1) {
-        const baseIndex = index * 3;
-        const x = basePositions[baseIndex];
-        const y = basePositions[baseIndex + 1];
-        const deformed = deformPageVertex(x, y, progress, PAGE_W);
-        positions.setXYZ(index, deformed.x, deformed.y, deformed.z);
-      }
-      positions.needsUpdate = true;
-      turnGeometry.computeVertexNormals();
-      turnGeometry.computeBoundingBox();
-      turnGeometry.computeBoundingSphere();
-    }
+    const dayPaperColor = new THREE.Color(0xfffbef);
+    const nightPaperColor = new THREE.Color(0xe6dccb);
+    const dayPageBlockColor = new THREE.Color(0xe8dcc4);
+    const nightPageBlockColor = new THREE.Color(0x5f554d);
+    const dayEdgeColor = new THREE.Color(0xe8dcc4);
+    const nightEdgeColor = new THREE.Color(0xb59367);
+    const dayParticleColor = new THREE.Color(0xc7aa7a);
+    const nightParticleColor = new THREE.Color(0xffc75f);
+    const dayKeyColor = new THREE.Color(0xffe9c6);
+    const nightKeyColor = new THREE.Color(0x9fb7d8);
+    const dayAmbientSky = new THREE.Color(0xfff4dc);
+    const dayAmbientGround = new THREE.Color(0x675b4b);
+    const nightAmbientSky = new THREE.Color(0x8ea6c7);
+    const nightAmbientGround = new THREE.Color(0x1b2230);
+    const dayCoverColor = new THREE.Color(0x173f39);
+    const nightCoverColor = new THREE.Color(0x261912);
+    backwardBaseCaptureTarget.texture.repeat.x = -1;
+    backwardBaseCaptureTarget.texture.offset.x = 1;
 
     function animate() {
       raf = requestAnimationFrame(animate);
       const { snapshot: current, turn: currentTurn } = propsRef.current;
       const spread = current.document.spreads[current.session.currentSpreadIndex];
       const pagePair = pagePairs.get(spread.id);
-      if (pagePair && !currentTurn && (spread.id !== lastSpreadId || leftMaterial.map !== pagePair.left || rightMaterial.map !== pagePair.right)) {
-        leftMaterial.map = pagePair.left;
-        rightMaterial.map = pagePair.right;
-        leftMaterial.needsUpdate = rightMaterial.needsUpdate = true;
-        lastSpreadId = spread.id;
-      }
 
       const night = current.session.sceneThemeId === "midnight-desk";
       const reduced = current.session.quality === "reduced";
       const frameTime = performance.now();
       const deltaSeconds = Math.min(0.05, (frameTime - lastFrameTime) / 1000);
       const delta = clamp(deltaSeconds * 4, 0, 1);
+      // Presentation state should acknowledge a mobile tap immediately and
+      // settle quickly. Keep content/interaction motion on its own cadence.
+      const themeDelta = 1 - Math.exp(-deltaSeconds * 13);
       lastFrameTime = frameTime;
-      ambient.intensity = THREE.MathUtils.lerp(ambient.intensity, night ? 0.48 : 1.7, delta);
-      key.intensity = THREE.MathUtils.lerp(key.intensity, night ? 2.45 : 3.6, delta);
-      key.color.lerp(new THREE.Color(night ? 0xffb86b : 0xffe9c6), delta);
-      rim.intensity = THREE.MathUtils.lerp(rim.intensity, night ? 1.85 : 0.6, delta);
-      coverMaterial.color.lerp(new THREE.Color(night ? 0x261912 : 0x173f39), delta);
-      particleMaterial.opacity = THREE.MathUtils.lerp(particleMaterial.opacity, night && !reduced ? 0.72 : 0, delta);
-      particles.rotation.z += night && !reduced ? 0.00025 : 0;
-      renderer.toneMappingExposure = THREE.MathUtils.lerp(renderer.toneMappingExposure, night ? 0.82 : 1.03, delta);
-
-      if (currentTurn) {
-        turnFront.visible = turnBack.visible = true;
-        const nextIndex = currentTurn.direction === "forward" ? current.session.currentSpreadIndex + 1 : current.session.currentSpreadIndex - 1;
-        const nextSpread = current.document.spreads[nextIndex];
-        const nextPair = nextSpread ? pagePairs.get(nextSpread.id) : null;
-        if (currentTurn.direction === "forward") {
-          turnFrontMaterial.map = pagePair?.right ?? null;
-          turnBackMaterial.map = nextPair?.leftBack ?? null;
-          if (nextPair && rightMaterial.map !== nextPair.right) {
-            rightMaterial.map = nextPair.right;
-            rightMaterial.needsUpdate = true;
-          }
-          rightPage.visible = leftPage.visible = true;
-        } else {
-          turnFrontMaterial.map = nextPair?.right ?? null;
-          turnBackMaterial.map = pagePair?.leftBack ?? null;
-          if (nextPair && leftMaterial.map !== nextPair.left) {
-            leftMaterial.map = nextPair.left;
-            leftMaterial.needsUpdate = true;
-          }
-          leftPage.visible = rightPage.visible = true;
-        }
-        turnFrontMaterial.needsUpdate = turnBackMaterial.needsUpdate = true;
-        updateTurn(currentTurn.progress);
-      } else {
-        turnFront.visible = turnBack.visible = false;
-        leftPage.visible = rightPage.visible = true;
-      }
+      ambient.intensity = THREE.MathUtils.lerp(ambient.intensity, night ? 1.0 : 1.7, themeDelta);
+      ambient.color.lerp(night ? nightAmbientSky : dayAmbientSky, themeDelta);
+      ambient.groundColor.lerp(night ? nightAmbientGround : dayAmbientGround, themeDelta);
+      key.intensity = THREE.MathUtils.lerp(key.intensity, night ? 3.0 : 3.6, themeDelta);
+      key.color.lerp(night ? nightKeyColor : dayKeyColor, themeDelta);
+      rim.intensity = THREE.MathUtils.lerp(rim.intensity, night ? 1.85 : 0.6, themeDelta);
+      stageAmbient.intensity = THREE.MathUtils.lerp(stageAmbient.intensity, night ? 1.05 : 1.9, themeDelta);
+      stageAmbient.color.lerp(night ? nightAmbientSky : dayAmbientSky, themeDelta);
+      stageAmbient.groundColor.lerp(night ? nightAmbientGround : dayAmbientGround, themeDelta);
+      stageKey.intensity = THREE.MathUtils.lerp(stageKey.intensity, night ? 3.1 : 4.2, themeDelta);
+      stageKey.color.lerp(night ? nightKeyColor : dayKeyColor, themeDelta);
+      stageRim.intensity = THREE.MathUtils.lerp(stageRim.intensity, night ? 2.2 : 0.8, themeDelta);
+      pageHalo.intensity = THREE.MathUtils.lerp(pageHalo.intensity, night ? 1.55 : 0, themeDelta);
+      deskLamp.intensity = THREE.MathUtils.lerp(deskLamp.intensity, night ? 9.8 : 0, themeDelta);
+      coverMaterial.color.lerp(night ? nightCoverColor : dayCoverColor, themeDelta);
+      pageBlockMaterial.color.lerp(night ? nightPageBlockColor : dayPageBlockColor, themeDelta);
+      turnEdgeMaterial.color.lerp(night ? nightEdgeColor : dayEdgeColor, themeDelta);
+      [leftMaterial, rightMaterial, turnFrontMaterial, turnBackMaterial].forEach((material) => {
+        material.color.lerp(night ? nightPaperColor : dayPaperColor, themeDelta);
+        material.roughness = THREE.MathUtils.lerp(material.roughness, night ? 0.74 : 0.82, themeDelta);
+        material.emissiveIntensity = THREE.MathUtils.lerp(material.emissiveIntensity, night ? 0.09 : 0, themeDelta);
+      });
+      particleMaterial.color.lerp(night ? nightParticleColor : dayParticleColor, themeDelta);
+      particleMaterial.opacity = THREE.MathUtils.lerp(particleMaterial.opacity, reduced ? 0 : night ? 0.72 : 0.1, themeDelta);
+      particleMaterial.size = THREE.MathUtils.lerp(particleMaterial.size, night ? 0.044 : 0.025, themeDelta);
+      particles.rotation.z += reduced ? 0 : night ? 0.00032 : -0.000045;
+      renderer.toneMappingExposure = THREE.MathUtils.lerp(renderer.toneMappingExposure, night ? 1.08 : 1.03, themeDelta);
 
       const time = frameTime;
       let focusIntensity = 0;
@@ -696,8 +1087,8 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
       });
       sceneElements.forEach((sceneElement, id) => {
         const element = spread.elements.find((item) => item.id === id);
-        sceneElement.root.visible = Boolean(element) && !currentTurn;
-        if (!element || currentTurn) {
+        sceneElement.root.visible = Boolean(element);
+        if (!element) {
           sceneElement.hoverAmount = 0;
           sceneElement.focusAmount = 0;
           return;
@@ -706,8 +1097,8 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
         const interaction = resolveInteraction(element);
         const hover = hoverTraits(interaction.hover);
         const focus = focusTraits(interaction.focus);
-        const hovered = hoveredId === id && !current.session.preview;
-        const focused = current.session.selectionId === id;
+        const hovered = hoveredId === id && !current.session.preview && !currentTurn;
+        const focused = current.session.selectionId === id && !currentTurn;
         sceneElement.hoverAmount = THREE.MathUtils.lerp(sceneElement.hoverAmount, hovered ? 1 : 0, clamp(deltaSeconds * 7, 0, 1));
         sceneElement.focusAmount = THREE.MathUtils.lerp(sceneElement.focusAmount, focused ? 1 : 0, clamp(deltaSeconds * 5, 0, 1));
 
@@ -737,25 +1128,41 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
         x += (element.page === "right" ? -1 : 1) * focusClearance * sceneElement.focusAmount;
         const interactionScale =
           1 + (hover.scale - 1) * sceneElement.hoverAmount + (focus.scale - 1) * sceneElement.focusAmount;
-        sceneElement.root.position.set(x, y, 0.39 + element.depth + rise);
+        sceneElement.root.position.set(x, y, element.depth + rise);
         sceneElement.root.rotation.z = THREE.MathUtils.degToRad(-element.transform.rotationDeg);
-        const appliedScale = scale * interactionScale;
+        const stageScale = 1;
+        const appliedScale = scale * interactionScale * stageScale;
         sceneElement.root.scale.set(appliedScale, element.transform.scaleY * (appliedScale / element.transform.scaleX), appliedScale);
 
         // Hover lean follows the live pointer; focus orbit is a named response.
-        const leanTarget = hovered && !reduced ? pointer.x * hover.tilt * 2.4 : 0;
-        const pitchTarget = hovered && !reduced ? -pointer.y * hover.tilt : 0;
+        const leanTarget = hovered && !reduced ? stagePointer.x * hover.tilt * 2.4 : 0;
+        const pitchTarget = hovered && !reduced ? -stagePointer.y * hover.tilt : 0;
         const spinDelta = focused && !reduced ? focus.spin * deltaSeconds : 0;
         sceneElement.spin += spinDelta;
         sceneElement.yaw.rotation.y = THREE.MathUtils.lerp(sceneElement.yaw.rotation.y, sceneElement.spin + leanTarget, clamp(deltaSeconds * 6, 0, 1));
-        if (sceneElement.model) {
-          sceneElement.tilt.rotation.x = THREE.MathUtils.lerp(sceneElement.tilt.rotation.x, POPUP_TILT + pitchTarget, clamp(deltaSeconds * 6, 0, 1));
-          const breathe = reduced ? 0 : Math.sin(time / 2600) * 0.012;
-          sceneElement.tilt.position.y = THREE.MathUtils.lerp(sceneElement.tilt.position.y, breathe, clamp(deltaSeconds * 3, 0, 1));
-          sceneElement.model.applyNight(night ? 1 : 0);
-        }
+        sceneElement.tilt.rotation.x = THREE.MathUtils.lerp(sceneElement.tilt.rotation.x, pitchTarget * 0.35, clamp(deltaSeconds * 6, 0, 1));
+        // A layer without an authored motion preset stays physically anchored
+        // to the paper. Clickability comes from hover light/focus treatment,
+        // never from a global idle bob applied to every subject.
+        sceneElement.tilt.position.y = THREE.MathUtils.lerp(sceneElement.tilt.position.y, 0, clamp(deltaSeconds * 8, 0, 1));
 
         const glow = hover.emissive * sceneElement.hoverAmount + 0.1 * sceneElement.focusAmount;
+        if (sceneElement.frameTextures.length > 1) {
+          const frameIndex = frameSequenceIndex(sceneElement.frameTextures.length, time, reduced);
+          if (frameIndex !== sceneElement.frameIndex) {
+            sceneElement.frameIndex = frameIndex;
+            sceneElement.materials[0].map = sceneElement.frameTextures[frameIndex];
+            sceneElement.materials[0].needsUpdate = true;
+            if (!sceneElement.seenFrameIndices.has(frameIndex)) {
+              sceneElement.seenFrameIndices.add(frameIndex);
+              recordDiagnostic("frame-sequence:advance", {
+                elementId: sceneElement.id,
+                frameIndex,
+                frameCount: sceneElement.frameTextures.length,
+              });
+            }
+          }
+        }
         sceneElement.materials.forEach((material) => {
           material.emissiveIntensity = glow;
         });
@@ -765,6 +1172,8 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
           sceneElement.anchor.getWorldPosition(anchorWorld);
           focusTarget.position.copy(anchorWorld);
           focusLight.position.set(anchorWorld.x - 0.6, anchorWorld.y + 3.1, anchorWorld.z + 4.6);
+          anchorWorld.set(anchorWorld.x, anchorWorld.y, 0.42);
+          book.localToWorld(anchorWorld);
           anchorWorld.project(camera);
           const screenX = (anchorWorld.x * 0.5 + 0.5) * host.clientWidth;
           const screenY = (-anchorWorld.y * 0.5 + 0.5) * host.clientHeight;
@@ -774,9 +1183,64 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
       });
       focusLight.intensity = THREE.MathUtils.lerp(focusLight.intensity, focusIntensity, delta);
 
+      if (pagePair) {
+        renderStageView(pagePair, liveSpreadTarget, "full", night);
+        if (currentTurn) {
+          const plan = resolveTurnContentPlan(current.session.currentSpreadIndex, currentTurn.direction, current.document.spreads.length);
+          const destinationSpread = plan ? current.document.spreads[plan.destinationIndex] : undefined;
+          const destinationPair = destinationSpread ? pagePairs.get(destinationSpread.id) : undefined;
+          const themeKey = night ? "night" : "day";
+          if (destinationSpread && destinationPair) {
+            configureStaticStage(destinationSpread);
+            renderStageView(destinationPair, destinationSpreadTarget, "full", night);
+            const captureKey = `${currentTurn.direction}:${spread.id}:${destinationSpread.id}:${themeKey}`;
+            if (captureKey !== lastTurnCaptureKey) {
+              const frontSpread = currentTurn.direction === "forward" ? spread : destinationSpread;
+              const frontPair = currentTurn.direction === "forward" ? pagePair : destinationPair;
+              const backSpread = currentTurn.direction === "forward" ? destinationSpread : spread;
+              const backPair = currentTurn.direction === "forward" ? destinationPair : pagePair;
+              configureStaticStage(frontSpread);
+              renderStageView(frontPair, turnCaptureTarget, "right", night);
+              configureStaticStage(backSpread);
+              renderStageView(backPair, backwardBaseCaptureTarget, "left", night);
+              lastTurnCaptureKey = captureKey;
+              recordDiagnostic("page-turn:capture", {
+                spreadId: frontSpread.id,
+                destinationSpreadId: destinationSpread.id,
+                elementCount: frontSpread.elements.length + backSpread.elements.length,
+                role: "shared-spread-rt",
+              });
+            }
+            leftMaterial.map = currentTurn.direction === "forward" ? liveSpreadTarget.texture : destinationSpreadTarget.texture;
+            rightMaterial.map = currentTurn.direction === "forward" ? destinationSpreadTarget.texture : liveSpreadTarget.texture;
+            turnFrontMaterial.map = turnCaptureTarget.texture;
+            turnBackMaterial.map = backwardBaseCaptureTarget.texture;
+            leftMaterial.needsUpdate = rightMaterial.needsUpdate = true;
+            turnFrontMaterial.needsUpdate = turnBackMaterial.needsUpdate = true;
+          }
+          setStageCameraView("full");
+          turnPage.visible = true;
+          turnLeaf.update(currentTurn.progress);
+        } else {
+          if (spread.id !== lastSpreadId || leftMaterial.map !== liveSpreadTarget.texture || rightMaterial.map !== liveSpreadTarget.texture) {
+            leftMaterial.map = liveSpreadTarget.texture;
+            rightMaterial.map = liveSpreadTarget.texture;
+            leftMaterial.needsUpdate = rightMaterial.needsUpdate = true;
+            lastSpreadId = spread.id;
+          }
+          turnPage.visible = false;
+          lastTurnCaptureKey = "";
+        }
+      }
+      leftPage.visible = rightPage.visible = true;
+
       frame += 1;
       if (frame % 60 === 0) renderer.info.reset();
       renderer.render(scene, camera);
+      if (pagePair && !readySent) {
+        readySent = true;
+        propsRef.current.onReady(loadingDocumentId);
+      }
     }
     animate();
 
@@ -790,21 +1254,32 @@ export const ThreeBook = forwardRef<BookSceneHandle, Props>(function ThreeBook(
       renderer.domElement.removeEventListener("pointercancel", onPointerUp);
       renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
       renderer.domElement.removeEventListener("webglcontextlost", onContextLost);
-      pagePairs.forEach(({ left, right, leftBack, rightBack }) => {
-        left.dispose(); right.dispose(); leftBack.dispose(); rightBack.dispose();
+      pagePairs.forEach(({ spread, overlay }) => {
+        spread.dispose();
+        overlay.dispose();
       });
       sceneElements.forEach((sceneElement) => sceneElement.dispose());
       leftGeometry.dispose();
       rightGeometry.dispose();
-      turnGeometry.dispose();
+      turnLeaf.geometry.dispose();
+      turnFrontMaterial.dispose();
+      turnBackMaterial.dispose();
+      turnEdgeMaterial.dispose();
+      turnCaptureTarget.dispose();
+      backwardBaseCaptureTarget.dispose();
+      liveSpreadTarget.dispose();
+      destinationSpreadTarget.dispose();
+      stageBackgroundGeometry.dispose();
+      stageBackgroundMaterial.dispose();
+      stageOverlayGeometry.dispose();
+      stageOverlayMaterial.dispose();
       particleGeometry.dispose();
       particleMaterial.dispose();
       renderer.dispose();
       renderer.domElement.remove();
-      canvasRef.current = null;
       recordDiagnostic("webgl:disposed");
     };
   }, [sceneStructureKey]);
 
   return <div className="book-scene" ref={hostRef} />;
-});
+}

@@ -1,6 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const webMcpHeaders = {
+  "Origin-Agent-Cluster": "?1",
+  "Permissions-Policy": "tools=(self)",
+};
+
 export default defineConfig({
   build: {
     outDir: "dist/client",
@@ -18,19 +23,13 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     allowedHosts: ["terminal.local"],
-    headers: {
-      "Origin-Agent-Cluster": "?1",
-      "Permissions-Policy": "tools=(self)",
-    },
+    headers: webMcpHeaders,
     warmup: {
       clientFiles: ["./src/main.tsx"],
     },
   },
   preview: {
-    headers: {
-      "Origin-Agent-Cluster": "?1",
-      "Permissions-Policy": "tools=(self)",
-    },
+    headers: webMcpHeaders,
   },
   plugins: [react()],
 });

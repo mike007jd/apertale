@@ -3,23 +3,23 @@ import {
   FOCUS_RESPONSES,
   HOVER_RESPONSES,
   focusTraits,
+  frameSequenceIndex,
   hasReveal,
   hoverTraits,
   motionTraits,
   resolveInteraction,
 } from "./interaction";
-import { initialDocument } from "./sampleBook";
+import { sampleBooks } from "./sampleBook";
 import type { BookElement } from "./types";
 
-const landmark = initialDocument.spreads[0].elements[0];
+const landmark = sampleBooks[3].spreads[0].elements[0];
 
 describe("structured interaction schema", () => {
   it("resolves an authored interaction without inventing behaviour", () => {
     const spec = resolveInteraction(landmark);
-    expect(spec).toMatchObject({ hover: "tilt-toward-pointer", focus: "orbit-inspect" });
-    expect(spec.reveal.kind).toBe("fact-card");
-    expect(spec.reveal.facts.length).toBeGreaterThanOrEqual(4);
-    expect(spec.reveal.source).toContain("Flavian Amphitheatre");
+    expect(spec).toMatchObject({ hover: "lift-glow", focus: "spotlight" });
+    expect(spec.reveal.kind).toBe("caption");
+    expect(spec.reveal.title).toBe("A city begins at hand scale");
     expect(hasReveal(spec)).toBe(true);
   });
 
@@ -73,5 +73,18 @@ describe("structured interaction schema", () => {
 
     const looping = { preset: "gentle-float", durationMs: 4000, loop: true } as const;
     expect(motionTraits(looping, 5000)).toEqual(motionTraits(looping, 1000));
+
+    const boat = motionTraits({ preset: "water-bob", durationMs: 4200, loop: true }, 1050);
+    expect(Math.abs(boat.x)).toBeLessThanOrEqual(0.012);
+    expect(Math.abs(boat.y)).toBeLessThanOrEqual(0.035);
+  });
+
+  it("keeps frame animation at rest before a brief burst and under reduced motion", () => {
+    expect(frameSequenceIndex(6, 1000, false)).toBe(0);
+    expect(frameSequenceIndex(6, 4100, false)).toBe(1);
+    expect(frameSequenceIndex(6, 4210, false)).toBe(2);
+    expect(frameSequenceIndex(6, 4599, false)).toBe(5);
+    expect(frameSequenceIndex(6, 4600, false)).toBe(0);
+    expect(frameSequenceIndex(6, 4210, true)).toBe(0);
   });
 });

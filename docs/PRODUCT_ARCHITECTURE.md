@@ -4,7 +4,7 @@
 >
 > Version: 1.1 consolidated
 >
-> Checked: 2026-08-26 NZST
+> Checked: 2026-08-28 NZST
 > Working brand: **Apertale — Open a page. Enter a world.**
 
 This document consolidates the user-approved Challenge build and later multi-book scope. Earlier LivingBook-branded documents remain historical delivery evidence and do not override this specification.
@@ -24,9 +24,9 @@ The user's ChatGPT/Codex supplies the intelligence. Apertale does not proxy ever
 
 ### Implementation snapshot
 
-Implemented in the current local build: the 3D/2D book renderer, a persistent multi-book shelf, Colosseum, Great Pyramid, and volcano dioramas, closed interaction presets, revisioned commands, conflict-safe undo including book creation and shelf membership, Day/Night, the six-tool project surface, and IndexedDB-backed local image import whose stable IDs are discoverable and editable through WebMCP.
+Implemented in the current local build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the six-tool project surface; a repository-level Codex authoring skill; and IndexedDB-backed local image import whose stable IDs are discoverable and editable through WebMCP.
 
-Required external delivery still open: a real supporting-host acceptance run and the explicitly approved public repository, live URL, video, and Devpost submission. Direct host attachment transfer and additional flagship 3D books remain post-v1.1 expansion work rather than hidden release dependencies.
+Required external delivery still open: a real supporting-host tool-execution acceptance run and the explicitly approved public repository, live URL, video, and Devpost submission. Direct host attachment transfer remains a post-v1.1 expansion rather than a hidden release dependency. The project stays private and local until the user approves release.
 
 ## 2. Feasibility decision
 
@@ -61,16 +61,16 @@ If a supported host later exposes a verified attachment/file bridge, it can impl
 
 ## 3. Core experience
 
-1. The user opens Apertale in ChatGPT's built-in browser.
-2. The page reports that its site tools are available.
-3. In the real ChatGPT input, the user asks for a book, for example: “Use my travel photos to build a moonlit pop-up atlas. Give every landmark a different hover and click interaction.”
-4. ChatGPT inspects project and asset context.
+1. The user opens Apertale and lands on a clean editorial library, not furniture-like shelf geometry or an editor with a fake prompt box.
+2. The Field Guide and **Create Your Own** action open a full-screen blank-book workshop that explains authoring happens in the conversation beside the built-in browser.
+3. In that real Codex/ChatGPT input, the user asks for a book, for example: “Use my travel photos to build a moonlit pop-up atlas. Give every landmark a different hover and click interaction.”
+4. The Agent inspects project and asset context, asks one concise question only when an omitted choice materially changes the result, and otherwise chooses a sensible 4–8 spreads.
 5. The Agent creates or patches the book through WebMCP.
 6. Each committed step appears immediately in the same page, identifies its source, and is undoable.
 7. The user turns pages, hovers, clicks, drags, adjusts, switches Day/Night, and previews directly.
 8. The Agent can continue editing from the resulting live state.
 
-The bottom page surface is a host hint/status strip. It may copy a suggested prompt or explain tool availability; it never pretends to send a model request itself.
+The bottom page surface is an explicit **Create Your Own** action. It opens a full-screen blank-book workshop where the user chooses length and visual direction; a clearly labeled action copies the resulting starter prompt for the real Agent conversation. A secondary **Image handoff** accepts chosen images only when direct host media transfer is unavailable. No copy action is styled as an editable input and the webpage never pretends to send a model request itself.
 
 ## 4. Architecture
 
@@ -85,7 +85,8 @@ flowchart LR
     Commands --> Project[Revisioned project]
     Assets --> Project
     Project --> Render[Three.js and HTML renderer]
-    Project --> Persist[IndexedDB adapter]
+    Project --> Persist[localStorage project adapter]
+    Assets --> AssetPersist[IndexedDB asset adapter]
     Render --> User
 ```
 
@@ -118,21 +119,24 @@ interface Project {
 interface SpreadSpec {
   id: string;
   title: string;
-  sceneType: "collage-2d" | "pop-up-3d" | "knowledge-diorama" | "landmark-atlas";
-  narrative: NarrativeBlock[];
+  body: string;
+  textureUrl?: string;
+  artwork?: {
+    sourceAssetId?: string;
+    cleanPlateAssetId: string;
+    separation: "inpainted-clean-plate";
+  };
   elements: SceneElement[];
-  camera: CameraPreset;
 }
 
 interface SceneElement {
   id: string;
-  assetId?: string;
-  kind: "image" | "cutout" | "model" | "text" | "light" | "particle" | "procedural";
-  transform: Transform;
-  material?: MaterialPreset;
+  assetId: string;
+  frameAssetIds?: string[];
+  kind: "embedded" | "lifted" | "decoration";
+  transform: Transform2D;
   motion?: MotionPreset;
   interaction?: InteractionSpec;
-  facts?: FactCard[];
 }
 ```
 
@@ -142,19 +146,15 @@ The Agent decides how a sample behaves at authoring time by writing an `Interact
 
 ```ts
 interface InteractionSpec {
-  hover?: {
-    effect: "lift" | "glow" | "tilt" | "pulse" | "orbit-preview" | "label";
-    intensity?: "subtle" | "medium" | "bold";
-    label?: string;
+  hover: "none" | "lift-glow" | "tilt-toward-pointer" | "warm-rim";
+  focus: "none" | "spotlight" | "rise-and-center" | "orbit-inspect";
+  reveal: {
+    kind: "none" | "caption" | "fact-card";
+    title: string;
+    summary: string;
+    facts?: Array<{ label: string; value: string }>;
   };
-  click?:
-    | { action: "focus-camera"; cameraPreset: string }
-    | { action: "play-motion"; motion: MotionPreset }
-    | { action: "reveal-fact"; factId: string }
-    | { action: "toggle-exploded-view"; groupId: string }
-    | { action: "advance-sequence"; sequenceId: string };
-  cursor?: "inspect" | "move" | "open";
-  accessibleLabel: string;
+  hint?: string;
 }
 ```
 
@@ -170,8 +170,8 @@ Security boundary:
 
 Keep tools semantic and small enough for an Agent to select reliably. The target surface is:
 
-1. `get_project_context` — current book, shelf, spread, selection, assets, capabilities, and revision.
-2. `manage_book` — open an existing shelf book or create a validated independent book.
+1. `get_project_context` — current book, library, spread, selection, assets, capabilities, and revision.
+2. `manage_book` — open a library book, create a validated independent book, or assign the active book a validated local cover.
 3. `compose_spread` — replace bounded spread text while preserving its structured scene.
 4. `apply_scene_patch` — Lift, animate, add, update, remove, or reorder a bounded list of scene elements and interactions.
 5. `set_presentation` — Day/Night and Preview state without corrupting content history.
@@ -191,10 +191,12 @@ The runtime exposes exactly these six tools. The scene patch applies up to 24 op
 - Blob storage and metadata in a browser-wide IndexedDB directory; stable IDs may be referenced from any local book.
 - Alpha images become cutouts; flat photos remain image layers until a derived asset is imported.
 - The Agent can discover reusable local assets, then arrange, light, animate, and attach interactions. A scene patch accepts an `asset:` ID only after the trusted storage adapter proves it exists.
+- Full-spread illustrations, transparent cutouts, and 2–6 frame sequences are generated or selected in the user's current Codex/ChatGPT conversation, then imported explicitly into browser-local storage.
+- The runtime ships no GLB/model payload and requires no external model-generation service or site-owner generation credential.
 
 ### Planned asset expansion
 
-- reviewed GLB/glTF import limits and validation;
+- direct host attachment handoff for generated images and frame sequences;
 - export that serializes the project manifest and referenced assets without leaking browser object URLs.
 
 ### Host-assisted generation
@@ -214,29 +216,33 @@ None may silently fall back to the product owner's model key.
 
 ### Atlas of Living Wonders
 
-The flagship sample is a museum-like pop-up atlas. Each spread raises a world landmark from the center gutter with authored light, camera, facts, hover, and click behavior. The first production spread is the Colosseum; later spreads can cover Petra, Machu Picchu, the Taj Mahal, the Great Wall, Chichén Itzá, Christ the Redeemer, and a curated eighth site clearly labeled as an editorial choice rather than an official canon.
+The flagship sample is an eight-spread museum-like pop-up atlas. Its independent book covers the Colosseum, Great Pyramid, Great Wall, Petra, Chichén Itzá, Machu Picchu, Taj Mahal, and Christ the Redeemer. Each spread has authored light, facts, hover, click, and a layered panoramic illustration inside the physical 3D book.
 
 Example interactions:
 
-- hover lifts the landmark and reveals its construction era;
-- click focuses the camera and opens an exploded architectural section;
+- hover lifts an illustrated detail and reveals its construction era;
+- click focuses the layer and opens a concise architectural fact card;
 - a second click advances a construction timeline;
 - Day/Night changes presentation while facts and project history stay fixed.
 
 ### How the World Works
 
-An interactive science book where each spread unfolds into a dimensional system: volcano, cell, solar system, engine, ocean current, or anatomy. Click toggles exploded view or advances a causal sequence; hover identifies components and relationships.
+An independent six-spread science book where each spread unfolds into an illustrated system: volcano, tectonic plates, water cycle, storm cell, ocean circulation, and solar system. The storm adds a three-frame lightning layer; hover and click open the structured explanation.
 
-### Your Story, Made Dimensional
+### Your Story, Made Alive
 
 A personal-photo sample demonstrates the real user workflow: imported photo assets, cutout/scene composition, unique interactions, and an Agent-authored narrative. It is not a pre-rendered fake generation flow.
+
+### The Apertale Field Guide
+
+The default library puts a four-spread guide first. It explains text-to-book with ImageGen artwork, photo-led books that start in the Agent conversation and use a minimal Image handoff only when host media transfer is unavailable, living illustrated layers, and the distinction between curated samples and work generated in the user's live conversation.
 
 ## 10. Visual and motion direction
 
 - The physical book is the hero and occupies most of the viewport.
 - Day is a luminous paper atelier; Night is a cinematic walnut desk.
 - Use material depth, real contact shadows, page fibers, restrained particles, and camera choreography before post-processing.
-- Ship GLB/glTF 2.0 for reusable authored models. Keep procedural geometry for purposeful diagrams and verified fallbacks.
+- Use full-spread PNG artwork and transparent image layers; reserve Three.js for the physical book, page turn, light, particles, and composition capture.
 - Use standard materials and lighting first. Add shaders only for a measured visual need with fallback, reduced-motion, and context-loss behavior.
 - DOM overlays carry readable controls, facts, keyboard focus, and accessibility semantics.
 - Hover feedback begins within 100 ms; click acknowledgment within one frame; camera transitions remain cancelable.
@@ -244,17 +250,19 @@ A personal-photo sample demonstrates the real user workflow: imported photo asse
 Motion principles:
 
 - A turning leaf remains one continuous, non-self-intersecting surface from gutter to outer edge; it never tears, swaps triangle order, or flashes the wrong face.
+- Every open spread is first composed in an independent full-width scene with its background, lighting, and interactive illustrated subjects. One RenderTexture is UV-mapped across the two physical paper pages, so the composition may use the whole stage without belonging to either page mesh.
+- Pointer hits first resolve against the physical paper, then map page UV into the shared stage camera for precise hover, click, and drag interaction.
+- At turn start, the renderer freezes the fully composed outgoing/destination illustration and layers into dedicated render targets. The deforming leaf and backward base page sample those textures while the next live spread is revealed, preventing blank frames, disappearing layers, and page/content tearing.
 - Page navigation explains direction and settles before accepting the next arrow command; pointer-driven turns may reverse or cancel from their current progress.
-- The book remains the spatial landmark. Shelf and fact surfaces enter above it without remounting or fading the entire world.
+- The book remains the spatial landmark. Library and fact surfaces enter above it without remounting or fading the entire world.
 - Reduced motion removes depth travel and sustained spin while preserving selection, page position, and success/error feedback.
 
 ## 11. Persistence and privacy
 
-- Challenge/demo build: IndexedDB, local-first, no account required.
-- Imported assets remain in the user's browser unless they explicitly export or later connect storage.
-- The project reports whether it is local-only, exported, or cloud-backed.
+- Challenge/demo build: localStorage for project documents and IndexedDB for imported image blobs; local-first and no account required.
+- Imported assets remain in the user's browser. Export and cloud-storage adapters are planned, not implemented.
 - No analytics event contains prompt text, book prose, private photo data, or binary content.
-- Reset/delete targets one explicit project and offers a recoverable export first.
+- The current Reset action applies only to the active curated sample and requires confirmation. General project delete and recoverable export remain planned.
 
 ## 12. Repository and release policy
 
@@ -283,7 +291,7 @@ Motion principles:
 
 ### Visual
 
-- The flagship landmark spread reads as a premium dimensional book, not a low-poly tech demo.
+- The flagship landmark spread reads as a premium panoramic picture book, not a template with an asset placed on one side.
 - Page turn, hover, click, camera, Day/Night, and Preview are visually reviewed at desktop and mobile viewports.
 - All controls are real, readable, and user-friendly; no decorative dead controls remain.
 
@@ -298,7 +306,7 @@ Motion principles:
 
 1. Lock the project schema and declarative interaction engine.
 2. Deliver one polished Colosseum knowledge-diorama end to end.
-3. Keep each Sample Book as an independent project in the persistent shelf.
+3. Keep each Sample Book as an independent project in the persistent library.
 4. Replace legacy Agent tools with the compact project-authoring surface while preserving compatibility.
 5. Build the remaining flagship Sample Books from real assets.
 6. Complete visual, performance, accessibility, WebMCP host, and security acceptance.

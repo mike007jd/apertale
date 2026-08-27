@@ -59,7 +59,7 @@ export function resolveInteraction(element: Pick<BookElement, "interaction" | "m
   };
 }
 
-export type HoverTraits = {
+type HoverTraits = {
   /** Extra world-space rise while hovered. */
   rise: number;
   /** Multiplier applied to the resolved element scale. */
@@ -70,7 +70,7 @@ export type HoverTraits = {
   tilt: number;
 };
 
-export type FocusTraits = {
+type FocusTraits = {
   rise: number;
   scale: number;
   /** Slide toward the spine, in world units, to clear the reveal card. */
@@ -97,7 +97,7 @@ export function hoverTraits(response: HoverResponse): HoverTraits {
 export function focusTraits(response: FocusResponse): FocusTraits {
   switch (response) {
     case "spotlight":
-      return { rise: 0.06, scale: 1.02, shift: 0, spotlight: 3.2, spin: 0 };
+      return { rise: 0, scale: 1.01, shift: 0, spotlight: 3.2, spin: 0 };
     case "rise-and-center":
       return { rise: 0.34, scale: 1.06, shift: 1.15, spotlight: 4.4, spin: 0 };
     case "orbit-inspect":
@@ -107,7 +107,7 @@ export function focusTraits(response: FocusResponse): FocusTraits {
   }
 }
 
-export type MotionTraits = {
+type MotionTraits = {
   x: number;
   y: number;
   scale: number;
@@ -123,8 +123,25 @@ export function motionTraits(motion: MotionSpec, elapsedMs: number): MotionTrait
 
   if (motion.preset === "gentle-float") return { x: 0, y: Math.sin(angle) * 0.12, scale: 1, progress };
   if (motion.preset === "fly-across") return { x: (progress - 0.5) * 1.25, y: Math.sin(angle) * 0.2, scale: 1, progress };
+  if (motion.preset === "water-bob") return { x: Math.sin(angle * 0.5) * 0.012, y: Math.sin(angle) * 0.035, scale: 1, progress };
   if (motion.preset === "soft-pulse") return { x: 0, y: 0, scale: 1 + Math.sin(angle) * 0.06, progress };
   return { x: (Math.cos(angle) - 1) * 0.16, y: Math.sin(angle) * 0.1, scale: 1, progress };
+}
+
+/**
+ * Keep frame animation quiet most of the time, then play one short authored
+ * burst. Frame zero is the resting artwork and is also the reduced-motion
+ * representation.
+ */
+export function frameSequenceIndex(frameCount: number, elapsedMs: number, reducedMotion: boolean) {
+  if (frameCount <= 1 || reducedMotion) return 0;
+  const frameDurationMs = 110;
+  const cycleDurationMs = 4600;
+  const animatedFrameCount = frameCount - 1;
+  const burstStartMs = cycleDurationMs - animatedFrameCount * frameDurationMs;
+  const cycleTime = ((elapsedMs % cycleDurationMs) + cycleDurationMs) % cycleDurationMs;
+  if (cycleTime < burstStartMs) return 0;
+  return Math.min(frameCount - 1, Math.floor((cycleTime - burstStartMs) / frameDurationMs) + 1);
 }
 
 export function hasReveal(spec: InteractionSpec) {
