@@ -26,6 +26,7 @@ import {
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
 import { releaseAssetUrls, resolveAssetUrl, storeLocalImage } from "./assetStore";
+import { MAX_SOURCE_IMAGE_BYTES } from "./imageOptimizer";
 import { recordDiagnostic } from "./diagnostics";
 import {
   FOCUS_LABELS,
@@ -682,13 +683,13 @@ export function App() {
     let imported = 0;
     try {
       for (const file of Array.from(files).slice(0, 6 - workshopAssetCount)) {
-        if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size <= 0 || file.size > 1_500_000) continue;
+        if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size <= 0 || file.size > MAX_SOURCE_IMAGE_BYTES) continue;
         const asset = await storeLocalImage(file);
         imported += 1;
-        recordDiagnostic("workbench:asset-handed-off", { assetId: asset.id, size: asset.size });
+        recordDiagnostic("workbench:asset-handed-off", { assetId: asset.id, originalSize: asset.originalSize ?? asset.size, size: asset.size, optimized: asset.optimized ?? false });
       }
       if (imported > 0) setWorkshopAssetCount((current) => Math.min(6, current + imported));
-      else window.alert("Choose PNG, JPEG, or WebP images smaller than 1.5 MB each.");
+      else window.alert("Choose PNG, JPEG, or WebP images smaller than 12 MB each. Apertale optimizes them locally.");
     } catch {
       window.alert("Apertale could not store those images in this browser.");
     } finally {
@@ -1074,7 +1075,7 @@ export function App() {
                 {copied ? "Copied — paste in your Agent" : "Copy starter prompt"}
               </button>
               <div className="workshop-media-note">
-                <p>Start by attaching photos in your Agent chat. If that host cannot hand them to WebMCP yet, use this fallback once.</p>
+                <p>Start by attaching photos in your Agent chat. If that host cannot hand them to WebMCP yet, use this fallback once; images up to 12 MB are optimized locally.</p>
                 <button type="button" onClick={() => fileInput.current?.click()} disabled={assetImporting || workshopAssetCount >= 6}>
                   {assetImporting ? <SpinnerGap size={14} className="is-spinning" /> : <Plus size={14} />}
                   {assetImporting ? "Importing" : workshopAssetCount > 0 ? `${workshopAssetCount} image${workshopAssetCount === 1 ? "" : "s"} ready` : "Image handoff"}

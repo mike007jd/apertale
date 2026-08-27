@@ -15,7 +15,7 @@ The application provides the medium—Three.js book rendering, assets, safe inte
 - Day and Night presentation modes over one revisioned document.
 - Shared human/WebMCP command engine with revision checks, idempotency, provenance, and exact undo tokens.
 - WebMCP book creation, dedicated cover assignment, spread composition, structured knowledge reveals, and atomic bounded scene patches, plus focused inspection of selected reveals and local assets.
-- Native local PNG/JPEG/WebP import backed by IndexedDB Blob storage; imported assets survive reload, remain reusable across books, and are accepted by the Agent only after a real local-store lookup.
+- Native local PNG/JPEG/WebP import backed by IndexedDB Blob storage; source files up to 12 MB are resized and compressed in the browser to at most 1.5 MB, survive reload, remain reusable across books, and are accepted by the Agent only after a real local-store lookup.
 - Declarative hover and click interactions validated against closed presets.
 - Twenty-eight spreads across five independent books, including an eight-spread landmark atlas and a six-spread science book.
 - Fourteen dedicated ImageGen panorama spreads for the landmark atlas and science book, plus transparent illustrated layers and a three-frame lightning sequence.
@@ -55,10 +55,11 @@ npm run typecheck
 npm test
 npm run test:sites
 npm run audit:cutouts
+npm run optimize:assets
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
-`npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-padding gate; see [`app/qa/RELEASE_GATES_2026-08-27.md`](app/qa/RELEASE_GATES_2026-08-27.md) rather than treating the code/build passes as release completion.
+`npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 66 legacy v2 layers require genuine regeneration because visual review found clipped subjects, detached fragments, or contaminated edges. See [`app/qa/RELEASE_GATES_2026-08-27.md`](app/qa/RELEASE_GATES_2026-08-27.md) rather than treating the code/build passes as release completion.
 
 ## Repository map
 
@@ -79,7 +80,7 @@ The normal creation loop is bring-your-own-Agent:
 
 1. Open Apertale in the supporting built-in browser and choose a sample or the Field Guide from the library.
 2. Use **Create Your Own** to open the blank-book workshop and hand the brief to the real Agent conversation beside the browser.
-3. Import source assets into the live page when needed.
+3. Import source assets into the live page when needed. Apertale optimizes supported images locally before storing them; it does not upload them or spend a site-owner model quota.
 4. Ask Codex/ChatGPT to inspect and build the book.
 5. The Agent invokes the page's WebMCP tools using the user's own account/session.
 6. Continue editing together in one visible, undoable project.

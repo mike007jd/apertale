@@ -347,7 +347,7 @@ export class BookEngine {
           }
         : null,
       theme: this.sessionState.sceneThemeId,
-      capabilities: ["create-book", "set-book-cover", "compose-spread", "full-spread-illustration-stage", "clean-plate-background", "layered-image-interaction", "presentation", "undo"],
+      capabilities: ["create-book", "set-book-cover", "compose-spread", "full-spread-illustration-stage", "clean-plate-background", "layered-image-interaction", "browser-image-optimization", "presentation", "undo"],
     };
   }
 

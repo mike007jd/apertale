@@ -23,7 +23,7 @@ Use `manage_book`:
 
 Draft all spread titles, kickers, and body copy before `create`. A normal first pass is 4–8 spreads. The maximum is 12.
 
-Image generation does not happen inside this tool. Generate the cover in the user's current Agent conversation. Prefer a host-supported media transfer; when the host cannot transfer the image through WebMCP, prepare PNG/JPEG/WebP no larger than 1.5 MB and ask the user to use **Image handoff** once. Then call `get_project_context(detail: "assets")` and set the cover.
+Image generation does not happen inside this tool. Generate the cover in the user's current Agent conversation. Prefer a host-supported media transfer; when the host cannot transfer the image through WebMCP, provide a PNG/JPEG/WebP source no larger than 12 MB and ask the user to use **Image handoff** once. Apertale resizes and compresses the source locally to at most 1.5 MB before storage. Then call `get_project_context(detail: "assets")` and set the cover using the returned optimized asset id.
 
 ## 3. Refine copy
 

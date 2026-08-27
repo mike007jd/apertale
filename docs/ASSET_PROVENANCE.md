@@ -18,7 +18,7 @@ Files under `app/public/assets/generated/` were generated specifically for this 
 
 Every newly accepted foreground asset is generated as one semantic subject in one ImageGen request. Contact sheets, sprite sheets, multi-object grids, and crops taken from them are not accepted as final runtime assets.
 
-The release keeps PNG as its delivery format because the target Codex in-app browser rejected otherwise valid WebP encodes during a real runtime probe. An earlier palette-optimised checkpoint reached roughly 21 MB, but later clean plates and independently generated foreground layers brought the current host-portable bundle to about 165 MiB. Asset-size reduction is therefore still open; runtime references stay local and no remote image host is involved.
+The release keeps PNG as its checked-in delivery format because the target Codex in-app browser rejected otherwise valid WebP encodes during a real runtime probe. The repository optimizer strips metadata and applies a compatibility-safe 256-colour PNG palette without changing dimensions or alpha geometry. It reduced runtime `public/` asset bytes from 143.8 MiB to 53.4 MiB and the host-portable build payload to 54.3 MiB. Runtime references stay local and no remote image host is involved.
 
 The five active portrait covers were generated independently for this project with OpenAI ImageGen, then resized to 768 × 1152 PNG for the library:
 
@@ -45,4 +45,4 @@ The Day and Night reference images under `docs/assets/` were supplied by the use
 
 ## User imports
 
-User-imported PNG, JPEG, and WebP files remain in that user's browser IndexedDB. Apertale does not upload or relicense them, and they are not part of the repository or production bundle.
+User-imported PNG, JPEG, and WebP source files up to 12 MB are decoded and optimized in the browser, then stored at no more than 1.5 MB in that user's IndexedDB. Transparent sources preserve PNG alpha; opaque sources may be stored as JPEG. Apertale does not upload or relicense them, and they are not part of the repository or production bundle.

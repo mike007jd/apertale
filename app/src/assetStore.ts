@@ -1,3 +1,5 @@
+import { optimizeImportedImage } from "./imageOptimizer";
+
 const DATABASE_NAME = "apertale-assets";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "assets";
@@ -8,6 +10,10 @@ type StoredAssetMetadata = {
   name: string;
   type: string;
   size: number;
+  originalSize?: number;
+  width?: number;
+  height?: number;
+  optimized?: boolean;
   createdAt: string;
 };
 
@@ -61,16 +67,19 @@ async function withStore<T>(mode: IDBTransactionMode, operation: (store: IDBObje
 }
 
 export async function storeLocalImage(file: File): Promise<StoredAssetMetadata> {
-  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) throw new TypeError("Only PNG, JPEG, and WebP images are supported.");
-  if (file.size <= 0 || file.size > 1_500_000) throw new RangeError("Images must be between 1 byte and 1.5 MB.");
+  const optimizedImage = await optimizeImportedImage(file);
   const metadata: StoredAssetMetadata = {
     id: `${ASSET_PREFIX}${crypto.randomUUID()}`,
-    name: file.name.slice(0, 128) || "Imported image",
-    type: file.type,
-    size: file.size,
+    name: optimizedImage.name.slice(0, 128) || "Imported image",
+    type: optimizedImage.blob.type,
+    size: optimizedImage.blob.size,
+    originalSize: optimizedImage.originalSize,
+    width: optimizedImage.width,
+    height: optimizedImage.height,
+    optimized: optimizedImage.optimized,
     createdAt: new Date().toISOString(),
   };
-  await withStore("readwrite", (store) => store.put({ ...metadata, blob: file } satisfies StoredAsset));
+  await withStore("readwrite", (store) => store.put({ ...metadata, blob: optimizedImage.blob } satisfies StoredAsset));
   return metadata;
 }
 

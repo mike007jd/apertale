@@ -126,7 +126,8 @@ describe("BookEngine document contract", () => {
     expect(context.capabilities).toContain("set-book-cover");
     expect(context.capabilities).toContain("full-spread-illustration-stage");
     expect(context.capabilities).toContain("layered-image-interaction");
-    expect(JSON.stringify(context).length).toBeLessThanOrEqual(2100);
+    expect(context.capabilities).toContain("browser-image-optimization");
+    expect(JSON.stringify(context).length).toBeLessThanOrEqual(2150);
   });
 
   it("rejects stale revisions without mutating state", () => {

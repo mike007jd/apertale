@@ -3,15 +3,15 @@
 ## Current private tree
 
 - `npm run typecheck` — passed.
-- `npm test` — 4 files, 39 tests passed.
-- `npm run build` — passed; the host-portable Sites bundle is currently about 165 MiB with no GLB/glTF payload. It contains five dedicated generated covers, fourteen knowledge panoramas, clean plates, and transparent foreground layers. Asset-size reduction remains an open release task.
+- `npm test` — 5 files, 40 tests passed.
+- `npm run build` — passed; the host-portable Sites bundle contains 54.3 MiB of file payload with no GLB/glTF payload. Runtime `public/` asset bytes are 53.4 MiB after compatibility-safe palette PNG optimization, down from 143.8 MiB.
 - `npm run test:sites` — rebuilds first, then passes 7 tests including the deployment HTTP-contract verifier and artwork-uniqueness check.
-- `npm run audit:cutouts` — **blocked**: 16 assets pass and 66 still-referenced v2 cutouts fail the required transparent edge padding. This is a release asset defect, not a code-gate failure.
+- `npm run audit:cutouts` — **blocked**: 16 assets pass and 66 still-referenced v2 cutouts fail. Contact-sheet review confirms that padding is not the only issue: the legacy set includes clipped subjects, detached fragments, and some contaminated edges. These need regenerated assets, not a mechanical border that merely satisfies the current alpha/padding check.
 - `npm audit --omit=dev` — 0 vulnerabilities.
 - `gitleaks detect --no-git --source . --redact --exit-code 1` — passed, no leaks.
 - `git diff --check` and the active-document local-link scan — passed.
 
-Vite keeps the physical book renderer behind a lazy chunk. The latest hygiene build emits approximately 48 kB of CSS, 24 kB for the lazy physical-book module, 380 kB for the app module, and 520 kB for the Three.js vendor chunk. The Three.js warning and total host-portable bundle size remain open release-size work.
+Vite keeps the physical book renderer behind a lazy chunk. The latest hygiene build emits 48.05 kB of CSS, 23.90 kB for the lazy physical-book module, 382.26 kB for the app module, and 520.13 kB for the Three.js vendor chunk (130.71 kB gzip). The 500 kB notice is Rollup's minified-chunk warning, not a code-quality verdict; Three.js is already isolated and loaded only with the physical book.
 
 ## Earlier isolated source replay
 
@@ -28,7 +28,7 @@ Before the current uncommitted hygiene pass, a fresh temporary export excluded `
 - Eight landmark and six science spreads are dedicated full-spread OpenAI ImageGen illustrations. Five books use independent portrait covers rather than crops from their interiors.
 - The storm spread includes three transparent ImageGen lightning frames. Runtime diagnostics observed frame indices `2` and `1` after the resting frame, proving all three frames participate in the loop.
 - The runtime contains no content model loader, model identifier, GLB/glTF file, external model-generation provider, or site-owner generation key. Three.js remains only for the physical book, lighting, raycasting, particles, and page deformation.
-- Compatibility-tested PNG remains the delivery format because the target in-app browser rejected the attempted WebP package. The later clean plates and independently generated foreground layers increased the current bundle to about 165 MiB; this document does not treat the earlier 21 MB checkpoint as current release truth.
+- Compatibility-tested PNG remains the delivery format because the target in-app browser rejected the attempted WebP package. Metadata stripping and 256-colour palette optimization reduced the complete host-portable build payload to 54.3 MiB without changing image dimensions or alpha geometry.
 
 ## In-app browser acceptance
 
@@ -45,4 +45,4 @@ Before the current uncommitted hygiene pass, a fresh temporary export excluded `
 
 ## Deliberately external
 
-The repository has no remote and no new deployment was created. A judge-facing URL, public repository, recorded end-to-end Site Tool mutation/undo run, demo video, and Devpost submission remain external shared-state actions requiring the user's approval.
+The configured GitHub destination is private and no new deployment was created. A judge-facing URL, public repository, recorded end-to-end Site Tool mutation/undo run, demo video, and Devpost submission remain external shared-state actions requiring the user's approval.

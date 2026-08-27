@@ -15,7 +15,7 @@ WebMCP is agent-neutral, not universally callable. Any Agent whose browser or ho
 - Declarative hover, focus, reveal, and motion behavior drawn from closed reviewed presets.
 - Twenty-eight sample spreads across the Guide, eight-spread landmark atlas, six-spread science book, personal story, and lantern story.
 - Fourteen purpose-generated panorama spreads, transparent cut-paper layers, and a true three-frame lightning sequence; no runtime model payload or external generation credential.
-- IndexedDB Blob storage for user-imported PNG/JPEG/WebP assets, with a cross-book local asset directory, stable IDs, and reload-safe object URL resolution.
+- IndexedDB Blob storage for user-imported PNG/JPEG/WebP assets, with browser-local resize/compression from source files up to 12 MB to stored assets no larger than 1.5 MB, a cross-book local asset directory, stable IDs, and reload-safe object URL resolution.
 - A persistent multi-book library; Sample Books are independent projects rather than unrelated spreads in one document. Curated illustrations are labeled as samples.
 - Shared human/WebMCP command engine with revision checks, idempotency, visible provenance, and exact undo tokens.
 - Responsive desktop/mobile layouts, reduced-motion behavior, and 2D fallback.
@@ -46,10 +46,11 @@ npm run typecheck
 npm test
 npm run test:sites
 npm run audit:cutouts
+npm run optimize:assets
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
-`npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-padding gate; the code, unit, build, and Sites checks remain independently green.
+`npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 66 legacy v2 layers need regeneration rather than padding-only repair. The code, unit, build, and Sites checks remain independently green.
 
 The production build is emitted as a host-portable bundle:
 
@@ -61,7 +62,8 @@ The production build is emitted as a host-portable bundle:
 
 - `src/ThreeBook.tsx` — Three.js physical-book renderer, page geometry, illustrated layer raycasting, theme lighting, frame animation, and dual-surface turn sampling.
 - `src/interaction.ts` — closed declarative interaction vocabulary and renderer traits.
-- `src/assetStore.ts` — IndexedDB Blob persistence, metadata, and safe object URL resolution.
+- `src/imageOptimizer.ts` — browser-local resize/compression with alpha-aware PNG/JPEG output and a 1.5 MB storage ceiling.
+- `src/assetStore.ts` — IndexedDB Blob persistence, optimization metadata, and safe object URL resolution.
 - `src/bookEngine.ts` — authoritative document/session state, persistence, revision checks, idempotency, and exact undo.
 - `src/webmcp.ts` — WebMCP registrations backed by the shared command engine.
 - `src/App.tsx` — accessible React editor, knowledge cards, themes, selection tools, outline, and responsive controls.

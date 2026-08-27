@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test:sites": "npm run build && npm run test:sites:built",
     "test:sites:built": "node --test tests/*.test.mjs",
+    "optimize:assets": "node scripts/optimize-runtime-images.mjs --write",
     "audit:cutouts": "node scripts/audit-cutout-alpha.mjs",
     "verify:release": "npm run typecheck && npm test && npm run test:sites && npm run audit:cutouts",
     "verify:deployment": "node scripts/verify-deployment.mjs"

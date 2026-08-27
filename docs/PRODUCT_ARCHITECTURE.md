@@ -187,7 +187,8 @@ The runtime exposes exactly these six tools. The scene patch applies up to 24 op
 
 ### Implemented local pipeline
 
-- Native import for PNG, JPEG, and WebP up to 1.5 MB.
+- Native import for PNG, JPEG, and WebP source files up to 12 MB.
+- Browser-local, alpha-aware resize/compression stores each import at no more than 1.5 MB and records original size, stored size, dimensions, and optimization status. Transparent sources remain PNG; opaque sources may become JPEG.
 - Blob storage and metadata in a browser-wide IndexedDB directory; stable IDs may be referenced from any local book.
 - Alpha images become cutouts; flat photos remain image layers until a derived asset is imported.
 - The Agent can discover reusable local assets, then arrange, light, animate, and attach interactions. A scene patch accepts an `asset:` ID only after the trusted storage adapter proves it exists.
