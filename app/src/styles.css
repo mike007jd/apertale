@@ -1494,7 +1494,7 @@ select:focus-visible {
 .is-preview .topbar { grid-template-columns: 1fr 1fr; }
 .is-preview .wordmark { grid-column: 1; justify-self: start; }
 .is-preview .topbar-actions { grid-column: 2; }
-.is-preview .theme-switch { display: none; }
+.is-preview:not(.is-shared-reader) .theme-switch { display: none; }
 
 .sr-only {
   position: absolute;
