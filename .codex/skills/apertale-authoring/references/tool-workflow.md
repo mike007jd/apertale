@@ -7,6 +7,7 @@ Apertale exposes six tools. Keep the tool set compact and compose complex work t
 Call `get_project_context`:
 
 - default/compact for the active book, outline, spread, elements, theme, revision, and capabilities;
+- `detail: "authoring-guide"` before any create flow; obey the returned two-phase quality contract even when this skill is not installed;
 - `detail: "assets"` after direct host media transfer or the workshop's explicit **Image handoff** fallback;
 - `detail: "selected-reveal"` only when revising the selected element's knowledge card.
 

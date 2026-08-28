@@ -188,13 +188,24 @@ select:focus-visible {
   filter: saturate(.82) brightness(.62);
 }
 
+/* The library is a fixed frame, not one long clipped canvas: topbar, hero,
+   actions and footer hold their place while only the shelf region scrolls. */
 .library-sheet {
   position: absolute;
   inset: 0;
-  padding: clamp(18px, 2.4vw, 38px) clamp(20px, 4vw, 64px) clamp(18px, 2.4vw, 34px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 1.8vh, 22px);
+  overflow: hidden;
+  padding: clamp(18px, 2.4vw, 38px) clamp(20px, 4vw, 64px) clamp(14px, 1.8vw, 26px);
   pointer-events: none;
   animation: library-sheet-in 420ms cubic-bezier(.2, .8, .2, 1) both;
 }
+
+.library-topbar,
+.library-intro,
+.library-tabs,
+.demo-disclosure { flex: 0 0 auto; }
 
 .library-topbar {
   display: flex;
@@ -241,16 +252,13 @@ select:focus-visible {
 .library-close:disabled { opacity: .48; cursor: wait; }
 
 .library-intro {
-  position: absolute;
-  top: clamp(82px, 10vh, 112px);
-  left: 50%;
-  width: min(690px, calc(100% - 40px));
+  width: min(690px, 100%);
+  margin: clamp(4px, 2.2vh, 28px) auto 0;
   text-align: center;
-  transform: translateX(-50%);
   pointer-events: auto;
 }
 
-.library-intro > p:not(.library-scroll-cue) {
+.library-intro > p {
   margin: 0 0 9px;
   color: var(--accent);
   font-size: 11px;
@@ -311,17 +319,87 @@ select:focus-visible {
   backdrop-filter: blur(16px);
 }
 
+/* Compact segmented control. Personal books lead; the counts stay quiet so the
+   control reads as navigation rather than a statistics strip. */
+.library-tabs {
+  display: flex;
+  gap: 2px;
+  align-self: center;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 16px 42px var(--shadow);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+
+.library-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 35px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 15px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--motion-feedback) var(--motion-ease-out),
+    background-color var(--motion-feedback) var(--motion-ease-out),
+    box-shadow var(--motion-feedback) var(--motion-ease-out),
+    transform 90ms ease-out;
+}
+
+.library-tabs button:active:not(:disabled) { transform: scale(.95); }
+.library-tabs button:disabled { cursor: wait; }
+
+.library-tabs button.is-active {
+  color: var(--ink);
+  background: var(--surface-strong);
+  box-shadow: 0 3px 10px var(--shadow);
+}
+
+.library-tab-count {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  opacity: .55;
+}
+
+/* Only this region scrolls, so a clipped last row is always reachable rather
+   than sitting below the fold of a page that cannot move. */
+.library-shelf {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  pointer-events: auto;
+}
+
+.library-shelf:focus-visible {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: -3px;
+  border-radius: 18px;
+}
+
 .library-gallery {
-  position: absolute;
-  top: clamp(390px, 44vh, 420px);
-  right: clamp(28px, 5vw, 82px);
-  bottom: 54px;
-  left: clamp(28px, 5vw, 82px);
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(0, var(--library-track, 208px)));
+  justify-content: center;
   align-items: start;
-  gap: clamp(16px, 2.6vw, 42px);
-  pointer-events: none;
+  gap: clamp(18px, 2.6vw, 42px);
+  width: min(100%, 1240px);
+  margin-inline: auto;
+  padding: clamp(18px, 2vh, 26px) 8px clamp(16px, 2.2vh, 28px);
   perspective: 1400px;
 }
 
@@ -474,10 +552,6 @@ select:focus-visible {
 }
 
 .demo-disclosure {
-  position: absolute;
-  right: clamp(22px, 4vw, 64px);
-  bottom: 16px;
-  left: clamp(22px, 4vw, 64px);
   margin: 0;
   color: var(--muted);
   font-size: 10px;
@@ -1631,8 +1705,9 @@ select:focus-visible {
   .element-panel.clears-left { top: 112px; }
   .context-menu button { padding-inline: 9px; font-size: 12px; }
   .context-menu button:first-child { display: none; }
-  .library-intro { width: calc(100% - 40px); }
-  .library-gallery { top: 390px; right: 24px; left: 24px; gap: 16px; }
+  .library-sheet { gap: clamp(9px, 1.5vh, 16px); }
+  .library-intro { margin-top: clamp(2px, 1.4vh, 16px); }
+  .library-gallery { --library-track: 172px; gap: clamp(16px, 3vw, 28px); }
   .library-cover-frame { width: min(100%, 146px); }
 }
 
@@ -1653,31 +1728,16 @@ select:focus-visible {
   .theme-switch { display: flex; padding: 3px; }
   .theme-switch button { width: 34px; min-height: 34px; justify-content: center; padding: 0; }
   .preview-button { width: 40px; min-height: 40px; }
-  .library-intro { top: 78px; width: calc(100% - 36px); }
-  .library-intro h1 { font-size: clamp(34px, 11vw, 50px); }
+  .library-intro { width: 100%; }
+  .library-intro h1 { font-size: clamp(30px, 9.4vw, 44px); }
   .library-intro > span { max-width: 42ch; margin: 12px auto 0; font-size: 12px; }
   .library-actions { justify-content: center; margin-top: 15px; }
-  .library-gallery {
-    top: 310px;
-    right: max(14px, env(safe-area-inset-right));
-    bottom: max(42px, calc(env(safe-area-inset-bottom) + 34px));
-    left: max(14px, env(safe-area-inset-left));
-    grid-auto-columns: minmax(150px, 43vw);
-    grid-template-columns: none;
-    grid-auto-flow: column;
-    align-items: center;
-    overflow-x: auto;
-    padding: 22px 12px 18px;
-    scroll-padding-inline: 12px;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-  .library-gallery::-webkit-scrollbar,
+  .library-tabs { width: 100%; }
+  .library-tabs button { flex: 1 1 0; justify-content: center; min-height: 40px; padding: 0 10px; }
+  .library-gallery { --library-track: 148px; gap: 20px 16px; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
   .element-rail::-webkit-scrollbar { display: none; }
-  .library-card { scroll-snap-align: center; }
-  .library-cover-frame { width: 132px; }
-  .demo-disclosure { right: 16px; bottom: max(11px, env(safe-area-inset-bottom)); left: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .library-cover-frame { width: min(100%, 158px); }
+  .demo-disclosure { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .page-arrow { width: 40px; height: 40px; }
   .outline-button { display: none; }
   .bottom-controls {
@@ -1982,34 +2042,26 @@ select:focus-visible {
   .wordmark { font-size: 22px; }
   .library-sheet { padding: 10px max(14px, env(safe-area-inset-right)) 8px max(14px, env(safe-area-inset-left)); }
   .library-wordmark { font-size: 22px; }
-  .library-intro { top: 54px; width: min(600px, calc(100% - 260px)); }
-  .library-intro > p:not(.library-scroll-cue),
+  .library-sheet { gap: 7px; }
+  .library-intro { width: min(640px, 100%); margin-top: 0; }
+  .library-intro > p,
   .library-intro > span { display: none; }
-  .library-intro h1 { font-size: clamp(29px, 4.6vw, 38px); line-height: .9; }
+  .library-intro h1 { font-size: clamp(25px, 4vw, 32px); line-height: .92; }
   .library-actions { margin-top: 8px; }
   .create-codex-button,
-  .guide-book-button { min-height: 36px; padding-inline: 14px; }
+  .guide-book-button { min-height: 36px; padding-inline: 14px; font-size: 13px; }
+  .library-tabs { padding: 3px; }
+  .library-tabs button { min-height: 30px; padding: 0 12px; font-size: 12px; }
   .library-gallery {
-    top: 196px;
-    right: max(18px, env(safe-area-inset-right));
-    bottom: 14px;
-    left: max(18px, env(safe-area-inset-left));
-    grid-auto-columns: 108px;
-    grid-template-columns: none;
-    grid-auto-flow: column;
-    align-items: start;
-    gap: 24px;
-    overflow-x: auto;
-    padding: 8px 6px 12px;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
+    --library-track: 106px;
+    gap: 16px 14px;
+    padding: 16px 6px 12px;
   }
-  .library-gallery::-webkit-scrollbar { display: none; }
-  .library-card { gap: 5px; scroll-snap-align: center; }
-  .library-cover-frame { width: 80px; }
+  .library-card { gap: 6px; }
+  .library-cover-frame { width: min(100%, 98px); }
   .library-card-copy small { font-size: 7.5px; }
   .library-card-copy strong { min-height: 22px; font-size: 11.5px; }
-  .demo-disclosure { bottom: 3px; font-size: 8px; }
+  .demo-disclosure { font-size: 8px; }
 
   .bottom-controls { bottom: max(8px, env(safe-area-inset-bottom)); }
   .element-rail {
@@ -2289,8 +2341,7 @@ select:focus-visible {
   .publication-disclosures { grid-template-columns: 1fr; gap: 7px; }
 }
 
-/* Hidden on desktop: both surfaces below belong to the mobile portrait score. */
-.library-scroll-cue { display: none; }
+/* Hidden on desktop: the surface below belongs to the mobile portrait score. */
 .reader-sheet { display: none; }
 
 /* ---------------------------------------------------------------------------
@@ -2413,8 +2464,7 @@ select:focus-visible {
 
   /* First-fold density: the headline yields room, and the covers become real
      browsable objects instead of a thin strip floating in dead space. */
-  .library-intro { top: 68px; }
-  .library-intro > p:not(.library-scroll-cue) { font-size: 10px; }
+  .library-intro > p { font-size: 10px; }
   .library-intro h1 { font-size: clamp(28px, 8.6vw, 34px); }
   .library-intro > span { max-width: 40ch; margin: 9px auto 0; font-size: 11.5px; line-height: 1.42; }
 
@@ -2428,46 +2478,12 @@ select:focus-visible {
   .create-codex-button,
   .guide-book-button { justify-content: center; min-height: 44px; }
 
-  .library-gallery {
-    top: 384px;
-    align-items: center;
-    grid-auto-columns: minmax(180px, 56vw);
-    padding: 10px 12px 12px;
-  }
+  .library-gallery { --library-track: 156px; gap: 22px 14px; }
+  .library-cover-frame { width: 100%; }
+  .library-card-copy strong { font-size: 15px; }
 
-  .library-cover-frame { width: min(100%, 206px); }
-  .library-card-copy strong { font-size: 17px; }
-
-  /* The cue rides in the intro's own flow so it can never collide with the two
-     action buttons above it, and the gallery starts below the gap it reserves. */
-  .library-scroll-cue {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 6px;
-    margin: 16px 0 0;
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-  }
 }
 
-@media (max-height: 520px) and (orientation: landscape) {
-  .library-scroll-cue {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 6px;
-    margin: 8px 0 0;
-    color: var(--muted);
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-  }
-}
 
 /* The shared reader's read-only badge is a span, not the icon button the editor
    collapses at narrow widths, so it must keep room for its label. */

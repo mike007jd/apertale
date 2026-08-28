@@ -179,7 +179,7 @@ Keep tools semantic and small enough for an Agent to select reliably. The target
 5. `set_presentation` — Day/Night and Preview state without corrupting content history.
 6. `undo_project_change` — undo an exact returned token while preserving non-overlapping later edits.
 
-`get_project_context` is compact by default. `detail: "selected-reveal"` returns the selected element's complete structured knowledge card; `detail: "assets"` lists up to 24 reusable local imports from the browser-wide IndexedDB asset directory. Fine-grained commands remain internal engine adapters for the human UI and do not register as Agent-discoverable tools.
+`get_project_context` is compact by default. `detail: "selected-reveal"` returns the selected element's complete structured knowledge card; `detail: "assets"` lists up to 24 reusable local imports from the browser-wide IndexedDB asset directory; `detail: "authoring-guide"` returns the site-native two-phase create-quality contract so a Site Tools conversation can author without an installed skill. The WebMCP registration session records that preflight and rejects `manage_book(action: "create")` until it has succeeded. Fine-grained commands remain internal engine adapters for the human UI and do not register as Agent-discoverable tools.
 
 Every mutation accepts `requestId` and `expectedRevision`, commits atomically, returns a compact summary plus `undoToken`, and preserves idempotency.
 

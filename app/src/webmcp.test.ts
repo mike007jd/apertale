@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AUTHORING_GUIDE_DETAIL, PROJECT_CONTEXT_DETAILS, SITE_TOOL_NAMES, buildAuthoringGuide } from "./authoringContract";
 import { bookEngine, humanEdit } from "./bookEngine";
 import { registerWebMcpTools } from "./webmcp";
 
@@ -24,14 +25,7 @@ describe("WebMCP registration", () => {
     const cleanup = registerWebMcpTools((available) => statuses.push(available));
     await vi.waitFor(() => expect(statuses).toEqual([true]));
 
-    expect(tools.map((tool) => tool.name)).toEqual([
-      "get_project_context",
-      "manage_book",
-      "compose_spread",
-      "apply_scene_patch",
-      "set_presentation",
-      "undo_project_change",
-    ]);
+    expect(tools.map((tool) => tool.name)).toEqual([...SITE_TOOL_NAMES]);
     for (const registeredTool of tools) {
       expect(registeredTool.name.length).toBeLessThanOrEqual(30);
       expect(registeredTool.description.length).toBeLessThanOrEqual(500);
@@ -51,8 +45,14 @@ describe("WebMCP registration", () => {
     expect(registrationSignals).toHaveLength(6);
     const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
     const manageBookSchema = tool("manage_book").inputSchema as { required?: string[] };
+    const projectContextSchema = tool("get_project_context").inputSchema as {
+      properties?: { detail?: { enum?: string[] } };
+    };
+    expect(projectContextSchema.properties?.detail?.enum).toEqual([...PROJECT_CONTEXT_DETAILS]);
     expect(JSON.stringify(manageBookSchema)).toContain("set-cover");
     expect(manageBookSchema.required).toContain("expectedRevision");
+    expect(tool("get_project_context").description).toContain("authoring-guide");
+    expect(tool("manage_book").description).toContain("authoring-guide");
     expect(tool("manage_book").description).toContain("generated portrait cover");
     expect(tool("manage_book").description).toContain("original full-spread art");
     expect(tool("manage_book").description).toContain("right-page art");
@@ -96,6 +96,24 @@ describe("WebMCP registration", () => {
       signal: new AbortController().signal,
     });
     expect(JSON.parse(String(assetDetailResult))).toMatchObject({ assets: [] });
+
+    await expect(tool("manage_book").execute({
+      requestId: "create-before-guide",
+      expectedRevision: 1,
+      action: "create",
+      title: "Too Soon",
+      spreads: [{ title: "Unplanned", body: "This mutation must not run." }],
+    }, { signal: new AbortController().signal })).rejects.toThrow(
+      "read get_project_context with detail authoring-guide before creating a book",
+    );
+    expect(bookEngine.getSnapshot().document.revision).toBe(1);
+
+    const authoringGuideResult = await tool("get_project_context").execute({ detail: AUTHORING_GUIDE_DETAIL }, {
+      signal: new AbortController().signal,
+    });
+    expect(JSON.parse(String(authoringGuideResult))).toMatchObject({
+      authoringGuide: { id: "apertale-authoring-guide", contract: "two-phase" },
+    });
 
     const canceled = new AbortController();
     canceled.abort();
@@ -254,6 +272,54 @@ describe("WebMCP registration", () => {
 
     cleanup();
     expect(registrationSignals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it("returns the authoring-guide quality contract, rejects invalid detail, and keeps compact context unchanged", async () => {
+    bookEngine.openBook("apertale-your-story");
+    bookEngine.reset();
+    const tools: WebMCP.ModelContextTool[] = [];
+    const modelContext = {
+      registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => {
+        tools.push(tool);
+      }),
+    };
+    vi.stubGlobal("document", { modelContext });
+    const statuses: boolean[] = [];
+    const cleanup = registerWebMcpTools((available) => statuses.push(available));
+    await vi.waitFor(() => expect(statuses).toEqual([true]));
+    expect(tools).toHaveLength(6);
+
+    const getProjectContext = tools.find((candidate) => candidate.name === "get_project_context")!;
+    const signal = { signal: new AbortController().signal };
+
+    const compactResult = JSON.parse(String(await getProjectContext.execute({}, signal)));
+    expect(compactResult.authoringGuide).toBeUndefined();
+    expect(compactResult.book).toMatchObject({ id: "apertale-your-story", revision: 1 });
+
+    const guideResult = JSON.parse(String(await getProjectContext.execute({ detail: AUTHORING_GUIDE_DETAIL }, signal)));
+    const expectedGuide = buildAuthoringGuide();
+    expect(guideResult.book).toMatchObject({ id: "apertale-your-story", revision: 1 });
+    expect(guideResult.authoringGuide).toEqual(expectedGuide);
+    expect(guideResult.authoringGuide.contract).toBe("two-phase");
+    expect(guideResult.authoringGuide.tools).toEqual([...SITE_TOOL_NAMES]);
+    expect(guideResult.authoringGuide.hardGates.map((gate: { id: string }) => gate.id)).toEqual(
+      expectedGuide.hardGates.map((gate) => gate.id),
+    );
+    expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "photo-truth").rule).toMatch(
+      /raw uploaded photo/,
+    );
+    expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "imagegen-before-create").rule)
+      .toMatch(/before manage_book create/);
+    expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "handoff-before-refer").rule)
+      .toMatch(/Hand off each generated asset/);
+    expect(guideResult.authoringGuide.phases[0].mutationAllowed).toBe(false);
+    expect(guideResult.authoringGuide.phases[1].sequence).toEqual(["handoff", "create", "set-cover", "patch", "verify"]);
+
+    await expect(getProjectContext.execute({ detail: "skill" }, signal)).rejects.toThrow("detail is not supported.");
+    await expect(getProjectContext.execute({ detail: "quality" }, signal)).rejects.toThrow("detail is not supported.");
+    await expect(getProjectContext.execute({ detail: "authoring" }, signal)).rejects.toThrow("detail is not supported.");
+
+    cleanup();
   });
 
   it("fails closed and unregisters the whole tool set when one registration is rejected", async () => {

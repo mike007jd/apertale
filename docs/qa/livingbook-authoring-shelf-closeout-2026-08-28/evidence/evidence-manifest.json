@@ -1,0 +1,22 @@
+{
+  "date": "2026-08-28",
+  "target": "local LivingBook implementation in the Codex in-app browser",
+  "files": [
+    {
+      "file": "01-first-visit-explore-1280x720.png",
+      "oracle": "fresh origin has no section tabs and immediately shows the five curated books without page overflow"
+    },
+    {
+      "file": "02-your-books-390x844.png",
+      "oracle": "returning creator defaults to Your books and sees The Starlight Stitch as the primary shelf content"
+    },
+    {
+      "file": "03-your-books-760x432-scrolled.png",
+      "oracle": "short landscape keeps the chrome and actions fixed while the bounded shelf scroll reaches the complete personal card"
+    },
+    {
+      "file": "04-reader-390x844-spread-4.png",
+      "oracle": "mobile portrait reader preserves the full artwork, interaction rail, story panel, and reachable spread navigation"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# LivingBook authoring and shelf closeout — bug ledger
+
+Date: 2026-08-28
+
+| ID | Severity | Finding | Reproduction | Resolution | Verification |
+| --- | --- | --- | --- | --- | --- |
+| CL-01 | P1 | Site Tools descriptions asked the host to read `authoring-guide`, but `manage_book create` did not enforce that preflight. | Register tools and invoke create before reading the guide. | Added registration-session fail-closed gate; guide state is recorded only after a successful guide response. | Focused WebMCP test rejects preflight bypass without changing revision, then proves create succeeds after the guide is read. |
+| CL-02 | P1 | Personal books were appended below curated samples, making the creator's work look secondary. | Load a browser with `The Starlight Stitch` plus the five samples. | Added accessible `Your books` / `Explore` pill tabs and defaulted returning creators to the personal section. | Live DOM and evidence 02: selected `Your books 1`, one personal card; Explore contains exactly five sample cards. |
+| CL-03 | P1 | The old absolute shelf clipped additional rows in short or constrained browser viewports. | Open the library at 760×432 with a personal book. | Converted the library to a flex frame and made only `.library-shelf` vertically scrollable. | Evidence 03: document overflow 0; bounded shelf scroll reaches the complete card and title. |
+| CL-04 | P1 | Creation-brief and Site Tools quality rules could drift because each owned separate strings and counts. | Compare photo treatment, art counts, interaction vocabulary, and completion gates across the two flows. | Added one typed `authoringContract` used by the brief and WebMCP guide, with drift tests. | Authoring contract and creation brief tests pass inside the 62-test suite. |
+| CL-05 | P1 | Existing legacy v2 cutouts fail the alpha-edge audit. | Run `npm run audit:cutouts`. | Known separate asset-production gate; no mechanical padding workaround applied because prior contact-sheet review found clipped subjects and contaminated fragments. | Current result remains 16 pass / 66 fail; no image asset is part of this diff. |
+

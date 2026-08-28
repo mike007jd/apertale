@@ -1,3 +1,14 @@
+import {
+  GENERATED_COVER_COUNT,
+  REQUIRED_GATE_IDS,
+  creationCompletionGates,
+  creationReportRequirements,
+  type CreationCompletionGate,
+} from "./authoringContract";
+
+export { creationCompletionGates, creationReportRequirements, REQUIRED_GATE_IDS };
+export type { CreationCompletionGate };
+
 export const AUTHORING_MODES = ["idea", "photos", "both"] as const;
 export type AuthoringMode = (typeof AUTHORING_MODES)[number];
 
@@ -17,26 +28,18 @@ export type CreationBriefInput = {
   sourceAssets: readonly CreationSourceAsset[];
 };
 
-export type CreationCompletionGate = {
-  id: string;
-  token: string;
-  requirement: string;
-};
-
 export type CreationBrief = {
   mode: AuthoringMode;
   spreadCount: number;
   visualDirection: string;
   sourceAssets: CreationSourceAsset[];
-  generatedCoverCount: 1;
+  generatedCoverCount: typeof GENERATED_COVER_COUNT;
   generatedFullSpreadCount: number;
   provenanceEntryCount: number;
   gates: CreationCompletionGate[];
   reportRequirements: string[];
   prompt: string;
 };
-
-const REQUIRED_GATE_IDS = ["inspect", "story", "plan", "art", "photo-truth", "layout", "evidence"] as const;
 
 function invalid(message: string): never {
   throw new TypeError(`Invalid creation brief: ${message}`);
@@ -61,59 +64,6 @@ function normalizeSourceAssets(raw: CreationBriefInput["sourceAssets"]): Creatio
     seen.add(id);
     return { id, name };
   });
-}
-
-export function creationCompletionGates(input: Pick<CreationBrief, "generatedCoverCount" | "generatedFullSpreadCount" | "provenanceEntryCount">): CreationCompletionGate[] {
-  return [
-    {
-      id: "inspect",
-      token: "[GATE:inspect]",
-      requirement: "Inspect the sources and user prompt in this conversation. Never invent unseen photo content.",
-    },
-    {
-      id: "story",
-      token: "[GATE:story]",
-      requirement: "State the audience or the assumption used, then a complete story arc with beginning, development, turn, and ending.",
-    },
-    {
-      id: "plan",
-      token: "[GATE:plan]",
-      requirement: `Plan the title, dedicated generated portrait cover, every spread, and ordered provenance before any Site Tool mutation. Required counts: generated cover ${input.generatedCoverCount}, original full-spread artwork ${input.generatedFullSpreadCount}, provenance entries ${input.provenanceEntryCount}.`,
-    },
-    {
-      id: "art",
-      token: "[GATE:art]",
-      requirement: "Use the host ImageGen/image editing capability to make one dedicated portrait cover and one purpose-built full-spread artwork for every spread.",
-    },
-    {
-      id: "photo-truth",
-      token: "[GATE:photo-truth]",
-      requirement: "Use source photos as references and story truth. Do not place uploaded source photos as the finished right-page artwork unless the user explicitly chose a literal photo-album treatment.",
-    },
-    {
-      id: "layout",
-      token: "[GATE:layout]",
-      requirement: "Only after the complete asset plan and generated art set exist, create the book through the six Site Tools, import exact assets through supported transfer or explicit Image handoff, set the cover, apply full-spread backgrounds, add meaningful interactions, and verify all spreads.",
-    },
-    {
-      id: "evidence",
-      token: "[GATE:evidence]",
-      requirement: "Never claim generation or import succeeded without evidence: returned asset ids, tool results, or an explicit pending-handoff report.",
-    },
-  ];
-}
-
-export function creationReportRequirements(input: Pick<CreationBrief, "generatedCoverCount" | "generatedFullSpreadCount">): string[] {
-  return [
-    "book title and exact spread count",
-    `generated cover count ${input.generatedCoverCount} with the cover asset id or a pending-handoff note`,
-    `generated full-spread count ${input.generatedFullSpreadCount} with one original artwork asset id per spread`,
-    "ordered source-asset ids and user-visible names, mapped as references rather than finished right-page placements",
-    "ordered provenance for cover and every spread, distinguishing user photo, generated art, and curated sample",
-    "interactions, illustrated layers, and short frame sequences added",
-    "unsupported or pending media handoff, with no success claim",
-    "active revision and undo tokens for the last reversible changes",
-  ];
 }
 
 function renderSourceAssets(sourceAssets: readonly CreationSourceAsset[]): string {
@@ -141,7 +91,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
   const visualDirection = typeof input.visualDirection === "string" ? input.visualDirection.trim() : "";
   if (!visualDirection || visualDirection.length > 120) invalid("visualDirection must be a non-empty string no longer than 120 characters.");
   const sourceAssets = normalizeSourceAssets(input.sourceAssets);
-  const generatedCoverCount = 1 as const;
+  const generatedCoverCount = GENERATED_COVER_COUNT;
   const generatedFullSpreadCount = input.spreadCount;
   const provenanceEntryCount = generatedCoverCount + generatedFullSpreadCount;
   const gates = creationCompletionGates({

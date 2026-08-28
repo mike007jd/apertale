@@ -4,6 +4,7 @@ import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MOTION_PRESETS } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
+import { AUTHORING_GUIDE_DETAIL, PROJECT_CONTEXT_DETAILS, buildAuthoringGuide } from "./authoringContract";
 const compact = (value: unknown) => JSON.stringify(value);
 
 type ToolInput = Record<string, unknown>;
@@ -121,20 +122,21 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     registeredCount += 1;
   });
   const sessionResults = new Map<string, unknown>();
+  let authoringGuideRead = false;
 
   const registrations = [
     register(
       {
         name: "get_project_context",
         title: "Get project context",
-        description: "Inspect the live Apertale shelf, open book, current spread, selected element, reusable browser-local assets, presentation theme, capabilities, and document revision before editing. Apertale is the shared canvas; planning and generation stay in the user's Codex conversation in ChatGPT desktop.",
+        description: "Inspect the live Apertale shelf, open book, current spread, selection, local assets, theme, capabilities, and revision. Create flows must first read detail authoring-guide and obey that two-phase quality contract. Planning and ImageGen stay in the user's Codex conversation.",
         inputSchema: {
           type: "object",
           properties: {
             detail: {
               type: "string",
-              enum: ["compact", "selected-reveal", "assets"],
-              description: "Optional focused detail. assets lists reusable local imports; selected-reveal returns the selected knowledge card.",
+              enum: [...PROJECT_CONTEXT_DETAILS],
+              description: "Optional focused detail. authoring-guide is the create-quality contract; assets lists local imports; selected-reveal returns the knowledge card.",
             },
           },
           additionalProperties: false,
@@ -143,16 +145,19 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
         execute: (input, options) => runTool("get_project_context", options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["detail"]);
           const detail = typeof input.detail === "undefined" ? "compact" : requiredString(input, "detail");
-          if (!["compact", "selected-reveal", "assets"].includes(detail)) invalid("detail is not supported.");
+          if (!(PROJECT_CONTEXT_DETAILS as readonly string[]).includes(detail)) invalid("detail is not supported.");
           const context = bookEngine.getContext(detail === "selected-reveal");
           const snapshot = bookEngine.getSnapshot();
           const currentSpread = snapshot.document.spreads[snapshot.session.currentSpreadIndex];
-          return {
+          const result = {
             ...context,
             assets: detail === "assets"
               ? await listAssetMetadata()
               : await getAssetMetadata(currentSpread.elements.map((element) => element.assetId)),
+            ...(detail === AUTHORING_GUIDE_DETAIL ? { authoringGuide: buildAuthoringGuide() } : {}),
           };
+          if (detail === AUTHORING_GUIDE_DETAIL) authoringGuideRead = true;
+          return result;
         }),
       },
       { signal: controller.signal },
@@ -161,7 +166,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: "manage_book",
         title: "Manage book",
-        description: "Open a library book, create an independent 1–12 spread book, or assign a browser-local portrait cover. Inspect first. Keep story and photos in the Agent conversation. Before create, finish the story plan plus a generated portrait cover and original full-spread art for every spread. Do not use uploaded source photos as finished right-page art unless the user asked for a literal photo album.",
+        description: "Open a library book, create an independent 1–12 spread book, or assign a browser-local portrait cover. Create flows must read get_project_context detail authoring-guide and obey it. Before create, finish the story plan plus a generated portrait cover and original full-spread art for every spread. Do not use uploaded source photos as finished right-page art unless the user asked for a literal photo album.",
         inputSchema: {
           type: "object",
           properties: {
@@ -222,6 +227,9 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             return result;
           }
           if (action !== "create") invalid("action must be open, create, or set-cover.");
+          if (!authoringGuideRead) {
+            invalid("read get_project_context with detail authoring-guide before creating a book.");
+          }
           const title = boundedString(input, "title", 100);
           if (!Array.isArray(input.spreads) || input.spreads.length < 1 || input.spreads.length > 12) invalid("spreads must contain 1–12 spread drafts.");
           const spreads = input.spreads.map((raw, index) => {

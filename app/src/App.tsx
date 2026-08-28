@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ArrowCounterClockwise,
   ArrowClockwise,
@@ -61,6 +61,19 @@ type OpeningBook = {
 
 type MotionRect = { left: number; top: number; width: number; height: number };
 type LibraryMotion = "idle" | "opening-book" | "closing-book";
+type LibraryTab = "yours" | "explore";
+
+/**
+ * A book belongs to the reader unless the samples set claims it, so `sample`
+ * being false *or absent* means personal. Personal books lead the shelf; the
+ * segmented control only appears once there is a second section worth showing.
+ */
+export function partitionLibraryBooks<Book extends { sample?: boolean }>(books: readonly Book[]) {
+  const personal = books.filter((book) => !book.sample);
+  const curated = books.filter((book) => Boolean(book.sample));
+  return { personal, curated, tabbed: personal.length > 0 };
+}
+
 type BookTransition = {
   id: string;
   title: string;
@@ -276,6 +289,7 @@ export function App() {
   const [showOutline, setShowOutline] = useState(false);
   const [showLibrary, setShowLibrary] = useState(true);
   const [libraryMotion, setLibraryMotion] = useState<LibraryMotion>("idle");
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("yours");
   const [bookTransition, setBookTransition] = useState<BookTransition | null>(null);
   const [showCreateGuide, setShowCreateGuide] = useState(false);
   const [showElementAgentGuide, setShowElementAgentGuide] = useState(false);
@@ -317,6 +331,14 @@ export function App() {
   const renderWebGl = !showLibrary && webGlAvailable && !sceneFailed;
   const library = useMemo(() => bookEngine.getLibrary(), [snapshot.document.id, snapshot.document.revision]);
   const activeLibraryBook = library.books.find((book) => book.id === library.activeBookId);
+  const { personal: personalBooks, curated: curatedBooks, tabbed: libraryTabbed } = useMemo(
+    () => partitionLibraryBooks(library.books),
+    [library],
+  );
+  // With nothing personal yet there is no second section to offer, so Explore
+  // is shown directly rather than parking the reader on an empty tab.
+  const activeLibraryTab: LibraryTab = libraryTabbed ? libraryTab : "explore";
+  const shelfBooks = activeLibraryTab === "yours" ? personalBooks : curatedBooks;
   const workshopSnapshot = useMemo<BookSnapshot>(() => ({
     document: {
       id: "apertale-new-book-workshop",
@@ -830,6 +852,12 @@ export function App() {
     window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
   }, [bookTransition, libraryMotion, showLibrary]);
 
+  // The shelf always opens on the reader's own books - including the first time
+  // one exists - so a stale Explore selection never hides what they just made.
+  useEffect(() => {
+    if (showLibrary) setLibraryTab("yours");
+  }, [showLibrary]);
+
   useEffect(() => {
     if (!showCreateGuide) return undefined;
     const card = createGuideCard.current;
@@ -1003,6 +1031,21 @@ export function App() {
     if (window.confirm("Restore the original Apertale sample book? Your local edits will be replaced.")) bookEngine.reset();
   };
 
+  const selectLibraryTab = (tab: LibraryTab, tablist: HTMLElement | null) => {
+    setLibraryTab(tab);
+    tablist?.querySelector<HTMLElement>(`#library-tab-${tab}`)?.focus();
+  };
+
+  const onLibraryTabsKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const next: LibraryTab | null =
+      event.key === "ArrowLeft" || event.key === "Home" ? "yours"
+      : event.key === "ArrowRight" || event.key === "End" ? "explore"
+      : null;
+    if (!next) return;
+    event.preventDefault();
+    selectLibraryTab(next, event.currentTarget);
+  };
+
   const undoLastAction = () => {
     const undoToken = snapshot.lastAction?.undoToken;
     if (!undoToken) return;
@@ -1060,38 +1103,76 @@ export function App() {
                 <button className="create-codex-button" onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create your own</button>
                 <button className="guide-book-button" onClick={() => openBookFromLibrary("apertale-field-guide")} onPointerEnter={() => prewarmReader("apertale-field-guide")} onFocus={() => prewarmReader("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={18} /> Read the Guide Book</button>
               </div>
-              <p className="library-scroll-cue" aria-hidden="true">Swipe for all {library.books.length} books<ArrowRight size={14} weight="bold" /></p>
             </div>
-            <div className="library-gallery" aria-label="Books in this library">
-              {library.books.map((book, index) => (
+            {libraryTabbed && (
+              <div className="library-tabs" role="tablist" aria-label="Library sections" onKeyDown={onLibraryTabsKeyDown}>
                 <button
-                  key={book.id}
-                  data-book-id={book.id}
-                  className={`library-card library-card-${index + 1} ${book.id === library.activeBookId ? "is-active" : ""} ${openingBook?.id === book.id ? "is-opening" : ""}`}
-                  onClick={(event) => openBookFromLibrary(book.id, event.currentTarget)}
-                  onPointerEnter={() => prewarmReader(book.id)}
-                  onFocus={() => prewarmReader(book.id)}
-                  aria-busy={openingBook?.id === book.id}
+                  type="button"
+                  id="library-tab-yours"
+                  role="tab"
+                  className={activeLibraryTab === "yours" ? "is-active" : ""}
+                  aria-selected={activeLibraryTab === "yours"}
+                  aria-controls="library-shelf"
+                  tabIndex={activeLibraryTab === "yours" ? 0 : -1}
+                  onClick={(event) => selectLibraryTab("yours", event.currentTarget.parentElement)}
                   disabled={libraryBusy}
                 >
-                  <span className="library-cover-frame">
-                    <img
-                      src={resolvedCoverUrls[book.id] ?? book.coverTextureUrl}
-                      alt={`${book.title} cover`}
-                      loading={index < 2 ? "eager" : "lazy"}
-                      decoding="async"
-                      fetchPriority={index === 0 ? "high" : "auto"}
-                    />
-                    {openingBook?.id === book.id && <span className="library-opening-badge" aria-hidden="true"><SpinnerGap size={15} weight="bold" /> Opening</span>}
-                  </span>
-                  <span className="library-card-copy">
-                    <small>{book.id === "apertale-field-guide" ? "Start here" : book.sample ? "Curated demo" : "Your book"} · {book.spreadCount} spreads</small>
-                    <strong>{book.title}</strong>
-                  </span>
+                  Your books <span className="library-tab-count" aria-hidden="true">{personalBooks.length}</span>
                 </button>
-              ))}
+                <button
+                  type="button"
+                  id="library-tab-explore"
+                  role="tab"
+                  className={activeLibraryTab === "explore" ? "is-active" : ""}
+                  aria-selected={activeLibraryTab === "explore"}
+                  aria-controls="library-shelf"
+                  tabIndex={activeLibraryTab === "explore" ? 0 : -1}
+                  onClick={(event) => selectLibraryTab("explore", event.currentTarget.parentElement)}
+                  disabled={libraryBusy}
+                >
+                  Explore <span className="library-tab-count" aria-hidden="true">{curatedBooks.length}</span>
+                </button>
+              </div>
+            )}
+            <div
+              id="library-shelf"
+              className="library-shelf"
+              role={libraryTabbed ? "tabpanel" : "group"}
+              aria-labelledby={libraryTabbed ? `library-tab-${activeLibraryTab}` : undefined}
+              aria-label={libraryTabbed ? undefined : "Books in this library"}
+              tabIndex={0}
+            >
+              <div className="library-gallery">
+                {shelfBooks.map((book, index) => (
+                  <button
+                    key={book.id}
+                    data-book-id={book.id}
+                    className={`library-card library-card-${(index % 5) + 1} ${book.id === library.activeBookId ? "is-active" : ""} ${openingBook?.id === book.id ? "is-opening" : ""}`}
+                    onClick={(event) => openBookFromLibrary(book.id, event.currentTarget)}
+                    onPointerEnter={() => prewarmReader(book.id)}
+                    onFocus={() => prewarmReader(book.id)}
+                    aria-busy={openingBook?.id === book.id}
+                    disabled={libraryBusy}
+                  >
+                    <span className="library-cover-frame">
+                      <img
+                        src={resolvedCoverUrls[book.id] ?? book.coverTextureUrl}
+                        alt={`${book.title} cover`}
+                        loading={index < 4 ? "eager" : "lazy"}
+                        decoding="async"
+                        fetchPriority={index === 0 ? "high" : "auto"}
+                      />
+                      {openingBook?.id === book.id && <span className="library-opening-badge" aria-hidden="true"><SpinnerGap size={15} weight="bold" /> Opening</span>}
+                    </span>
+                    <span className="library-card-copy">
+                      <small>{book.id === "apertale-field-guide" ? "Start here" : book.sample ? "Curated demo" : "Your book"} · {book.spreadCount} spreads</small>
+                      <strong>{book.title}</strong>
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <p className="demo-disclosure">Curated samples use OpenAI-generated illustration. Create your own with Codex and ImageGen in your active conversation.</p>
+            <p className="demo-disclosure">Curated samples use OpenAI-generated illustration. Create your own in Codex.</p>
             {openingBook && <BookLoadingFeedback title={openingBook.title} placement="library" stage={loadStage} reducedMotion={reducedMotion} />}
           </div>
         </section>

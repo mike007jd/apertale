@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTHORING_MODES,
+  REQUIRED_GATE_IDS,
   buildCreationBrief,
   creationCompletionGates,
   type CreationBriefInput,
 } from "./creationBrief";
 
-const REQUIRED_GATE_IDS = ["inspect", "story", "plan", "art", "photo-truth", "layout", "evidence"] as const;
 const REQUIRED_GATE_TOKENS = REQUIRED_GATE_IDS.map((id) => `[GATE:${id}]`);
 
 const photoBriefInput = (): CreationBriefInput => ({
@@ -81,8 +81,8 @@ describe("host-side creation brief contract", () => {
   it("cannot represent photo-led creation as placing uploaded source photos on the right page", () => {
     const prompt = buildCreationBrief(photoBriefInput()).prompt;
     expect(prompt).toContain("cannot be represented as simply placing uploaded source photos on the right page");
-    expect(prompt).toContain("Do not place uploaded source photos as the finished right-page artwork");
-    expect(prompt).toContain("unless the user explicitly chose a literal photo-album treatment");
+    expect(prompt).toContain("Do not use a raw uploaded photo as finished interior or right-page artwork");
+    expect(prompt).toContain("unless the user explicitly requested a literal photo album");
   });
 
   it("still requires generated cover and full-spread art for idea-led books with no selected assets", () => {
