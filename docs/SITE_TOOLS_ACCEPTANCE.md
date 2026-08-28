@@ -28,6 +28,8 @@ This check proves the deployed artifact and document policy. It does not claim t
    - `set_presentation`
    - `undo_project_change`
 
+Create flows must call `get_project_context` with `detail: "authoring-guide"` and obey the returned two-phase quality contract. That detail is not a seventh tool. The site fails closed: `manage_book(action: "create")` is rejected until the guide has been read in the current Site Tools registration session.
+
 If the arrow is absent, first verify that the selected account and model have Site Tools access; then refresh the page after enabling the permission. Do not reinterpret ordinary browser automation as a passing WebMCP run.
 
 ## 3. Execute the shared-state acceptance story
@@ -42,7 +44,7 @@ Prompt:
 
 Required evidence:
 
-- `get_project_context` is called before mutation, including `detail: "assets"` when needed.
+- `get_project_context` is called before mutation, including `detail: "authoring-guide"` before create and `detail: "assets"` when binding imported art.
 - `manage_book` opens the Atlas shelf item.
 - The same visible page changes immediately and reports an Agent-authored action.
 
@@ -54,6 +56,7 @@ Prompt:
 
 Required evidence:
 
+- `get_project_context(detail: "authoring-guide")` is read and obeyed before `manage_book` create.
 - `manage_book` returns a new book and undo token.
 - `compose_spread` updates the visible spread using its stable ID.
 - `apply_scene_patch` commits one bounded atomic patch using the validated browser-local image asset id; no URL, model reference, script, HTML, GLSL, or executable expression is accepted.
