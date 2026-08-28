@@ -9,6 +9,8 @@
 
 This document records the earlier LivingBook-branded build. It is retained only for traceability and no longer defines the product, tool names, acceptance gates, or submission state. The consolidated source of truth is [`PRODUCT_ARCHITECTURE.md`](PRODUCT_ARCHITECTURE.md), with current evidence in [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md).
 
+Reconciliation for Create Your Own: in-page owner-funded generation remains out of scope, but host-side prompt/photo-to-complete-book authoring in the user's Codex/ChatGPT conversation is now a required product path, not deferred work. Photo-led creation must analyze sources, plan a story, generate a dedicated cover and original full-spread art, and keep ordered provenance; placing uploaded source photos on the right page is not a finished book.
+
 ## 1. Product decision
 
 LivingBook Studio is an AI-native interactive picture book where a person and ChatGPT work on the same live page.
@@ -95,16 +97,18 @@ The following belong to a future product and must not enter the Challenge critic
 
 - arbitrary point- or region-based segmentation;
 - automatic subject extraction from a flattened illustration;
-- live image generation or regeneration;
-- prompt-to-book or prompt-to-spread generation;
-- user photo upload and cloud asset management;
+- live image generation or regeneration **inside the webpage**, including any owner-funded OpenAI API key or in-page composer;
+- in-page prompt-to-book or prompt-to-spread generation that bypasses the user's Codex/ChatGPT conversation;
+- cloud asset management and cross-device photo libraries;
 - PDF, print, video, or public-sharing export;
 - a full layer panel, property inspector, animation timeline, or general design editor;
-- twelve complete spreads;
+- twelve complete spreads as a Challenge-era sample requirement;
 - multi-user collaboration, accounts, payments, or subscriptions;
 - WebGPU-only rendering;
 - SSAO, depth of field, multi-pass bloom, or other heavy post-processing;
 - a second in-page ChatGPT or remote MCP server duplicating the host Agent.
+
+Host-side authoring is **not** deferred. The required Create Your Own path is: the user supplies an idea, photos, or both in the current Codex/ChatGPT conversation; the Agent inspects sources, plans a coherent story, generates a dedicated portrait cover and original full-spread artwork for every spread, then lays the book out through the six Site Tools. Local Image handoff remains an explicit fallback, not cloud asset management.
 
 ### 4.3 Change-control rule
 
@@ -207,7 +211,7 @@ During a page turn, the contextual menu fades and interaction handles freeze. Th
 
 ### 7.3 Add
 
-If the `Add` control is visible, it opens a small tray of prepared cut-paper assets and adds the chosen item as a structured element. Upload, generation, and cloud-library behavior are deferred. If this tray is not complete, the `Add` control is omitted rather than shipped as a placeholder.
+If the `Add` control is visible, it opens a small tray of prepared cut-paper assets and adds the chosen item as a structured element. In-page owner-funded generation and cloud-library behavior remain deferred. Host-side prompt/photo-to-complete-book authoring and the workshop's explicit Image handoff are required product paths, not this tray. If this tray is not complete, the `Add` control is omitted rather than shipped as a placeholder.
 
 ### 7.4 Deterministic Lift
 
@@ -822,19 +826,17 @@ LivingBook Studio Challenge Final 1.1 is done when:
 
 ## 21. Post-Challenge product direction
 
-These ideas remain valid but are not commitments for version 1.1:
+These ideas remain valid but are not commitments for the in-page runtime:
 
-- prompt-to-book and prompt-to-spread creation;
+- in-page owner-funded generation or a second embedded composer;
 - arbitrary Lift from flat pages;
-- user uploads and model-assisted extraction;
-- page composition and regeneration;
-- richer motion authoring;
 - cloud accounts and cross-device projects;
 - export, sharing, and print;
-- WebGPU/TSL rendering enhancements;
-- expanded books beyond the prepared three-spread sample.
+- WebGPU/TSL rendering enhancements.
 
-They may begin only after the submitted build is frozen and reproducibly accepted.
+Host-side prompt-to-book and photo-to-complete-book authoring is no longer post-Challenge direction. It is a required product path: inspect sources, plan a story, generate cover and full-spread art in the user's conversation, then create the book through Site Tools. Local photo handoff is allowed as an explicit fallback; treating uploaded source photos as finished right-page artwork is not.
+
+The remaining in-page items may begin only after the submitted build is frozen and reproducibly accepted.
 
 ## 22. Current official references
 

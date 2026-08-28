@@ -1,24 +1,29 @@
 # Authoring recipes
 
-## Text-led book
+## Text-led / idea book
 
 1. Infer or ask for audience and intended length.
-2. Write a one-sentence promise and a complete spread outline.
+2. Write a one-sentence promise and a complete spread outline with beginning, development, turn, and ending.
 3. Define a distinct visual beat for each spread before generating art.
 4. Generate a dedicated 2:3 portrait cover with a legible exact title and no extra copy.
-5. Create the book, import and set the cover, then compose each spread.
-6. Generate or select interior images. Plan foreground, midground, background, and interactive cutouts rather than placing one full-bleed image everywhere.
-7. For each spread, decide which parts belong in the full-spread illustration, which become isolated interactive subjects, and whether a short 2–6 frame sequence adds meaning.
-8. Add content-specific interactions and inspect both themes.
+5. Generate one original purpose-built full-spread artwork for every spread. Required counts: generated cover 1, generated full-spreads equal to the agreed spread count.
+6. Only after that art set exists, create the book, import and set the cover, then compose each spread through Site Tools.
+7. Plan foreground, midground, background, and interactive cutouts rather than placing one full-bleed image everywhere.
+8. For each spread, decide which parts belong in the full-spread illustration, which become isolated interactive subjects, and whether a short 2–6 frame sequence adds meaning.
+9. Add content-specific interactions and inspect both themes.
 
 ## Photo-led book
 
+Hard rejection: placing an uploaded source photo on the right page, or using a raw import as the finished interior artwork, is not a completed book. Source photos are references and story truth unless the user explicitly asked for a literal photo-album treatment.
+
 1. Inspect the supplied images in the current Codex conversation. Never infer unseen content.
-2. Propose the narrative sequence and identify which images need crops, subject isolation, cleanup, or supporting generated art.
-3. Ask the user to import only the chosen final images through the workshop's **Image handoff** control when direct host media transfer is unavailable.
-4. Refresh the asset list and map exact asset ids to spreads.
-5. Preserve the person's identity and source truth. Distinguish user photos, generated extensions, and curated sample elements in the final report.
-6. Use interaction to reveal captions, memories, dates, places, or facts—not to obscure the original photograph.
+2. Define audience or assumption and a complete story arc before choosing crops.
+3. Plan title, dedicated generated portrait cover, every spread, and ordered provenance. Required generated-art counts: 1 cover + one original full-spread artwork per spread. Provenance entries: 1 cover + one per spread.
+4. Use host ImageGen/image editing to make those assets. Crop, isolate, or extend source photos only as references into new compositions.
+5. Keep the selected source-asset ids in the user's given order. Map each id as a reference, not as a lazy right-page placement.
+6. Only after the complete art set exists, create the book through Site Tools. Ask the user to import generated finals through supported host transfer or the workshop's **Image handoff** when direct transfer is unavailable.
+7. Refresh the asset list and bind exact asset ids to cover and spreads. Preserve the person's identity and source truth in provenance.
+8. Use interaction to reveal captions, memories, dates, places, or facts—not to obscure the original photograph when a photo is cited as story truth.
 
 ## Illustration-led book
 

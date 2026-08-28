@@ -9,6 +9,8 @@
 
 This document consolidates the user-approved Challenge build and later multi-book scope. Earlier LivingBook-branded documents remain historical delivery evidence and do not override this specification.
 
+Create Your Own is a required host-side product path: the user's Codex/ChatGPT conversation turns a prompt, photos, or both into a complete book through the six Site Tools. In-page owner-funded generation remains out of scope. Apertale never proxies visitors through a site-owner API key and never treats uploaded source photos as finished right-page artwork unless the user explicitly chose a literal photo-album treatment.
+
 ## 1. Product
 
 Apertale is a WebMCP-native canvas for creating and experiencing interactive books. The user describes a book in their own ChatGPT or Codex conversation. The host Agent reads the live project, composes spreads, assigns safe interactions, and edits the same artifact the user sees.
@@ -24,7 +26,7 @@ The user's ChatGPT/Codex supplies the intelligence. Apertale does not proxy ever
 
 ### Implementation snapshot
 
-Implemented in the current local build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the six-tool project surface; a repository-level Codex authoring skill; and IndexedDB-backed local image import whose stable IDs are discoverable and editable through WebMCP.
+Implemented in the current local build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the six-tool project surface; a repository-level Codex authoring skill; a typed host-side creation-brief contract that requires story planning and generated art before WebMCP layout; and IndexedDB-backed local image import whose stable IDs are discoverable and editable through WebMCP.
 
 Required external delivery still open: a real supporting-host tool-execution acceptance run and the explicitly approved public repository, live URL, video, and Devpost submission. Direct host attachment transfer remains a post-v1.1 expansion rather than a hidden release dependency. The project stays private and local until the user approves release.
 
@@ -62,15 +64,15 @@ If a supported host later exposes a verified attachment/file bridge, it can impl
 ## 3. Core experience
 
 1. The user opens Apertale and lands on a clean editorial library, not furniture-like shelf geometry or an editor with a fake prompt box.
-2. The Field Guide and **Create Your Own** action open a full-screen blank-book workshop that explains authoring happens in the conversation beside the built-in browser.
+2. The Field Guide and **Create Your Own** action open a full-screen blank-book workshop that explains authoring happens in the conversation beside the built-in browser. The typed creation-brief contract accepts authoring mode (idea, photos, or both), exact spread count, visual direction, and ordered selected source assets so the starter prompt can force story planning and generated art before layout.
 3. In that real Codex/ChatGPT input, the user asks for a book, for example: “Use my travel photos to build a moonlit pop-up atlas. Give every landmark a different hover and click interaction.”
-4. The Agent inspects project and asset context, asks one concise question only when an omitted choice materially changes the result, and otherwise chooses a sensible 4–8 spreads.
-5. The Agent creates or patches the book through WebMCP.
+4. The Agent follows a two-phase host-side contract in the current conversation: inspect sources and the user prompt; define audience or assumption and a complete story arc; plan title, dedicated generated cover, every spread, and ordered provenance; then use host ImageGen/image editing to make a portrait cover and purpose-built full-spread artwork for every spread. Source photos are references and story truth, not a lazy right-page placement unless the user explicitly chose a literal photo-album treatment.
+5. Only after that asset plan and art set exist does the Agent create or patch the book through WebMCP, importing exact assets through supported transfer or the explicit Image handoff. It never claims generation or import succeeded without evidence.
 6. Each committed step appears immediately in the same page, identifies its source, and is undoable.
 7. The user turns pages, hovers, clicks, drags, adjusts, switches Day/Night, and previews directly.
 8. The Agent can continue editing from the resulting live state.
 
-The bottom page surface is an explicit **Create Your Own** action. It opens a full-screen blank-book workshop where the user chooses length and visual direction; a clearly labeled action copies the resulting starter prompt for the real Agent conversation. A secondary **Image handoff** accepts chosen images only when direct host media transfer is unavailable. No copy action is styled as an editable input and the webpage never pretends to send a model request itself.
+The bottom page surface is an explicit **Create Your Own** action. It opens a full-screen blank-book workshop where the user chooses length and visual direction; a clearly labeled action copies the resulting starter prompt for the real Agent conversation. That prompt is a two-phase host-side contract: inspect and plan a story, generate a dedicated portrait cover plus original full-spread artwork for every spread, then—and only then—create the book through the six Site Tools. A secondary **Image handoff** accepts chosen images only when direct host media transfer is unavailable and exposes ordered local asset ids. No copy action is styled as an editable input and the webpage never pretends to send a model request itself.
 
 ## 4. Architecture
 
@@ -193,6 +195,7 @@ The runtime exposes exactly these six tools. The scene patch applies up to 24 op
 - Alpha images become cutouts; flat photos remain image layers until a derived asset is imported.
 - The Agent can discover reusable local assets, then arrange, light, animate, and attach interactions. A scene patch accepts an `asset:` ID only after the trusted storage adapter proves it exists.
 - Full-spread illustrations, transparent cutouts, and 2–6 frame sequences are generated or selected in the user's current Codex/ChatGPT conversation, then imported explicitly into browser-local storage.
+- Uploaded source photos are references and story truth. They are not a finished right-page placement unless the user explicitly chose a literal photo-album treatment.
 - The runtime ships no GLB/model payload and requires no external model-generation service or site-owner generation credential.
 
 ### Planned asset expansion
@@ -200,9 +203,9 @@ The runtime exposes exactly these six tools. The scene patch applies up to 24 op
 - direct host attachment handoff for generated images and frame sequences;
 - export that serializes the project manifest and referenced assets without leaking browser object URLs.
 
-### Host-assisted generation
+### Host-side complete-book authoring
 
-The user may ask ChatGPT/Codex to create images or derived assets using their own supported model capabilities. Until direct attachment transfer is verified, Apertale presents a clear “Import generated asset” step and resumes Agent composition immediately after import.
+Host-side prompt/photo-to-complete-book authoring is a required product path, not a deferred extra. The user asks ChatGPT/Codex in the current conversation to inspect sources, plan a coherent story arc, and generate a dedicated portrait cover plus original full-spread artwork for every spread using their own supported model capabilities. Only after that art set exists does the Agent lay the book out through the six Site Tools. Until direct attachment transfer is verified, Apertale presents a clear Image handoff step and resumes Agent composition immediately after import. In-page owner-funded generation remains out of scope and must not silently fall back to the product owner's model key.
 
 ### Later adapters
 
@@ -236,7 +239,7 @@ A personal-photo sample demonstrates the real user workflow: imported photo asse
 
 ### The Apertale Field Guide
 
-The default library puts a four-spread guide first. It explains text-to-book with ImageGen artwork, photo-led books that start in the Agent conversation and use a minimal Image handoff only when host media transfer is unavailable, living illustrated layers, and the distinction between curated samples and work generated in the user's live conversation.
+The default library puts a four-spread guide first. It explains text-to-book with ImageGen artwork, photo-led books that start in the Agent conversation and become planned illustrated stories rather than raw right-page photo dumps, living illustrated layers, and the distinction between curated samples and work generated in the user's live conversation.
 
 ## 10. Visual and motion direction
 
@@ -278,6 +281,8 @@ Motion principles:
 ### Product
 
 - A first-time user understands that prompts belong in ChatGPT/Codex, not the webpage.
+- Host-side Create Your Own can turn an idea, photos, or both into a complete book: planned story, generated cover, original full-spread art, ordered provenance, and honest media handoff.
+- Photo-led creation is not accepted as placing uploaded source photos on the right page.
 - The user can import an asset, ask the Agent to create a spread, and see a visible committed result.
 - Human edits and Agent edits remain coherent and exactly undoable.
 - Every primary sample has meaningful hover and click behavior.

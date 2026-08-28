@@ -50,7 +50,14 @@ describe("WebMCP registration", () => {
     }
     expect(registrationSignals).toHaveLength(6);
     const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
-    expect(JSON.stringify(tool("manage_book").inputSchema)).toContain("set-cover");
+    const manageBookSchema = tool("manage_book").inputSchema as { required?: string[] };
+    expect(JSON.stringify(manageBookSchema)).toContain("set-cover");
+    expect(manageBookSchema.required).toContain("expectedRevision");
+    expect(tool("manage_book").description).toContain("generated portrait cover");
+    expect(tool("manage_book").description).toContain("original full-spread art");
+    expect(tool("manage_book").description).toContain("right-page art");
+    expect(tool("apply_scene_patch").description).toContain("purpose-built full-spread");
+    expect(tool("apply_scene_patch").description).toContain("source photo");
 
     bookEngine.setSelection("bird");
     const contextResult = await tool("get_project_context").execute({}, { signal: new AbortController().signal });

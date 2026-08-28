@@ -1,4 +1,4 @@
 interface:
   display_name: "Apertale Authoring"
   short_description: "Create polished interactive books through Apertale Site Tools"
-  default_prompt: "Use $apertale-authoring to turn my idea or images into a polished interactive Apertale book."
+  default_prompt: "Use $apertale-authoring to turn my idea or images into a planned interactive Apertale book with generated cover art and original full-spread artwork, not a raw photo dump."

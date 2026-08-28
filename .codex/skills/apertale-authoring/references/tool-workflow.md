@@ -21,9 +21,9 @@ Use `manage_book`:
 - `action: "create"` with a complete 1–12 spread plan;
 - `action: "set-cover"` with `expectedRevision` and a validated browser-local `coverAssetId`.
 
-Draft all spread titles, kickers, and body copy before `create`. A normal first pass is 4–8 spreads. The maximum is 12.
+Draft all spread titles, kickers, and body copy before `create`. A normal first pass is 4–8 spreads. The maximum is 12. Do not call `create` until Phase 1 is complete: inspected sources, story arc, ordered provenance, one generated portrait cover, and one original full-spread artwork per spread.
 
-Image generation does not happen inside this tool. Generate the cover in the user's current Agent conversation. Prefer a host-supported media transfer; when the host cannot transfer the image through WebMCP, provide a PNG/JPEG/WebP source no larger than 12 MB and ask the user to use **Image handoff** once. Apertale resizes and compresses the source locally to at most 1.5 MB before storage. Then call `get_project_context(detail: "assets")` and set the cover using the returned optimized asset id.
+Image generation does not happen inside this tool. Generate the cover and every interior full-spread in the user's current Agent conversation. Do not place an uploaded source photo as the finished right-page artwork unless the user explicitly chose a literal photo-album treatment. Prefer a host-supported media transfer; when the host cannot transfer the image through WebMCP, provide a PNG/JPEG/WebP source no larger than 12 MB and ask the user to use **Image handoff** once. Apertale resizes and compresses the source locally to at most 1.5 MB before storage. Then call `get_project_context(detail: "assets")` and set the cover using the returned optimized asset id.
 
 ## 3. Refine copy
 
@@ -33,7 +33,7 @@ Use `compose_spread` to change one existing spread's title, kicker, or body with
 
 Use one atomic `apply_scene_patch` per coherent spread edit. It can add, update, remove, or reorder up to 24 elements.
 
-The only supported scene source is a validated browser-local image asset id returned by the asset context. Generate full-spread artwork and native-alpha transparent cutouts in the user's current conversation. For GPT-Image-2 request `background: "transparent"` with PNG or WebP output. Do not create green/blue-screen intermediates, white-background stand-ins, or color-keyed alpha. Prefer direct host transfer; otherwise use the workshop's **Image handoff** fallback and refresh asset context.
+The only supported scene source is a validated browser-local image asset id returned by the asset context. Generate full-spread artwork and native-alpha transparent cutouts in the user's current conversation before patching the scene. For GPT-Image-2 request `background: "transparent"` with PNG or WebP output. Do not create green/blue-screen intermediates, white-background stand-ins, or color-keyed alpha. Do not treat a raw uploaded photo as the finished right-page art. Prefer direct host transfer; otherwise use the workshop's **Image handoff** fallback and refresh asset context.
 
 Before importing a cutout, inspect the actual pixels rather than trusting the file extension: the subject must be visible, complete, and padded; the background must be genuinely transparent; the edge must not contain a rectangular matte, chroma spill, detached crop fragments, or a baked glow intended to be supplied by the runtime hover effect. Reject and regenerate failed output.
 

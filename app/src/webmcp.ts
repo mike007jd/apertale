@@ -161,7 +161,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: "manage_book",
         title: "Manage book",
-        description: "Open an existing library book, create an independent book with 1–12 planned spreads, or assign a browser-local portrait cover. Inspect context first. Ask for the story and any photos in the Agent conversation; do not make the user repeat the brief in Apertale. Draft the full book before scene edits.",
+        description: "Open a library book, create an independent 1–12 spread book, or assign a browser-local portrait cover. Inspect first. Keep story and photos in the Agent conversation. Before create, finish the story plan plus a generated portrait cover and original full-spread art for every spread. Do not use uploaded source photos as finished right-page art unless the user asked for a literal photo album.",
         inputSchema: {
           type: "object",
           properties: {
@@ -186,7 +186,11 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
               },
             },
           },
-          required: ["requestId", "action"],
+          // All manage actions accept the inspected revision. Create and cover
+          // assignment enforce it; open keeps it as an explicit freshness
+          // acknowledgement so the published schema never understates what
+          // the mutating branches require.
+          required: ["requestId", "expectedRevision", "action"],
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
@@ -283,7 +287,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: "apply_scene_patch",
         title: "Apply atomic scene patch",
-        description: "Atomically set an inpainted clean background and add, update, remove, or reorder up to 24 foreground layers. For image-led pages, set the repaired clean plate, then add 2–4 extracted transparent subjects so lifting one never reveals a duplicate. Use validated browser-local asset ids from context. Image work stays in the user's Agent conversation; use explicit media handoff only when required. Arbitrary URLs and executable content are rejected.",
+        description: "Atomically set a purpose-built full-spread background and add, update, remove, or reorder up to 24 foreground layers. Set the repaired clean plate, then add 2–4 transparent subjects so lifting one never reveals a duplicate. Use validated browser-local asset ids. Generate art in the Agent conversation; use explicit handoff only when required. Do not place a source photo as finished right-page art. Arbitrary URLs and executable content are rejected.",
         inputSchema: {
           type: "object",
           properties: {
