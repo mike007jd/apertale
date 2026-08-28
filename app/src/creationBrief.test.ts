@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTHORING_MODES,
-  REQUIRED_GATE_IDS,
   buildCreationBrief,
-  creationCompletionGates,
   type CreationBriefInput,
 } from "./creationBrief";
+import { REQUIRED_GATE_IDS, creationCompletionGates } from "./authoringContract";
 
 const REQUIRED_GATE_TOKENS = REQUIRED_GATE_IDS.map((id) => `[GATE:${id}]`);
 
@@ -34,17 +33,16 @@ describe("host-side creation brief contract", () => {
   it("fails if the prompt omits a semantic gate, generated-art count, or ordered asset id", () => {
     const input = photoBriefInput();
     const brief = buildCreationBrief(input);
-
-    expect(brief.mode).toBe("photos");
-    expect(brief.generatedCoverCount).toBe(1);
-    expect(brief.generatedFullSpreadCount).toBe(6);
-    expect(brief.provenanceEntryCount).toBe(7);
-    expect(brief.gates.map((gate) => gate.id)).toEqual([...REQUIRED_GATE_IDS]);
+    const gates = creationCompletionGates({
+      generatedCoverCount: 1,
+      generatedFullSpreadCount: 6,
+      provenanceEntryCount: 7,
+    });
 
     for (const token of REQUIRED_GATE_TOKENS) {
       expect(brief.prompt, `prompt must include ${token}`).toContain(token);
     }
-    for (const gate of brief.gates) {
+    for (const gate of gates) {
       expect(brief.prompt).toContain(gate.requirement);
     }
 
@@ -100,8 +98,8 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("[GATE:layout]");
     expect(brief.prompt).toContain("Phase 1");
     expect(brief.prompt).toContain("Phase 2");
-    expect(brief.reportRequirements.join("\n")).toContain("cover asset id");
-    expect(brief.reportRequirements.join("\n")).toContain("one original artwork asset id per spread");
+    expect(brief.prompt).toContain("cover asset id");
+    expect(brief.prompt).toContain("one original artwork asset id per spread");
   });
 
   it("honors both-mode by keeping the idea promise and photo-truth rejection together", () => {

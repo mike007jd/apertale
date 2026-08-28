@@ -12,15 +12,15 @@ export const QUALITY_CONTRACT_VERSION = 1 as const;
 export const QUALITY_RUBRIC_VERSION = 1 as const;
 export const QUALITY_REVIEW_MAX_ROUNDS = 2 as const;
 
-export type QualityCriterionMode = "deterministic" | "visual" | "both";
-export type QualityCriterion = {
+type QualityCriterionMode = "deterministic" | "visual" | "both";
+type QualityCriterion = {
   id: string;
   label: string;
   mode: QualityCriterionMode;
   description: string;
 };
 
-export type QualityRubric = {
+type QualityRubric = {
   id: string;
   version: typeof QUALITY_RUBRIC_VERSION;
   maxReviewRounds: typeof QUALITY_REVIEW_MAX_ROUNDS;
@@ -37,10 +37,9 @@ if (QUALITY_RUBRIC.version !== QUALITY_RUBRIC_VERSION || QUALITY_RUBRIC.maxRevie
   throw new TypeError("Invalid Apertale quality rubric version.");
 }
 
-export type QualitySeverity = "blocker" | "warn" | "note";
-export type QualityOutcome = "pass" | QualitySeverity;
+type QualityOutcome = "pass" | "blocker" | "warn" | "note";
 
-export type QualityEvidenceLocation = {
+type QualityEvidenceLocation = {
   scope: "book" | "cover" | "spread";
   spreadId?: string;
   locator: string;
@@ -58,7 +57,7 @@ export type QualityRenderEvidence = {
   renderedAt: string;
 };
 
-export type QualityCheckResult = {
+type QualityCheckResult = {
   criterionId: string;
   outcome: QualityOutcome;
   message: string;
@@ -75,7 +74,7 @@ export type QualityVisualReviewSubmission = {
   checks: QualityCheckResult[];
 };
 
-export type QualityReportStatus = "ready" | "blocked" | "needs-user-input";
+type QualityReportStatus = "ready" | "blocked" | "needs-user-input";
 
 export type QualityReport = {
   contractVersion: typeof QUALITY_CONTRACT_VERSION;
@@ -112,7 +111,7 @@ export type QualityGateState = {
   remainingRounds: number;
 };
 
-export type QualityRenderManifest = {
+type QualityRenderManifest = {
   contractVersion: typeof QUALITY_CONTRACT_VERSION;
   documentId: string;
   revision: number;
@@ -210,10 +209,6 @@ export function creationAssetPolicyIssues(
 
 export const QUALITY_VISUAL_CRITERION_IDS = Object.freeze(
   QUALITY_RUBRIC.criteria.filter((item) => item.mode !== "deterministic").map((item) => item.id),
-);
-
-export const QUALITY_DETERMINISTIC_CRITERION_IDS = Object.freeze(
-  QUALITY_RUBRIC.criteria.filter((item) => item.mode !== "visual").map((item) => item.id),
 );
 
 const evidence = (
@@ -411,7 +406,7 @@ export function buildQualityReport(
   const warningCount = checks.filter((check) => check.outcome === "warn").length;
   const noteCount = checks.filter((check) => check.outcome === "note").length;
   const sampleReady = submission.sampleReady && blockerCount === 0;
-  const publishAllowed = sampleReady && blockerCount === 0;
+  const publishAllowed = sampleReady;
   const status: QualityReportStatus = publishAllowed
     ? "ready"
     : round >= QUALITY_REVIEW_MAX_ROUNDS

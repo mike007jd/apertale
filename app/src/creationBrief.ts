@@ -12,8 +12,6 @@ import {
   type CreationSourceAsset,
 } from "./authoringContract";
 
-export { creationCompletionGates, REQUIRED_GATE_IDS };
-
 export const AUTHORING_MODES = ["idea", "photos", "both"] as const;
 export type AuthoringMode = (typeof AUTHORING_MODES)[number];
 
@@ -33,17 +31,8 @@ export type CreationBriefInput = {
 };
 
 export type CreationBrief = {
-  mode: AuthoringMode;
-  spreadCount: number;
-  visualDirection: string;
   sourceAssets: CreationSourceAsset[];
-  generatedCoverCount: typeof GENERATED_COVER_COUNT;
-  generatedFullSpreadCount: number;
-  preservedPhotoSpreadCount: number;
-  provenanceEntryCount: number;
   readiness: CreationReadinessAssessment;
-  gates: CreationCompletionGate[];
-  reportRequirements: string[];
   prompt: string;
 };
 
@@ -184,17 +173,8 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
   ].join("\n");
 
   return {
-    mode: input.mode,
-    spreadCount: input.spreadCount,
-    visualDirection,
     sourceAssets,
-    generatedCoverCount,
-    generatedFullSpreadCount,
-    preservedPhotoSpreadCount,
-    provenanceEntryCount,
     readiness,
-    gates,
-    reportRequirements,
     prompt,
   };
 }

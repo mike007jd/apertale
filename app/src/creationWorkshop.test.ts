@@ -91,15 +91,15 @@ describe("creation workshop session", () => {
       type: "set-photo-use",
       photoUse: "illustrated-keepsake",
     }));
-    expect(illustrated).toMatchObject({ generatedFullSpreadCount: 6, preservedPhotoSpreadCount: 0 });
     expect(illustrated.prompt).toContain("Book type: photo-led-keepsake");
+    expect(illustrated.prompt).toContain("generated full-spread count 6");
 
     const preserved = buildCreationWorkshopBrief(reduceCreationWorkshop(withPhoto, {
       type: "set-photo-use",
       photoUse: "preserve-originals",
     }));
-    expect(preserved).toMatchObject({ generatedFullSpreadCount: 0, preservedPhotoSpreadCount: 6 });
     expect(preserved.prompt).toContain("Book type: preserved-photo-album");
+    expect(preserved.prompt).toContain("generated full-spread count 0");
     expect(preserved.prompt).toContain("preserved original-photo layout count 6");
     expect(preserved.prompt).not.toContain("purpose-built full-spread artwork for every spread");
   });
