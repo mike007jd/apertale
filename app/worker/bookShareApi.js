@@ -6,6 +6,9 @@ const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const MAX_ASSET_BYTES = 1_500_000;
 const MAX_MANIFEST_BYTES = 1_000_000;
 const MAX_ASSETS = 24;
+const MAX_SITE_BOOKS = 2_000;
+const MAX_BOOKS_PER_WINDOW = 40;
+const CREATION_WINDOW_MS = 60 * 60 * 1_000;
 const ELEMENT_KINDS = new Set(["embedded", "lifted", "decoration"]);
 const PAGES = new Set(["left", "right"]);
 const PROVENANCE = new Set(["sample", "human", "agent"]);
@@ -268,8 +271,17 @@ async function readJsonBody(request) {
   }
 }
 
-export function createBookShareApi({ repository, objects, tokenFactory = defaultTokenFactory, clock = () => new Date() }) {
+export function createBookShareApi({
+  repository,
+  objects,
+  tokenFactory = defaultTokenFactory,
+  clock = () => new Date(),
+  limits = {},
+}) {
   const now = () => clock().toISOString();
+  const maxSiteBooks = limits.maxSiteBooks ?? MAX_SITE_BOOKS;
+  const maxBooksPerWindow = limits.maxBooksPerWindow ?? MAX_BOOKS_PER_WINDOW;
+  const creationWindowMs = limits.creationWindowMs ?? CREATION_WINDOW_MS;
 
   async function managedBook(request, bookId) {
     const token = bearerToken(request);
@@ -280,6 +292,13 @@ export function createBookShareApi({ repository, objects, tokenFactory = default
   }
 
   async function createDraft() {
+    if (await repository.countBooks() >= maxSiteBooks) {
+      throw new HttpError(429, "creation_limit", "This Site has reached its book storage bound.");
+    }
+    const windowStart = new Date(clock().getTime() - creationWindowMs).toISOString();
+    if (await repository.countBooksCreatedSince(windowStart) >= maxBooksPerWindow) {
+      throw new HttpError(429, "creation_rate", "Too many books are being created right now. Try again later.");
+    }
     const id = crypto.randomUUID();
     const manageToken = tokenFactory();
     if (!TOKEN_PATTERN.test(manageToken)) throw new Error("Token factory returned an invalid capability token.");
@@ -331,10 +350,33 @@ export function createBookShareApi({ repository, objects, tokenFactory = default
 
   async function publish(request, bookId) {
     const { book, manageTokenHash } = await managedBook(request, bookId);
+    const payload = await readJsonBody(request);
+    const shareToken = payload?.shareToken;
+    if (typeof shareToken !== "string" || !TOKEN_PATTERN.test(shareToken)) {
+      throw new HttpError(400, "invalid_share_token", "A valid share token is required.");
+    }
+    const shareTokenHash = await hashToken(shareToken);
+    const shareUrl = new URL(`/share/${shareToken}`, request.url).href;
+
+    if (book.status === "published") {
+      const recovered = await repository.publishBook({
+        id: bookId,
+        manageTokenHash,
+        shareTokenHash,
+        title: book.title ?? "",
+        revision: payload?.manifest?.revision,
+        manifestJson: book.manifest_json ?? "null",
+        now: now(),
+      });
+      if (!recovered) {
+        throw new HttpError(409, "invalid_state", "Only a draft or revoked book can be published.");
+      }
+      return json({ ok: true, bookId, status: "published", shareUrl });
+    }
+
     if (!MANAGEABLE_STATUSES.has(book.status)) {
       throw new HttpError(409, "invalid_state", "Only a draft or revoked book can be published.");
     }
-    const payload = await readJsonBody(request);
     const manifest = payload?.manifest;
     const references = validateManifest(manifest);
     const uploaded = new Set(await repository.listAssetIds(bookId));
@@ -342,12 +384,10 @@ export function createBookShareApi({ repository, objects, tokenFactory = default
     if (missing.length > 0) {
       throw new HttpError(409, "missing_assets", `Upload every referenced local asset before publishing (${missing.length} missing).`);
     }
-    const shareToken = tokenFactory();
-    if (!TOKEN_PATTERN.test(shareToken)) throw new Error("Token factory returned an invalid share token.");
     const published = await repository.publishBook({
       id: bookId,
       manageTokenHash,
-      shareTokenHash: await hashToken(shareToken),
+      shareTokenHash,
       title: manifest.title.trim(),
       revision: manifest.revision,
       manifestJson: JSON.stringify(manifest),
@@ -358,7 +398,7 @@ export function createBookShareApi({ repository, objects, tokenFactory = default
       ok: true,
       bookId,
       status: "published",
-      shareUrl: new URL(`/share/${shareToken}`, request.url).href,
+      shareUrl,
     });
   }
 
@@ -379,7 +419,16 @@ export function createBookShareApi({ repository, objects, tokenFactory = default
     const assetId = decodePathComponent(rawAssetId, "The shared asset was not found.");
     if (!ASSET_ID_PATTERN.test(assetId)) throw new HttpError(404, "not_found", "The shared asset was not found.");
     const asset = await repository.findPublishedAsset(await hashToken(shareToken), assetId);
-    if (!asset) throw new HttpError(404, "not_found", "The shared asset was not found.");
+    if (!asset?.manifest_json) throw new HttpError(404, "not_found", "The shared asset was not found.");
+    try {
+      const currentReferences = validateManifest(JSON.parse(asset.manifest_json));
+      if (!currentReferences.has(assetId)) throw new Error("unreferenced asset");
+    } catch {
+      // Assets left behind by an older revision remain private after republish.
+      // Stored-manifest corruption also fails closed instead of broadening read
+      // access to every object ever uploaded for the book.
+      throw new HttpError(404, "not_found", "The shared asset was not found.");
+    }
     const object = request.method === "HEAD" ? await objects.head(asset.object_key) : await objects.get(asset.object_key);
     if (!object) throw new HttpError(404, "not_found", "The shared asset was not found.");
     const headers = new Headers({
@@ -394,6 +443,10 @@ export function createBookShareApi({ repository, objects, tokenFactory = default
 
   async function revoke(request, bookId) {
     const { book, manageTokenHash } = await managedBook(request, bookId);
+    // The public token is already cleared once a revoke commits. Returning the
+    // same terminal state lets a creator safely retry when that success
+    // response was lost without ever restoring public access.
+    if (book.status === "revoked") return json({ ok: true, bookId, status: "revoked" });
     if (book.status !== "published") throw new HttpError(409, "invalid_state", "Only a published book can be revoked.");
     const revoked = await repository.revokeBook({ id: bookId, manageTokenHash, now: now() });
     if (!revoked) throw new HttpError(409, "revoke_conflict", "The book changed before it could be revoked.");
@@ -406,7 +459,8 @@ export function createBookShareApi({ repository, objects, tokenFactory = default
       throw new HttpError(409, "delete_conflict", "The book changed before deletion began.");
     }
     const assets = await repository.listAssets(bookId);
-    if (assets.length > 0) await objects.delete(assets.map((asset) => asset.object_key));
+    const objectKeys = [...new Set(assets.map((asset) => asset.object_key).filter(Boolean))];
+    if (objectKeys.length > 0) await objects.delete(objectKeys);
     if (!await repository.deleteBook({ id: bookId, manageTokenHash })) {
       throw new HttpError(409, "delete_conflict", "The book files were removed, but its metadata cleanup must be retried.");
     }

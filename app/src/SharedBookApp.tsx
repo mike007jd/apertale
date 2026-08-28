@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Moon, Sun, X } from "@phosphor-icons/react";
 import { hasReveal, resolveInteraction } from "./interaction";
 import type { BookSnapshot, DocumentState, ThemeId } from "./types";
@@ -13,6 +13,15 @@ type SharedBookResponse = {
 function shareTokenFromPath() {
   const match = /^\/share\/([^/]+)\/?$/u.exec(window.location.pathname);
   return match?.[1] ?? "";
+}
+
+/** Joins announcement fragments without producing the doubled `..` of naive concatenation. */
+function announce(...parts: Array<string | undefined | null>) {
+  return parts
+    .map((part) => (part ?? "").trim())
+    .filter(Boolean)
+    .map((part) => (/[.!?…:;]$/u.test(part) ? part : `${part}.`))
+    .join(" ");
 }
 
 function supportsWebGl2() {
@@ -51,6 +60,16 @@ export function SharedBookApp() {
     document.documentElement.dataset.theme = theme === "midnight-desk" ? "night" : "day";
   }, [theme]);
 
+  /**
+   * The mobile reader sheet scrolls its own copy, so a page turn has to return
+   * the anonymous reader to the top of the new spread rather than leaving them
+   * at the previous spread's offset.
+   */
+  const readerCopy = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    readerCopy.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [spreadIndex]);
+
   const snapshot = useMemo<BookSnapshot | null>(() => documentState ? {
     document: documentState,
     session: {
@@ -64,7 +83,7 @@ export function SharedBookApp() {
   } : null, [documentState, selectionId, spreadIndex, theme]);
 
   if (error) {
-    return <main className="app-shell"><section className="fallback-book"><article className="fallback-plate"><p>Shared book</p><h1>Unavailable</h1><p>{error}</p></article></section></main>;
+    return <main className="app-shell"><section className="fallback-book"><article className="fallback-plate"><p className="fallback-kicker">Shared book</p><h2>Unavailable</h2><p>{error}</p></article></section></main>;
   }
   if (!snapshot) {
     return <main className="app-shell"><section className="fallback-book is-loading" role="status"><article className="fallback-plate"><p>Opening shared book…</p></article></section></main>;
@@ -121,6 +140,19 @@ export function SharedBookApp() {
         <button className="page-arrow page-arrow-left" onClick={() => move(-1)} disabled={spreadIndex === 0} aria-label="Previous spread"><ArrowLeft size={22} /></button>
         <button className="page-arrow page-arrow-right" onClick={() => move(1)} disabled={spreadIndex === snapshot.document.spreads.length - 1} aria-label="Next spread"><ArrowRight size={22} /></button>
 
+        <aside className="reader-sheet" aria-label="Reading panel">
+          <div className="reader-sheet-copy" ref={readerCopy}>
+            {spread.kicker && <p className="reader-sheet-kicker">{spread.kicker}</p>}
+            <h2>{spread.title}</h2>
+            <p>{spread.body}</p>
+          </div>
+          <div className="reader-sheet-controls">
+            <button onClick={() => move(-1)} disabled={spreadIndex === 0} aria-label="Previous spread"><ArrowLeft size={24} /></button>
+            <span className="reader-sheet-progress"><strong>{spreadIndex + 1}</strong> / {snapshot.document.spreads.length}</span>
+            <button onClick={() => move(1)} disabled={spreadIndex === snapshot.document.spreads.length - 1} aria-label="Next spread"><ArrowRight size={24} /></button>
+          </div>
+        </aside>
+
         {selected && selectedInteraction && hasReveal(selectedInteraction) && (
           <aside className={`reveal-card reveal-${selectedInteraction.reveal.kind} ${selected.page === "right" ? "is-right" : "is-left"}`} aria-label={`${selectedInteraction.reveal.title} details`}>
             <header><p>{selected.label}</p><h2>{selectedInteraction.reveal.title}</h2></header>
@@ -132,7 +164,7 @@ export function SharedBookApp() {
         )}
       </section>
 
-      <div className="sr-only" aria-live="polite">{snapshot.document.title}. {spread.title}. {spread.body}</div>
+      <div className="sr-only" aria-live="polite">{announce(snapshot.document.title, spread.title, spread.body)}</div>
     </main>
   );
 }

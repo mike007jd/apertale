@@ -29,18 +29,31 @@ class MemoryRepository {
     return [...this.assets.values()].filter((asset) => asset.bookId === bookId).map((asset) => asset.assetId);
   }
 
+  async countBooks() {
+    return this.books.size;
+  }
+
+  async countBooksCreatedSince(isoTimestamp) {
+    return [...this.books.values()].filter((book) => book.created_at >= isoTimestamp).length;
+  }
+
   async publishBook({ id, manageTokenHash, shareTokenHash, title, revision, manifestJson, now }) {
     const book = await this.findManagedBook(id, manageTokenHash);
-    if (!book || !["draft", "revoked"].includes(book.status)) return false;
-    Object.assign(book, {
-      shareTokenHash,
-      status: "published",
-      title,
-      revision,
-      manifest_json: manifestJson,
-      published_at: now,
-    });
-    return true;
+    if (!book) return false;
+    if (["draft", "revoked"].includes(book.status)) {
+      Object.assign(book, {
+        shareTokenHash,
+        status: "published",
+        title,
+        revision,
+        manifest_json: manifestJson,
+        published_at: now,
+      });
+      return true;
+    }
+    return book.status === "published"
+      && book.revision === revision
+      && book.shareTokenHash === shareTokenHash;
   }
 
   async findPublishedBook(shareTokenHash) {
@@ -49,7 +62,8 @@ class MemoryRepository {
 
   async findPublishedAsset(shareTokenHash, assetId) {
     const book = await this.findPublishedBook(shareTokenHash);
-    return book ? this.assets.get(`${book.id}:${assetId}`) ?? null : null;
+    const asset = book ? this.assets.get(`${book.id}:${assetId}`) ?? null : null;
+    return asset ? { ...asset, manifest_json: book.manifest_json } : null;
   }
 
   async revokeBook({ id, manageTokenHash, now }) {
@@ -61,7 +75,7 @@ class MemoryRepository {
 
   async markDeleting({ id, manageTokenHash }) {
     const book = await this.findManagedBook(id, manageTokenHash);
-    if (!book) return false;
+    if (!book || !["draft", "published", "revoked", "deleting"].includes(book.status)) return false;
     book.status = "deleting";
     book.shareTokenHash = null;
     return true;
@@ -74,6 +88,9 @@ class MemoryRepository {
   async deleteBook({ id, manageTokenHash }) {
     const book = await this.findManagedBook(id, manageTokenHash);
     if (!book || book.status !== "deleting") return false;
+    for (const key of [...this.assets.keys()]) {
+      if (key.startsWith(`${id}:`)) this.assets.delete(key);
+    }
     this.books.delete(id);
     return true;
   }
@@ -102,13 +119,12 @@ class MemoryObjects {
 test("publishes an uploaded book and makes revocation fail closed", async () => {
   const manageToken = "a".repeat(43);
   const shareToken = "b".repeat(43);
-  const tokens = [manageToken, shareToken];
   const repository = new MemoryRepository();
   const objects = new MemoryObjects();
   const api = createBookShareApi({
     repository,
     objects,
-    tokenFactory: () => tokens.shift(),
+    tokenFactory: () => manageToken,
     clock: () => new Date("2026-08-28T00:00:00.000Z"),
   });
 
@@ -173,7 +189,7 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   const invalidPublishResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: invalidManifest }),
+    body: JSON.stringify({ manifest: invalidManifest, shareToken }),
   }));
   assert.equal(invalidPublishResponse.status, 400);
   assert.equal((await invalidPublishResponse.json()).code, "invalid_manifest");
@@ -181,7 +197,7 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   const publishResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest }),
+    body: JSON.stringify({ manifest, shareToken }),
   }));
   assert.equal(publishResponse.status, 200);
   assert.equal((await publishResponse.json()).shareUrl, `https://example.test/share/${shareToken}`);
@@ -206,6 +222,14 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   assert.equal(revokeResponse.status, 200);
   assert.equal(await api.isPublishedShare(shareToken), false);
 
+  const retryRevokeResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/revoke`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${manageToken}` },
+  }));
+  assert.equal(retryRevokeResponse.status, 200);
+  assert.equal((await retryRevokeResponse.json()).status, "revoked");
+  assert.equal(await api.isPublishedShare(shareToken), false);
+
   const revokedRead = await api.handle(new Request(`https://example.test/api/shared/${shareToken}`));
   assert.equal(revokedRead.status, 404);
   assert.equal((await revokedRead.json()).code, "not_found");
@@ -222,4 +246,254 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   assert.equal(deleteResponse.status, 204);
   assert.equal(repository.books.has(draft.bookId), false);
   assert.equal(objects.values.size, 0);
+});
+function pngBytes() {
+  return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+}
+
+async function publishFixture(options = {}) {
+  const manageToken = options.manageToken ?? "a".repeat(43);
+  const shareToken = options.shareToken ?? "b".repeat(43);
+  const repository = new MemoryRepository();
+  const objects = new MemoryObjects();
+  const api = createBookShareApi({
+    repository,
+    objects,
+    tokenFactory: () => manageToken,
+    clock: () => new Date("2026-08-28T00:00:00.000Z"),
+    limits: options.limits,
+  });
+  const draftResponse = await api.handle(new Request("https://example.test/api/books", { method: "POST" }));
+  const draft = await draftResponse.json();
+  const assetId = "asset:12345678-1234-4234-8234-123456789abc";
+  const uploadResponse = await api.handle(new Request(
+    `https://example.test/api/books/${draft.bookId}/assets/${encodeURIComponent(assetId)}`,
+    {
+      method: "PUT",
+      headers: { authorization: `Bearer ${draft.manageToken}`, "content-type": "image/png" },
+      body: pngBytes(),
+    },
+  ));
+  const manifest = {
+    id: "warm-photo-story",
+    revision: 4,
+    title: "A Warm Photo Story",
+    coverAssetId: assetId,
+    spreads: [{
+      id: "spread-1",
+      order: 0,
+      title: "Home",
+      body: "A remembered afternoon.",
+      elements: [{
+        id: "photo",
+        label: "Family photo",
+        kind: "lifted",
+        assetId,
+        page: "right",
+        transform: { x: 0.5, y: 0.5, scaleX: 0.8, scaleY: 0.8, rotationDeg: 0 },
+        depth: 0.1,
+        locked: false,
+        interaction: {
+          hover: "lift-glow",
+          focus: "spotlight",
+          reveal: { kind: "caption", title: "A warm memory", summary: "", facts: [] },
+        },
+        provenance: "human",
+      }],
+    }],
+  };
+  const publishRequest = {
+    method: "POST",
+    headers: { authorization: `Bearer ${draft.manageToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ manifest, shareToken }),
+  };
+  const publishResponse = await api.handle(new Request(
+    `https://example.test/api/books/${draft.bookId}/publish`,
+    publishRequest,
+  ));
+  return {
+    api,
+    repository,
+    objects,
+    draft,
+    assetId,
+    manageToken: draft.manageToken,
+    shareToken,
+    uploadResponse,
+    publishResponse,
+    publishRequest,
+  };
+}
+
+test("retries an interrupted delete without restoring public access", async () => {
+  const { api, repository, objects, draft, manageToken, shareToken, assetId } = await publishFixture();
+  let objectDeletes = 0;
+  const innerDelete = objects.delete.bind(objects);
+  objects.delete = async (keys) => {
+    objectDeletes += 1;
+    if (objectDeletes === 1) throw new Error("R2 unavailable");
+    return innerDelete(keys);
+  };
+
+  const firstDelete = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${manageToken}` },
+  }));
+  assert.equal(firstDelete.status, 503);
+  assert.equal((await firstDelete.json()).code, "storage_unavailable");
+  assert.equal(repository.books.get(draft.bookId).status, "deleting");
+  assert.equal(await api.isPublishedShare(shareToken), false);
+  assert.equal((await api.handle(new Request(`https://example.test/api/shared/${shareToken}`))).status, 404);
+  assert.equal((await api.handle(new Request(
+    `https://example.test/api/shared/${shareToken}/assets/${encodeURIComponent(assetId)}`,
+  ))).status, 404);
+  assert.equal(objects.values.size, 1);
+  assert.equal(repository.books.has(draft.bookId), true);
+
+  const retryDelete = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${manageToken}` },
+  }));
+  assert.equal(retryDelete.status, 204);
+  assert.equal(repository.books.has(draft.bookId), false);
+  assert.equal(repository.assets.size, 0);
+  assert.equal(objects.values.size, 0);
+  assert.equal(await api.isPublishedShare(shareToken), false);
+});
+
+test("keeps assets from an older revision private after republish", async () => {
+  const { api, draft, manageToken, shareToken, assetId, publishRequest } = await publishFixture({
+    manageToken: "k".repeat(43),
+    shareToken: "l".repeat(43),
+  });
+  const revokeResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/revoke`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${manageToken}` },
+  }));
+  assert.equal(revokeResponse.status, 200);
+
+  const nextManifest = structuredClone(JSON.parse(publishRequest.body).manifest);
+  nextManifest.revision += 1;
+  delete nextManifest.coverAssetId;
+  nextManifest.coverTextureUrl = "/assets/covers/the-lantern-garden-v2.png";
+  nextManifest.spreads[0].elements = [];
+  const nextShareToken = "m".repeat(43);
+  const republishResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ manifest: nextManifest, shareToken: nextShareToken }),
+  }));
+  assert.equal(republishResponse.status, 200);
+  assert.equal(await api.isPublishedShare(shareToken), false);
+  assert.equal(await api.isPublishedShare(nextShareToken), true);
+
+  const staleAssetResponse = await api.handle(new Request(
+    `https://example.test/api/shared/${nextShareToken}/assets/${encodeURIComponent(assetId)}`,
+  ));
+  assert.equal(staleAssetResponse.status, 404);
+  assert.equal((await staleAssetResponse.json()).code, "not_found");
+});
+
+test("retries metadata cleanup after files were already removed", async () => {
+  const { api, repository, objects, draft, manageToken, shareToken } = await publishFixture({
+    manageToken: "d".repeat(43),
+    shareToken: "e".repeat(43),
+  });
+  let deleteBookCalls = 0;
+  const innerDeleteBook = repository.deleteBook.bind(repository);
+  repository.deleteBook = async (...args) => {
+    deleteBookCalls += 1;
+    if (deleteBookCalls === 1) return false;
+    return innerDeleteBook(...args);
+  };
+
+  const firstDelete = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${manageToken}` },
+  }));
+  assert.equal(firstDelete.status, 409);
+  assert.equal((await firstDelete.json()).code, "delete_conflict");
+  assert.equal(objects.values.size, 0);
+  assert.equal(repository.books.get(draft.bookId).status, "deleting");
+  assert.equal(await api.isPublishedShare(shareToken), false);
+
+  const retryDelete = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${manageToken}` },
+  }));
+  assert.equal(retryDelete.status, 204);
+  assert.equal(repository.books.has(draft.bookId), false);
+  assert.equal(repository.assets.size, 0);
+});
+
+test("bounds anonymous book creation without storing network identity", async () => {
+  const repository = new MemoryRepository();
+  const objects = new MemoryObjects();
+  const api = createBookShareApi({
+    repository,
+    objects,
+    tokenFactory: () => "f".repeat(43),
+    clock: () => new Date("2026-08-28T00:00:00.000Z"),
+    limits: { maxSiteBooks: 2, maxBooksPerWindow: 2 },
+  });
+
+  assert.equal((await api.handle(new Request("https://example.test/api/books", { method: "POST" }))).status, 201);
+  assert.equal((await api.handle(new Request("https://example.test/api/books", { method: "POST" }))).status, 201);
+  const limited = await api.handle(new Request("https://example.test/api/books", { method: "POST" }));
+  assert.equal(limited.status, 429);
+  assert.equal((await limited.json()).code, "creation_limit");
+
+  const rateApi = createBookShareApi({
+    repository: new MemoryRepository(),
+    objects: new MemoryObjects(),
+    tokenFactory: () => "g".repeat(43),
+    clock: () => new Date("2026-08-28T00:00:00.000Z"),
+    limits: { maxSiteBooks: 50, maxBooksPerWindow: 1, creationWindowMs: 60 * 60 * 1000 },
+  });
+  assert.equal((await rateApi.handle(new Request("https://example.test/api/books", { method: "POST" }))).status, 201);
+  const rateLimited = await rateApi.handle(new Request("https://example.test/api/books", { method: "POST" }));
+  assert.equal(rateLimited.status, 429);
+  assert.equal((await rateLimited.json()).code, "creation_rate");
+});
+
+test("retries a publish whose response was lost after commit without replacing the share link", async () => {
+  const { api, repository, objects, draft, manageToken, shareToken, publishRequest, publishResponse } = await publishFixture({
+    manageToken: "h".repeat(43),
+    shareToken: "i".repeat(43),
+  });
+  const first = await publishResponse.json();
+  assert.equal(first.shareUrl, `https://example.test/share/${shareToken}`);
+  assert.match(first.shareUrl, /^https:\/\/example\.test\/share\/[A-Za-z0-9_-]{43}$/);
+
+  let objectPuts = 0;
+  const innerPut = objects.put.bind(objects);
+  objects.put = async (...args) => {
+    objectPuts += 1;
+    return innerPut(...args);
+  };
+
+  const retry = await api.handle(new Request(
+    `https://example.test/api/books/${draft.bookId}/publish`,
+    publishRequest,
+  ));
+  assert.equal(retry.status, 200);
+  const retried = await retry.json();
+  assert.equal(retried.shareUrl, first.shareUrl);
+  assert.equal(objectPuts, 0);
+  assert.equal(objects.values.size, 1);
+  assert.equal(repository.assets.size, 1);
+  assert.equal(await api.isPublishedShare(shareToken), true);
+
+  const mismatch = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      manifest: { revision: 4 },
+      shareToken: "j".repeat(43),
+    }),
+  }));
+  assert.equal(mismatch.status, 409);
+  assert.equal((await mismatch.json()).code, "invalid_state");
+  assert.equal(await api.isPublishedShare(shareToken), true);
+  assert.equal(await api.isPublishedShare("j".repeat(43)), false);
 });

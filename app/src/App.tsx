@@ -19,13 +19,16 @@ import {
   Minus,
   Plus,
   ImageSquare,
+  LinkSimple,
   Sparkle,
   SpinnerGap,
   Sun,
+  UploadSimple,
+  WarningCircle,
   X,
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
-import { releaseAssetUrls, resolveAssetUrl, storeLocalImage } from "./assetStore";
+import { listAssetMetadata, releaseAssetUrls, resolveAssetUrl, storeLocalImage } from "./assetStore";
 import { MAX_SOURCE_IMAGE_BYTES } from "./imageOptimizer";
 import { recordDiagnostic } from "./diagnostics";
 import {
@@ -36,6 +39,9 @@ import {
   hasReveal,
   resolveInteraction,
 } from "./interaction";
+import { PublicationPanel } from "./PublicationPanel";
+import { getPublicationRecord } from "./publishingClient";
+import type { PublicationRecord } from "./publishingClient";
 import type { BookSnapshot, FocusResponse, HoverResponse, MotionPreset, ThemeId, TurnState } from "./types";
 import { registerWebMcpTools } from "./webmcp";
 
@@ -98,6 +104,12 @@ function transitionStyle(cardRect: MotionRect): CSSProperties {
 }
 
 function BookTransitionOverlay({ transition, onDone }: { transition: BookTransition; onDone: () => void }) {
+  // `animationend` is the normal settle signal, but a browser that skips or
+  // interrupts the animation must never leave the shelf and reader both locked.
+  useEffect(() => {
+    const timer = window.setTimeout(onDone, 1600);
+    return () => window.clearTimeout(timer);
+  }, [onDone]);
   return (
     <div
       className={`book-nav-transition is-${transition.direction}`}
@@ -125,18 +137,56 @@ function BookTransitionOverlay({ transition, onDone }: { transition: BookTransit
   );
 }
 
-function BookLoadingFeedback({ title, placement }: { title: string; placement: "library" | "stage" }) {
+/**
+ * Honest staged feedback for the one operation a reader is waiting on.
+ *
+ * The three stages map to real events: intent/prewarm, the renderer reporting
+ * that it started loading this spread, and the long composition tail. Reduced
+ * motion keeps the same status text and step marks without a sustained spin.
+ */
+const LOAD_STAGES = ["warming", "loading", "composing"] as const;
+type LoadStage = (typeof LOAD_STAGES)[number];
+
+const LOAD_STAGE_COPY: Record<LoadStage, string> = {
+  warming: "Waking the reading stage",
+  loading: "Loading this spread's artwork",
+  composing: "Composing pages, lighting, and layers",
+};
+
+function BookLoadingFeedback({ title, placement, stage, reducedMotion }: {
+  title: string;
+  placement: "library" | "stage";
+  stage: LoadStage;
+  reducedMotion: boolean;
+}) {
+  const activeIndex = LOAD_STAGES.indexOf(stage);
   return (
     <div className={`book-loading-feedback is-${placement}`} role="status" aria-live="polite" aria-atomic="true">
       <div className="book-loading-card">
-        <span className="book-loading-icon" aria-hidden="true"><SpinnerGap size={22} weight="bold" /></span>
+        <span className="book-loading-icon" aria-hidden="true">
+          {reducedMotion ? <BookOpenText size={22} weight="bold" /> : <SpinnerGap size={22} weight="bold" />}
+        </span>
         <span>
           <strong>Opening {title}</strong>
-          <small>Preparing the illustrated pages…</small>
+          <small>{LOAD_STAGE_COPY[stage]}</small>
+          <ol className="book-loading-steps" aria-hidden="true">
+            {LOAD_STAGES.map((step, index) => (
+              <li key={step} className={index < activeIndex ? "is-done" : index === activeIndex ? "is-active" : ""} />
+            ))}
+          </ol>
         </span>
       </div>
     </div>
   );
+}
+
+/** Joins announcement fragments without producing the doubled `..` of naive concatenation. */
+function announce(...parts: Array<string | undefined | null>) {
+  return parts
+    .map((part) => (part ?? "").trim())
+    .filter(Boolean)
+    .map((part) => (/[.!?…:;]$/u.test(part) ? part : `${part}.`))
+    .join(" ");
 }
 
 function supportsWebGl2() {
@@ -177,6 +227,10 @@ export function App() {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [sceneFailed, setSceneFailed] = useState(false);
   const [resolvedCoverUrls, setResolvedCoverUrls] = useState<Record<string, string>>({});
+  const [loadStage, setLoadStage] = useState<LoadStage>("warming");
+  const [workshopImportError, setWorkshopImportError] = useState<string | null>(null);
+  const [showPublication, setShowPublication] = useState(false);
+  const [publicationRecord, setPublicationRecord] = useState<PublicationRecord | null>(null);
   const turnFrame = useRef<number | null>(null);
   const turnState = useRef<TurnState>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -186,6 +240,9 @@ export function App() {
   const createGuideOpener = useRef<HTMLElement | null>(null);
   const elementAgentCard = useRef<HTMLDivElement | null>(null);
   const elementAgentOpener = useRef<HTMLElement | null>(null);
+  const publicationOpener = useRef<HTMLElement | null>(null);
+  const prewarmedBooks = useRef(new Map<string, { renderer: Promise<unknown>; media: Promise<unknown> }>());
+  const loadToken = useRef(0);
   const openingBookRef = useRef<OpeningBook | null>(null);
   const openingFrame = useRef<number | null>(null);
   const libraryFrame = useRef<number | null>(null);
@@ -209,6 +266,17 @@ export function App() {
     },
     lastAction: null,
   }), [snapshot.session.quality, snapshot.session.sceneThemeId]);
+
+  useEffect(() => {
+    if (!showCreateGuide) return undefined;
+    let canceled = false;
+    listAssetMetadata(6)
+      .then((assets) => {
+        if (!canceled) setWorkshopAssetCount((current) => Math.max(current, assets.length));
+      })
+      .catch(() => recordDiagnostic("workbench:asset-list-failed", {}));
+    return () => { canceled = true; };
+  }, [showCreateGuide]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return undefined;
@@ -245,6 +313,65 @@ export function App() {
   const canGoForward = snapshot.session.currentSpreadIndex < snapshot.document.spreads.length - 1;
   const stageIsLoading = readyBookId !== snapshot.document.id || sceneLoadingBookId === snapshot.document.id;
   const libraryBusy = Boolean(openingBook || bookTransition || libraryMotion !== "idle");
+
+  const isCreatorBook = Boolean(activeLibraryBook) && activeLibraryBook?.sample === false;
+
+  /**
+   * The mobile reader sheet scrolls its own copy. Turning the page swaps the
+   * text in place, so without this the next spread opens mid-paragraph at the
+   * previous spread's scroll offset instead of at its own first line.
+   */
+  const readerCopy = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    readerCopy.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [snapshot.document.id, snapshot.session.currentSpreadIndex]);
+
+  useEffect(() => {
+    if (!isCreatorBook) {
+      setPublicationRecord(null);
+      return;
+    }
+    setPublicationRecord(getPublicationRecord(snapshot.document.id));
+  }, [isCreatorBook, snapshot.document.id]);
+
+  /**
+   * Prewarm exactly what the next screen needs, and only after a reader shows
+   * intent (hover, focus, or the click that starts the cover transition). The
+   * root shelf never reaches this, so Three.js, spreads, cutouts, and the Night
+   * background stay off the cold path.
+   */
+  const prewarmReader = useCallback((bookId: string) => {
+    const cached = prewarmedBooks.current.get(bookId);
+    if (cached) return cached;
+    const renderer: Promise<unknown> = import("./ThreeBook")
+      .catch(() => recordDiagnostic("book:prewarm-renderer-failed", { documentId: bookId }));
+    const info = bookEngine.getPrewarmMedia(bookId);
+    const media: Promise<unknown> = info?.mediaRef
+      ? resolveAssetUrl(info.mediaRef)
+        .then((url) => {
+          const image = new Image();
+          image.decoding = "async";
+          image.src = url;
+          return image.decode();
+        })
+        .then(() => recordDiagnostic("book:prewarmed", { documentId: bookId, spreadId: info.spreadId }))
+        .catch(() => recordDiagnostic("book:prewarm-media-failed", { documentId: bookId }))
+      : Promise.resolve();
+    const entry = { renderer, media };
+    prewarmedBooks.current.set(bookId, entry);
+    return entry;
+  }, []);
+
+  /** Stages only move forward, so a late signal can never rewind the message. */
+  const advanceLoadStage = useCallback((next: LoadStage) => {
+    setLoadStage((current) => (LOAD_STAGES.indexOf(next) > LOAD_STAGES.indexOf(current) ? next : current));
+  }, []);
+
+  useEffect(() => {
+    if (loadStage !== "loading") return undefined;
+    const timer = window.setTimeout(() => advanceLoadStage("composing"), 1800);
+    return () => window.clearTimeout(timer);
+  }, [advanceLoadStage, loadStage]);
 
   const hideLibrary = useCallback(() => {
     setShowLibrary(false);
@@ -341,11 +468,13 @@ export function App() {
 
   const handleBookLoading = useCallback((documentId: string) => {
     setSceneLoadingBookId(documentId);
+    advanceLoadStage("loading");
     recordDiagnostic("book:loading", { documentId });
-  }, []);
+  }, [advanceLoadStage]);
 
   const handleBookReady = useCallback((documentId: string) => {
     setReadyBookId(documentId);
+    setLoadStage("warming");
     setSceneLoadingBookId((current) => current === documentId ? null : current);
     recordDiagnostic("book:ready", { documentId });
   }, []);
@@ -365,6 +494,16 @@ export function App() {
     createGuideOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setCopied(false);
     setShowCreateGuide(true);
+  }, []);
+
+  const closePublication = useCallback(() => {
+    setShowPublication(false);
+    window.setTimeout(() => publicationOpener.current?.focus(), 0);
+  }, []);
+
+  const openPublication = useCallback(() => {
+    publicationOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setShowPublication(true);
   }, []);
 
   const closeElementAgentGuide = useCallback(() => {
@@ -403,6 +542,14 @@ export function App() {
     if (openingBookRef.current || bookTransition) return;
     const book = library.books.find((candidate) => candidate.id === bookId);
     if (!book) return;
+    // The three stages track real work: the renderer chunk arriving, this
+    // spread's artwork decoding, and the scene being composed from both.
+    const warm = prewarmReader(bookId);
+    const token = loadToken.current + 1;
+    loadToken.current = token;
+    setLoadStage("warming");
+    void warm.renderer.then(() => { if (loadToken.current === token) advanceLoadStage("loading"); });
+    void Promise.all([warm.renderer, warm.media]).then(() => { if (loadToken.current === token) advanceLoadStage("composing"); });
 
     const nextOpening: OpeningBook = {
       id: book.id,
@@ -437,7 +584,7 @@ export function App() {
       setShowMore(false);
       setShowOutline(false);
     });
-  }, [beginOpenTransition, bookTransition, findLibraryCoverRect, library.books, readyBookId, resolvedCoverUrls, snapshot.document.id]);
+  }, [advanceLoadStage, beginOpenTransition, bookTransition, findLibraryCoverRect, library.books, prewarmReader, readyBookId, resolvedCoverUrls, snapshot.document.id]);
 
   useEffect(() => registerWebMcpTools(setWebMcpAvailable), []);
 
@@ -529,6 +676,7 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && showPublication) return;
       if (event.key === "Escape" && showElementAgentGuide) {
         closeElementAgentGuide();
         return;
@@ -537,8 +685,17 @@ export function App() {
         closeCodexGuide();
         return;
       }
-      if (event.key === "Escape" && showLibrary && !openingBook) {
-        openBookFromLibrary(snapshot.document.id);
+      if (event.key === "Escape" && showLibrary) {
+        // Escape always resolves the shelf. When a cover transition is already
+        // running, skip straight to the reader instead of ignoring the key.
+        if (openingBook || bookTransition || libraryMotion !== "idle") {
+          openingBookRef.current = null;
+          setOpeningBook(null);
+          setBookTransition(null);
+          hideLibrary();
+        } else {
+          openBookFromLibrary(snapshot.document.id);
+        }
         return;
       }
       if (showLibrary) return;
@@ -558,7 +715,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeCodexGuide, closeElementAgentGuide, openBookFromLibrary, openingBook, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, snapshot.document.id, snapshot.session.preview, turnPage]);
+  }, [bookTransition, closeCodexGuide, closeElementAgentGuide, hideLibrary, libraryMotion, openBookFromLibrary, openingBook, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
 
   useEffect(() => {
     if (!showLibrary) return undefined;
@@ -680,6 +837,7 @@ export function App() {
   const importWorkshopPhotos = async (files: FileList | null) => {
     if (!files?.length) return;
     setAssetImporting(true);
+    setWorkshopImportError(null);
     let imported = 0;
     try {
       for (const file of Array.from(files).slice(0, 6 - workshopAssetCount)) {
@@ -689,9 +847,9 @@ export function App() {
         recordDiagnostic("workbench:asset-handed-off", { assetId: asset.id, originalSize: asset.originalSize ?? asset.size, size: asset.size, optimized: asset.optimized ?? false });
       }
       if (imported > 0) setWorkshopAssetCount((current) => Math.min(6, current + imported));
-      else window.alert("Choose PNG, JPEG, or WebP images smaller than 12 MB each. Apertale optimizes them locally.");
+      else setWorkshopImportError("That file was not a usable image. Choose PNG, JPEG, or WebP under 12 MB, then try the handoff again.");
     } catch {
-      window.alert("Apertale could not store those images in this browser.");
+      setWorkshopImportError("This browser could not store those images. Free some space or try a private-window-free profile, then try again.");
     } finally {
       setAssetImporting(false);
     }
@@ -775,8 +933,9 @@ export function App() {
               <span>Browse here in any browser. To create with your own plan usage, open this Site in the ChatGPT desktop built-in browser and use the conversation beside it; Safari does not include that composer.</span>
               <div className="library-actions">
                 <button className="create-codex-button" onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create with ChatGPT</button>
-                <button className="guide-book-button" onClick={() => openBookFromLibrary("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={18} /> Read the Guide Book</button>
+                <button className="guide-book-button" onClick={() => openBookFromLibrary("apertale-field-guide")} onPointerEnter={() => prewarmReader("apertale-field-guide")} onFocus={() => prewarmReader("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={18} /> Read the Guide Book</button>
               </div>
+              <p className="library-scroll-cue" aria-hidden="true">Swipe for all {library.books.length} books<ArrowRight size={14} weight="bold" /></p>
             </div>
             <div className="library-gallery" aria-label="Books in this library">
               {library.books.map((book, index) => (
@@ -785,6 +944,8 @@ export function App() {
                   data-book-id={book.id}
                   className={`library-card library-card-${index + 1} ${book.id === library.activeBookId ? "is-active" : ""} ${openingBook?.id === book.id ? "is-opening" : ""}`}
                   onClick={(event) => openBookFromLibrary(book.id, event.currentTarget)}
+                  onPointerEnter={() => prewarmReader(book.id)}
+                  onFocus={() => prewarmReader(book.id)}
                   aria-busy={openingBook?.id === book.id}
                   disabled={libraryBusy}
                 >
@@ -806,7 +967,7 @@ export function App() {
               ))}
             </div>
             <p className="demo-disclosure">Curated samples use OpenAI-generated illustration. Create your own with Codex and ImageGen in your active conversation.</p>
-            {openingBook && <BookLoadingFeedback title={openingBook.title} placement="library" />}
+            {openingBook && <BookLoadingFeedback title={openingBook.title} placement="library" stage={loadStage} reducedMotion={reducedMotion} />}
           </div>
         </section>
       )}
@@ -867,13 +1028,28 @@ export function App() {
           </div>
         )}
 
-        {stageIsLoading && !showLibrary && !showCreateGuide && <BookLoadingFeedback title={openingBook?.title ?? snapshot.document.title} placement="stage" />}
+        {stageIsLoading && !showLibrary && !showCreateGuide && <BookLoadingFeedback title={openingBook?.title ?? snapshot.document.title} placement="stage" stage={loadStage} reducedMotion={reducedMotion} />}
 
         {!snapshot.session.preview && !showCreateGuide && (
           <>
             <button className="page-arrow page-arrow-left" onClick={() => turnPage("backward")} disabled={!canGoBack || Boolean(turn)} aria-label="Previous spread"><ArrowLeft size={22} /></button>
             <button className="page-arrow page-arrow-right" onClick={() => turnPage("forward")} disabled={!canGoForward || Boolean(turn)} aria-label="Next spread"><ArrowRight size={22} /></button>
           </>
+        )}
+
+        {!showCreateGuide && (
+          <aside className="reader-sheet" aria-label="Reading panel">
+            <div className="reader-sheet-copy" ref={readerCopy}>
+              {spread.kicker && <p className="reader-sheet-kicker">{spread.kicker}</p>}
+              <h2>{spread.title}</h2>
+              <p>{spread.body}</p>
+            </div>
+            <div className="reader-sheet-controls">
+              <button onClick={() => turnPage("backward")} disabled={!canGoBack || Boolean(turn)} aria-label="Previous spread"><ArrowLeft size={24} /></button>
+              <span className="reader-sheet-progress"><strong>{snapshot.session.currentSpreadIndex + 1}</strong> / {snapshot.document.spreads.length}</span>
+              <button onClick={() => turnPage("forward")} disabled={!canGoForward || Boolean(turn)} aria-label="Next spread"><ArrowRight size={24} /></button>
+            </div>
+          </aside>
         )}
 
         {selected && !snapshot.session.preview && !turn && !showCreateGuide && (
@@ -994,6 +1170,16 @@ export function App() {
         <footer className="bottom-controls" hidden={showLibrary}>
           <div className="bottom-left-actions">
             <button className="outline-button" onClick={() => setShowOutline(!showOutline)} aria-expanded={showOutline}>Story</button>
+            {isCreatorBook && (
+              <button
+                className={`publish-button ${publicationRecord?.status === "published" ? "is-live" : ""}`}
+                onClick={openPublication}
+                aria-haspopup="dialog"
+              >
+                {publicationRecord?.status === "published" ? <LinkSimple size={17} weight="bold" /> : <UploadSimple size={17} weight="bold" />}
+                <span>{publicationRecord?.status === "published" ? "Shared" : "Publish"}</span>
+              </button>
+            )}
           </div>
           <button className="agent-prompt" onClick={openCodexGuide}>
             <Sparkle size={17} weight="fill" />
@@ -1089,6 +1275,13 @@ export function App() {
                   {assetImporting ? "Importing" : workshopAssetCount > 0 ? `${workshopAssetCount} image${workshopAssetCount === 1 ? "" : "s"} ready` : "Image handoff"}
                 </button>
                 <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => { void importWorkshopPhotos(event.currentTarget.files); event.currentTarget.value = ""; }} />
+                {workshopImportError && (
+                  <p className="workshop-import-error" role="alert">
+                    <WarningCircle size={14} weight="fill" />
+                    <span>{workshopImportError}</span>
+                    <button type="button" onClick={() => { setWorkshopImportError(null); fileInput.current?.click(); }}>Choose another image</button>
+                  </p>
+                )}
               </div>
             </aside>
           </div>
@@ -1123,13 +1316,27 @@ export function App() {
         </section>
       )}
 
+      {showPublication && isCreatorBook && !snapshot.session.preview && (
+        <PublicationPanel
+          document={snapshot.document}
+          record={publicationRecord}
+          onRecordChange={setPublicationRecord}
+          onClose={closePublication}
+        />
+      )}
+
       {!showLibrary && <div className="sr-only" aria-live="polite">
-        {spread.title}. {spread.body}
-        {selectedInteraction && hasReveal(selectedInteraction)
-          ? ` ${selectedInteraction.reveal.title}. ${selectedInteraction.reveal.summary} ${selectedInteraction.reveal.facts
-              .map((fact) => `${fact.label}: ${fact.value}.`)
-              .join(" ")}`
-          : ""}
+        {announce(
+          spread.title,
+          spread.body,
+          ...(selectedInteraction && hasReveal(selectedInteraction)
+            ? [
+                selectedInteraction.reveal.title,
+                selectedInteraction.reveal.summary,
+                ...selectedInteraction.reveal.facts.map((fact) => `${fact.label}: ${fact.value}`),
+              ]
+            : []),
+        )}
       </div>}
     </main>
   );

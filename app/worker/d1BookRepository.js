@@ -30,7 +30,7 @@ export class D1BookRepository {
 
   async findManagedBook(id, manageTokenHash) {
     await this.ensureSchema();
-    return this.db.prepare(`SELECT id, status, title, revision
+    return this.db.prepare(`SELECT id, status, title, revision, share_token_hash
       FROM living_books
       WHERE id = ? AND manage_token_hash = ?`).bind(id, manageTokenHash).first();
   }
@@ -57,6 +57,20 @@ export class D1BookRepository {
     return result.results.map((row) => row.asset_id);
   }
 
+  async countBooks() {
+    await this.ensureSchema();
+    const row = await this.db.prepare(`SELECT COUNT(*) AS count FROM living_books`).first();
+    return Number(row?.count ?? 0);
+  }
+
+  async countBooksCreatedSince(isoTimestamp) {
+    await this.ensureSchema();
+    const row = await this.db.prepare(`SELECT COUNT(*) AS count
+      FROM living_books
+      WHERE created_at >= ?`).bind(isoTimestamp).first();
+    return Number(row?.count ?? 0);
+  }
+
   async publishBook({ id, manageTokenHash, shareTokenHash, title, revision, manifestJson, now }) {
     await this.ensureSchema();
     const result = await this.db.prepare(`UPDATE living_books SET
@@ -80,7 +94,16 @@ export class D1BookRepository {
       id,
       manageTokenHash,
     ).run();
-    return changes(result) === 1;
+    if (changes(result) === 1) return true;
+    if (!Number.isSafeInteger(revision) || typeof shareTokenHash !== "string") return false;
+    const existing = await this.db.prepare(`SELECT id
+      FROM living_books
+      WHERE id = ?
+        AND manage_token_hash = ?
+        AND status = 'published'
+        AND revision = ?
+        AND share_token_hash = ?`).bind(id, manageTokenHash, revision, shareTokenHash).first();
+    return Boolean(existing);
   }
 
   async findPublishedBook(shareTokenHash) {
@@ -92,7 +115,7 @@ export class D1BookRepository {
 
   async findPublishedAsset(shareTokenHash, assetId) {
     await this.ensureSchema();
-    return this.db.prepare(`SELECT asset.object_key, asset.content_type, asset.byte_size
+    return this.db.prepare(`SELECT asset.object_key, asset.content_type, asset.byte_size, book.manifest_json
       FROM living_book_assets AS asset
       INNER JOIN living_books AS book ON book.id = asset.book_id
       WHERE book.share_token_hash = ?
@@ -122,7 +145,9 @@ export class D1BookRepository {
       share_token_hash = NULL,
       status = 'deleting',
       updated_at = ?
-    WHERE id = ? AND manage_token_hash = ?`).bind(now, id, manageTokenHash).run();
+    WHERE id = ?
+      AND manage_token_hash = ?
+      AND status IN ('draft', 'published', 'revoked', 'deleting')`).bind(now, id, manageTokenHash).run();
     return changes(result) === 1;
   }
 

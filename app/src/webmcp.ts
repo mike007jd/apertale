@@ -7,6 +7,7 @@ import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, RevealKind
 const compact = (value: unknown) => JSON.stringify(value);
 
 type ToolInput = Record<string, unknown>;
+const uncancelledToolSignal = new AbortController().signal;
 
 function invalid(message: string): never {
   throw new TypeError(`Invalid WebMCP input: ${message}`);
@@ -139,7 +140,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("get_project_context", signal, async () => {
+        execute: (input, options) => runTool("get_project_context", options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["detail"]);
           const detail = typeof input.detail === "undefined" ? "compact" : requiredString(input, "detail");
           if (!["compact", "selected-reveal", "assets"].includes(detail)) invalid("detail is not supported.");
@@ -189,7 +190,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("manage_book", signal, async () => {
+        execute: (input, options) => runTool("manage_book", options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["requestId", "expectedRevision", "action", "bookId", "coverAssetId", "title", "spreads"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
@@ -205,7 +206,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           if (action === "set-cover") {
             const coverAssetId = requiredString(input, "coverAssetId");
             const validatedAssets = await getAssetMetadata([coverAssetId]);
-            canceled(signal);
+            canceled(options?.signal ?? uncancelledToolSignal);
             const result = bookEngine.dispatch({
               type: "set-book-cover",
               requestId,
@@ -263,7 +264,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("compose_spread", signal, () => {
+        execute: (input, options) => runTool("compose_spread", options?.signal ?? uncancelledToolSignal, () => {
           assertOnly(input, ["requestId", "expectedRevision", "spreadId", "title", "body", "kicker"]);
           return bookEngine.dispatch({
             type: "compose-spread",
@@ -342,7 +343,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("apply_scene_patch", signal, async () => {
+        execute: (input, options) => runTool("apply_scene_patch", options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["requestId", "expectedRevision", "spreadId", "operations"]);
           if (!Array.isArray(input.operations) || input.operations.length < 1 || input.operations.length > 24) invalid("operations must contain 1–24 scene operations.");
           const parseTransform = (raw: unknown) => {
@@ -472,7 +473,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           }))];
           const validatedLocalAssets = await getAssetMetadata(requestedLocalAssetIds);
           if (validatedLocalAssets.length !== requestedLocalAssetIds.length) invalid("one or more local asset ids do not exist in this browser.");
-          canceled(signal);
+          canceled(options?.signal ?? uncancelledToolSignal);
           return bookEngine.dispatch({
             type: "scene-patch",
             requestId: requiredString(input, "requestId"),
@@ -501,7 +502,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
-        execute: (input, { signal }) => runTool("set_presentation", signal, () => {
+        execute: (input, options) => runTool("set_presentation", options?.signal ?? uncancelledToolSignal, () => {
           assertOnly(input, ["requestId", "theme", "preview"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
@@ -535,7 +536,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, { signal }) => runTool("undo_project_change", signal, () => {
+        execute: (input, options) => runTool("undo_project_change", options?.signal ?? uncancelledToolSignal, () => {
           assertOnly(input, ["requestId", "expectedRevision", "undoToken"]);
           return bookEngine.dispatch({
             type: "undo",

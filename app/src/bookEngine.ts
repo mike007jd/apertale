@@ -366,6 +366,25 @@ export class BookEngine {
     };
   }
 
+  /**
+   * Read-only media descriptor for the spread a reader will see first.
+   *
+   * Used purely to prewarm the renderer chunk and that one spread's artwork
+   * once a reader shows intent. It mutates nothing and never widens the
+   * current/adjacent loading scope.
+   */
+  getPrewarmMedia(documentId: string) {
+    const isActive = documentId === this.documentState.id;
+    const book = isActive ? this.documentState : this.libraryState.documents.find((candidate) => candidate.id === documentId);
+    if (!book) return null;
+    const spread = book.spreads[isActive ? this.sessionState.currentSpreadIndex : 0] ?? book.spreads[0];
+    if (!spread) return null;
+    return {
+      spreadId: spread.id,
+      mediaRef: spread.artwork?.cleanPlateAssetId ?? spread.textureUrl ?? null,
+    };
+  }
+
   openBook(documentId: string, source: CommandSource = "human") {
     if (documentId === this.documentState.id) return true;
     const nextDocument = this.libraryState.documents.find((book) => book.id === documentId);
