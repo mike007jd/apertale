@@ -31,8 +31,8 @@ test("falls back to the Worker-routed app shell for an unknown app route", async
         fetch: async (request) => {
           const url = new URL(request.url);
           calls.push(url.pathname + url.search);
-          return new Response(url.pathname === "/app-shell.html" ? "app" : "missing", {
-            status: url.pathname === "/app-shell.html" ? 200 : 404,
+          return new Response(url.pathname === "/app-shell" ? "app" : "missing", {
+            status: url.pathname === "/app-shell" ? 200 : 404,
           });
         },
       },
@@ -40,9 +40,10 @@ test("falls back to the Worker-routed app shell for an unknown app route", async
   );
 
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
   assert.equal(response.headers.get("origin-agent-cluster"), "?1");
   assert.equal(response.headers.get("permissions-policy"), "tools=(self)");
-  assert.deepEqual(calls, ["/flow/step-two?source=share", "/app-shell.html"]);
+  assert.deepEqual(calls, ["/flow/step-two?source=share", "/app-shell"]);
 });
 
 test("does not turn missing API or write requests into the app shell", async () => {
@@ -81,7 +82,7 @@ test("does not serve the app shell for a revoked or unknown share token", async 
 });
 
 test("emits the files required by Sites packaging", async () => {
-  await access(new URL("../dist/client/app-shell.html", import.meta.url));
+  await access(new URL("../dist/client/app-shell", import.meta.url));
   await assert.rejects(access(new URL("../dist/client/index.html", import.meta.url)));
   await access(new URL("../dist/client/apertale-manifest.json", import.meta.url));
   await access(new URL("../dist/server/index.js", import.meta.url));

@@ -1,12 +1,13 @@
 import { createBookShareApi } from "./bookShareApi.js";
 import { D1BookRepository } from "./d1BookRepository.js";
 
-const APP_SHELL_PATH = "/app-shell.html";
+const APP_SHELL_PATH = "/app-shell";
 
-function withWebMcpDocumentPolicy(response) {
+function withWebMcpDocumentPolicy(response, { html = false } = {}) {
   const headers = new Headers(response.headers);
   headers.set("Origin-Agent-Cluster", "?1");
   headers.set("Permissions-Policy", "tools=(self)");
+  if (html) headers.set("Content-Type", "text/html; charset=utf-8");
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -65,7 +66,7 @@ export async function handleRequest(request, env, options = {}) {
     const indexUrl = new URL(request.url);
     indexUrl.pathname = APP_SHELL_PATH;
     indexUrl.search = "";
-    return withWebMcpDocumentPolicy(await env.ASSETS.fetch(new Request(indexUrl, request)));
+    return withWebMcpDocumentPolicy(await env.ASSETS.fetch(new Request(indexUrl, request)), { html: true });
   }
 
   const response = await env.ASSETS.fetch(request);
@@ -78,7 +79,7 @@ export async function handleRequest(request, env, options = {}) {
   const indexUrl = new URL(request.url);
   indexUrl.pathname = APP_SHELL_PATH;
   indexUrl.search = "";
-  return withWebMcpDocumentPolicy(await env.ASSETS.fetch(new Request(indexUrl, request)));
+  return withWebMcpDocumentPolicy(await env.ASSETS.fetch(new Request(indexUrl, request)), { html: true });
 }
 
 export default {
