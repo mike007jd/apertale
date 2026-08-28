@@ -1,6 +1,6 @@
 {
   "date": "2026-08-28",
-  "target": "local LivingBook implementation in the Codex in-app browser",
+  "target": "local and production LivingBook implementation in the Codex in-app browser",
   "files": [
     {
       "file": "01-first-visit-explore-1280x720.png",
@@ -17,6 +17,14 @@
     {
       "file": "04-reader-390x844-spread-4.png",
       "oracle": "mobile portrait reader preserves the full artwork, interaction rail, story panel, and reachable spread navigation"
+    },
+    {
+      "file": "05-production-your-books-1280x720.png",
+      "oracle": "deployed public Site defaults to the personal section and keeps curated samples in Explore"
+    },
+    {
+      "file": "06-production-starlight-night-spread-2.png",
+      "oracle": "deployed anonymous Starlight reader reaches spread two in Night and exposes no creator controls"
     }
   ]
 }
