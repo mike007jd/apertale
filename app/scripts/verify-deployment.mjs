@@ -35,6 +35,40 @@ function assertHeader(response, name, expected) {
   if (actual !== expected) fail(`${name} must be ${JSON.stringify(expected)}; received ${JSON.stringify(actual)}.`);
 }
 
+function referencedChunks(source, moduleUrl) {
+  const chunks = new Set();
+  for (const match of source.matchAll(/["']([^"'\\\s]+\.js)["']/gu)) {
+    let reference = match[1];
+    if (reference.startsWith("assets/")) reference = `/${reference}`;
+    if (!reference.startsWith("/") && !reference.startsWith("./") && !reference.startsWith("../")) continue;
+    const url = new URL(reference, moduleUrl);
+    if (url.origin === moduleUrl.origin && url.pathname.startsWith("/assets/")) chunks.add(url.href);
+  }
+  return chunks;
+}
+
+async function fetchBundleGraph(entryUrl, entrySource, fetchImpl) {
+  const sources = [entrySource];
+  const seen = new Set([entryUrl.href]);
+  const pending = [...referencedChunks(entrySource, entryUrl)];
+
+  while (pending.length > 0 && seen.size < 32) {
+    const href = pending.shift();
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    const chunkUrl = new URL(href);
+    const response = await fetchImpl(chunkUrl, { redirect: "follow" });
+    if (!response.ok) fail(`${chunkUrl.href} returned HTTP ${response.status}.`);
+    const source = await response.text();
+    sources.push(source);
+    for (const reference of referencedChunks(source, chunkUrl)) {
+      if (!seen.has(reference)) pending.push(reference);
+    }
+  }
+
+  return sources.join("\n");
+}
+
 export async function verifyDeployment(value, fetchImpl = fetch) {
   const baseUrl = asBaseUrl(value);
   const response = await fetchImpl(baseUrl, {
@@ -64,7 +98,8 @@ export async function verifyDeployment(value, fetchImpl = fetch) {
   const entryResponse = await fetchImpl(entryUrl, { redirect: "follow" });
   if (!entryResponse.ok) fail(`${entryUrl.href} returned HTTP ${entryResponse.status}.`);
   const entry = await entryResponse.text();
-  const missingTools = EXPECTED_TOOLS.filter((name) => !entry.includes(name));
+  const bundleGraph = await fetchBundleGraph(entryUrl, entry, fetchImpl);
+  const missingTools = EXPECTED_TOOLS.filter((name) => !bundleGraph.includes(name));
   if (missingTools.length > 0) fail(`the shipped entry bundle is missing tool identifiers: ${missingTools.join(", ")}.`);
 
   return {

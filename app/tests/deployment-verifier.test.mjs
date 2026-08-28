@@ -34,7 +34,8 @@ test("verifies the public HTTP contract and reports the remaining host gate", as
         webMcp: { registration: "document.modelContext.registerTool", tools: toolNames },
       }));
     }
-    if (url.pathname === "/assets/index.js") return response(toolNames.join("\n"));
+    if (url.pathname === "/assets/index.js") return response('const lazyChunks = ["assets/App.js"];');
+    if (url.pathname === "/assets/App.js") return response(toolNames.join("\n"));
     return response("missing", { status: 404 });
   };
 
