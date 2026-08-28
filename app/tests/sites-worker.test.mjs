@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import worker, { handleRequest } from "../worker/index.js";
 
@@ -82,6 +82,9 @@ test("does not serve the app shell for a revoked or unknown share token", async 
 
 test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/index.html", import.meta.url));
+  const staticHeaders = await readFile(new URL("../dist/client/_headers", import.meta.url), "utf8");
+  assert.match(staticHeaders, /Origin-Agent-Cluster:\s*\?1/u);
+  assert.match(staticHeaders, /Permissions-Policy:\s*tools=\(self\)/u);
   await access(new URL("../dist/client/apertale-manifest.json", import.meta.url));
   await access(new URL("../dist/server/index.js", import.meta.url));
   await access(new URL("../dist/server/bookShareApi.js", import.meta.url));
