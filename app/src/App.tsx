@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ArrowCounterClockwise,
@@ -28,9 +28,19 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
-import { getAssetMetadata, releaseAssetUrls, resolveAssetUrl, storeLocalImage } from "./assetStore";
-import { buildCreationBrief } from "./creationBrief";
-import { MAX_SOURCE_IMAGE_BYTES } from "./imageOptimizer";
+import { releaseAssetUrls, resolveAssetUrl } from "./assetStore";
+import {
+  CREATION_LENGTHS,
+  CREATION_SOURCES,
+  CREATION_STYLES,
+  INITIAL_CREATION_WORKSHOP,
+  MAX_WORKSHOP_ASSETS,
+  buildCreationWorkshopBrief,
+  importCreationWorkshopAssets,
+  persistCreationWorkshopAssetOrder,
+  reduceCreationWorkshop,
+  restoreCreationWorkshopAssets,
+} from "./creationWorkshop";
 import { recordDiagnostic } from "./diagnostics";
 import {
   FOCUS_LABELS,
@@ -40,6 +50,7 @@ import {
   hasReveal,
   resolveInteraction,
 } from "./interaction";
+import { canTurnPage, createPageTurnSession, pageTurnNavDisabled } from "./pageTurn";
 import { PublicationPanel } from "./PublicationPanel";
 import { getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
@@ -84,40 +95,6 @@ type BookTransition = {
   direction: "open" | "close";
   cardRect: MotionRect;
 };
-
-const CREATION_STYLES = ["Paper collage", "Watercolor", "Cinematic", "Surprise me"] as const;
-const CREATION_LENGTHS = [4, 6, 8, 10, 12] as const;
-const CREATION_SOURCES = [
-  { id: "idea", label: "Idea" },
-  { id: "photos", label: "Photos" },
-  { id: "both", label: "Idea + photos" },
-] as const;
-/* One source image per spread covers a full book, and 12 optimized images stay
-   under ~18 MB in IndexedDB while the strip still scrolls in one row. */
-const MAX_WORKSHOP_ASSETS = 12;
-const WORKSHOP_ASSET_ORDER_KEY = "apertale:workshop-asset-order:v1";
-
-type CreationSource = (typeof CREATION_SOURCES)[number]["id"];
-type WorkshopAsset = { id: string; name: string; url: string };
-
-function readWorkshopAssetOrder(): string[] {
-  try {
-    const parsed: unknown = JSON.parse(sessionStorage.getItem(WORKSHOP_ASSET_ORDER_KEY) ?? "[]");
-    if (!Array.isArray(parsed)) return [];
-    return [...new Set(parsed.filter((id): id is string => typeof id === "string" && id.startsWith("asset:")))]
-      .slice(0, MAX_WORKSHOP_ASSETS);
-  } catch {
-    return [];
-  }
-}
-
-function writeWorkshopAssetOrder(assets: readonly WorkshopAsset[]) {
-  try {
-    sessionStorage.setItem(WORKSHOP_ASSET_ORDER_KEY, JSON.stringify(assets.map((asset) => asset.id)));
-  } catch {
-    // A storage-blocked browser can still keep the current in-memory brief.
-  }
-}
 
 async function copyPlainText(text: string): Promise<boolean> {
   try {
@@ -295,10 +272,9 @@ export function App() {
   const [showElementAgentGuide, setShowElementAgentGuide] = useState(false);
   const [elementPromptCopied, setElementPromptCopied] = useState(false);
   const [elementPromptCopyError, setElementPromptCopyError] = useState(false);
-  const [creationSpreadCount, setCreationSpreadCount] = useState(6);
-  const [creationStyle, setCreationStyle] = useState<(typeof CREATION_STYLES)[number]>("Paper collage");
-  const [creationSource, setCreationSource] = useState<CreationSource>("idea");
-  const [workshopAssets, setWorkshopAssets] = useState<WorkshopAsset[]>([]);
+  const [creationWorkshop, dispatchCreationWorkshop] = useReducer(reduceCreationWorkshop, INITIAL_CREATION_WORKSHOP);
+  const [workshopHydrated, setWorkshopHydrated] = useState(false);
+  const [workshopHydrationAttempt, setWorkshopHydrationAttempt] = useState(0);
   const [assetImporting, setAssetImporting] = useState(false);
   const [openingBook, setOpeningBook] = useState<OpeningBook | null>(null);
   const [readyBookId, setReadyBookId] = useState<string | null>(null);
@@ -311,8 +287,14 @@ export function App() {
   const [workshopImportError, setWorkshopImportError] = useState<string | null>(null);
   const [showPublication, setShowPublication] = useState(false);
   const [publicationRecord, setPublicationRecord] = useState<PublicationRecord | null>(null);
-  const turnFrame = useRef<number | null>(null);
-  const turnState = useRef<TurnState>(null);
+  const creationSpreadCount = creationWorkshop.spreadCount;
+  const creationStyle = creationWorkshop.visualDirection;
+  const creationSource = creationWorkshop.mode;
+  const workshopAssets = creationWorkshop.assets;
+  const pageTurnIndexRef = useRef(snapshot.session.currentSpreadIndex);
+  const pageTurnCountRef = useRef(snapshot.document.spreads.length);
+  const pageTurnDocumentRef = useRef(snapshot.document.id);
+  const reducedMotionRef = useRef(reducedMotion);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const addPhotoButton = useRef<HTMLButtonElement | null>(null);
   const librarySheet = useRef<HTMLDivElement | null>(null);
@@ -327,6 +309,30 @@ export function App() {
   const openingBookRef = useRef<OpeningBook | null>(null);
   const openingFrame = useRef<number | null>(null);
   const libraryFrame = useRef<number | null>(null);
+  pageTurnIndexRef.current = snapshot.session.currentSpreadIndex;
+  pageTurnCountRef.current = snapshot.document.spreads.length;
+  pageTurnDocumentRef.current = snapshot.document.id;
+  reducedMotionRef.current = reducedMotion;
+
+  const turnController = useMemo(() => createPageTurnSession({
+    surface: "editor",
+    now: () => performance.now(),
+    requestFrame: (callback) => requestAnimationFrame(callback),
+    cancelFrame: (handle) => cancelAnimationFrame(handle),
+    setTurn,
+    commit: (direction) => bookEngine.setSpread(pageTurnIndexRef.current + (direction === "forward" ? 1 : -1)),
+    navigationKey: () => `${pageTurnDocumentRef.current}:${pageTurnIndexRef.current}`,
+    reducedMotion: () => reducedMotionRef.current,
+    canTurn: (direction) => canTurnPage(direction, pageTurnIndexRef.current, pageTurnCountRef.current),
+  }), []);
+
+  useEffect(() => {
+    turnController.activate();
+    return () => turnController.dispose();
+  }, [turnController]);
+
+  const turnPage = turnController.turnPage;
+  const onPageGesture = turnController.onPageGesture;
   const webGlAvailable = useMemo(supportsWebGl2, []);
   const renderWebGl = !showLibrary && webGlAvailable && !sceneFailed;
   const library = useMemo(() => bookEngine.getLibrary(), [snapshot.document.id, snapshot.document.revision]);
@@ -357,30 +363,25 @@ export function App() {
   }), [snapshot.session.quality, snapshot.session.sceneThemeId]);
 
   useEffect(() => {
-    if (!showCreateGuide || workshopAssets.length > 0) return undefined;
-    const selectedIds = readWorkshopAssetOrder();
-    if (selectedIds.length === 0) return undefined;
+    if (!showCreateGuide || workshopHydrated) return undefined;
     let canceled = false;
-    getAssetMetadata(selectedIds)
-      .then(async (assets) => {
-        const metadataById = new Map(assets.map((asset) => [asset.id, asset]));
-        const resolved = await Promise.all(selectedIds.map(async (id) => {
-          const asset = metadataById.get(id);
-          if (!asset) return null;
-          try {
-            return { id: asset.id, name: asset.name, url: await resolveAssetUrl(asset.id) } satisfies WorkshopAsset;
-          } catch {
-            return null;
-          }
-        }));
+    restoreCreationWorkshopAssets()
+      .then((assets) => {
         if (canceled) return;
-        const hydrated = resolved.filter((asset): asset is WorkshopAsset => Boolean(asset));
-        writeWorkshopAssetOrder(hydrated);
-        setWorkshopAssets((current) => (current.length > 0 ? current : hydrated));
+        dispatchCreationWorkshop({ type: "restore-assets", assets });
+        setWorkshopHydrated(true);
       })
-      .catch(() => recordDiagnostic("workbench:asset-list-failed", {}));
+      .catch(() => {
+        if (canceled) return;
+        recordDiagnostic("workbench:asset-list-failed", {});
+        setWorkshopImportError("Saved photos could not be restored. Try again before adding new images.");
+      });
     return () => { canceled = true; };
-  }, [showCreateGuide, workshopAssets.length]);
+  }, [showCreateGuide, workshopHydrated, workshopHydrationAttempt]);
+
+  useEffect(() => {
+    if (workshopHydrated) persistCreationWorkshopAssetOrder(workshopAssets);
+  }, [workshopAssets, workshopHydrated]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return undefined;
@@ -413,8 +414,11 @@ export function App() {
   const selectedInteraction = selected ? resolveInteraction(selected) : null;
   const hovered = hoveredId ? spread.elements.find((element) => element.id === hoveredId) ?? null : null;
   const isNight = snapshot.session.sceneThemeId === "midnight-desk";
-  const canGoBack = snapshot.session.currentSpreadIndex > 0;
-  const canGoForward = snapshot.session.currentSpreadIndex < snapshot.document.spreads.length - 1;
+  const pageTurnNav = pageTurnNavDisabled(
+    turn,
+    snapshot.session.currentSpreadIndex,
+    snapshot.document.spreads.length,
+  );
   const stageIsLoading = readyBookId !== snapshot.document.id || sceneLoadingBookId === snapshot.document.id;
   const libraryBusy = Boolean(openingBook || bookTransition || libraryMotion !== "idle");
 
@@ -717,70 +721,6 @@ export function App() {
     document.documentElement.dataset.theme = isNight ? "night" : "day";
   }, [isNight]);
 
-  const animateTurn = useCallback((direction: "forward" | "backward", from: number, to: number, commit: boolean) => {
-    if (turnFrame.current) cancelAnimationFrame(turnFrame.current);
-    if (reducedMotion) {
-      if (commit) bookEngine.setSpread(snapshot.session.currentSpreadIndex + (direction === "forward" ? 1 : -1));
-      setTurn(null);
-      return;
-    }
-    const activeTurn = turnState.current ?? { direction, progress: from };
-    activeTurn.direction = direction;
-    activeTurn.progress = from;
-    turnState.current = activeTurn;
-    setTurn(activeTurn);
-    const started = performance.now();
-    const duration = Math.max(240, 760 * Math.abs(to - from));
-    let frameCount = 0;
-    const tick = (now: number) => {
-      frameCount += 1;
-      const linear = Math.min(1, (now - started) / duration);
-      const eased = 0.5 - Math.cos(Math.PI * linear) / 2;
-      activeTurn.progress = from + (to - from) * eased;
-      if (linear < 1) turnFrame.current = requestAnimationFrame(tick);
-      else {
-        const measuredDuration = Math.max(1, now - started);
-        recordDiagnostic("page-turn:summary", {
-          direction,
-          durationMs: Math.round(measuredDuration),
-          frames: frameCount,
-          fps: Math.round((frameCount / measuredDuration) * 1000),
-        });
-        turnState.current = null;
-        setTurn(null);
-        turnFrame.current = null;
-        if (commit) bookEngine.setSpread(snapshot.session.currentSpreadIndex + (direction === "forward" ? 1 : -1));
-      }
-    };
-    turnFrame.current = requestAnimationFrame(tick);
-  }, [reducedMotion, snapshot.session.currentSpreadIndex]);
-
-  const turnPage = useCallback((direction: "forward" | "backward") => {
-    if (turnState.current) return;
-    if (direction === "forward" && !canGoForward) return;
-    if (direction === "backward" && !canGoBack) return;
-    animateTurn(direction, direction === "forward" ? 0 : 1, direction === "forward" ? 1 : 0, true);
-  }, [animateTurn, canGoBack, canGoForward]);
-
-  const onPageGesture = useCallback((direction: "forward" | "backward", phase: "start" | "move" | "end", amount: number) => {
-    if (phase === "start") {
-      if (turnState.current) return;
-      const activeTurn = { direction, progress: direction === "forward" ? 0 : 1 };
-      turnState.current = activeTurn;
-      setTurn(activeTurn);
-      return;
-    }
-    if (phase === "move") {
-      if (turnState.current) turnState.current.progress = direction === "forward" ? amount : 1 - amount;
-      return;
-    }
-    if (!turnState.current) return;
-    const commit = amount > 0.32;
-    const current = direction === "forward" ? amount : 1 - amount;
-    const target = commit ? (direction === "forward" ? 1 : 0) : direction === "forward" ? 0 : 1;
-    animateTurn(direction, current, target, commit);
-  }, [animateTurn]);
-
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && showPublication) return;
@@ -905,11 +845,9 @@ export function App() {
   }, [showElementAgentGuide]);
 
   useEffect(() => () => {
-    if (turnFrame.current) cancelAnimationFrame(turnFrame.current);
     if (openingFrame.current) cancelAnimationFrame(openingFrame.current);
     if (libraryFrame.current) cancelAnimationFrame(libraryFrame.current);
     releaseAssetUrls();
-    turnState.current = null;
   }, []);
 
   const liftSelected = () => {
@@ -949,6 +887,10 @@ export function App() {
 
   const importWorkshopPhotos = async (files: FileList | null) => {
     if (!files?.length) return;
+    if (!workshopHydrated) {
+      setWorkshopImportError("Wait for saved photos to finish restoring before adding new images.");
+      return;
+    }
     const room = MAX_WORKSHOP_ASSETS - workshopAssets.length;
     if (room <= 0) {
       setWorkshopImportError(`This brief already holds ${MAX_WORKSHOP_ASSETS} photos. Remove one to add another.`);
@@ -956,68 +898,40 @@ export function App() {
     }
     setAssetImporting(true);
     setWorkshopImportError(null);
-    const imported: WorkshopAsset[] = [];
     try {
+      const batch = await importCreationWorkshopAssets(files, room);
       // Files keep their picked order, and each import appends to the end of the strip.
-      for (const file of Array.from(files).slice(0, room)) {
-        if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size <= 0 || file.size > MAX_SOURCE_IMAGE_BYTES) continue;
-        const asset = await storeLocalImage(file);
-        let url = "";
-        try { url = await resolveAssetUrl(asset.id); } catch { url = ""; }
-        imported.push({ id: asset.id, name: asset.name, url });
+      for (const asset of batch.stored) {
         recordDiagnostic("workbench:asset-handed-off", { assetId: asset.id, originalSize: asset.originalSize ?? asset.size, size: asset.size, optimized: asset.optimized ?? false });
       }
-      if (imported.length > 0) {
-        setWorkshopAssets((current) => {
-          const next = [...current, ...imported].slice(0, MAX_WORKSHOP_ASSETS);
-          writeWorkshopAssetOrder(next);
-          return next;
-        });
-        setCreationSource((current) => (current === "idea" ? "both" : current));
+      if (batch.imported.length > 0) {
+        dispatchCreationWorkshop({ type: "append-assets", assets: batch.imported });
+      } else if (batch.failed > 0) {
+        setWorkshopImportError("This browser could not store those images. Free some space, then try again.");
       } else {
         setWorkshopImportError("That file was not a usable image. Choose PNG, JPEG, or WebP under 12 MB.");
       }
-    } catch {
-      setWorkshopImportError("This browser could not store those images. Free some space, then try again.");
     } finally {
       setAssetImporting(false);
     }
   };
 
   const moveWorkshopAsset = (index: number, direction: -1 | 1) => {
-    const target = index + direction;
-    setWorkshopAssets((current) => {
-      if (target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      writeWorkshopAssetOrder(next);
-      return next;
-    });
+    dispatchCreationWorkshop({ type: "move-asset", index, direction });
   };
 
   const removeWorkshopAsset = (assetId: string) => {
     // This is a brief-level edit only. The blob stays in IndexedDB so existing
     // books and WebMCP asset lookups keep working.
-    setWorkshopAssets((current) => {
-      const next = current.filter((asset) => asset.id !== assetId);
-      writeWorkshopAssetOrder(next);
-      return next;
-    });
+    dispatchCreationWorkshop({ type: "remove-asset", assetId });
     recordDiagnostic("workbench:asset-removed-from-brief", { assetId });
     window.setTimeout(() => addPhotoButton.current?.focus(), 0);
   };
 
   const usesPhotos = creationSource !== "idea";
-  const briefAssets = usesPhotos ? workshopAssets : [];
-
-  const createPrompt = useMemo(() => {
-    return buildCreationBrief({
-      mode: creationSource,
-      spreadCount: creationSpreadCount,
-      visualDirection: creationStyle,
-      sourceAssets: (usesPhotos ? workshopAssets : []).map(({ id, name }) => ({ id, name })),
-    }).prompt;
-  }, [creationSource, creationSpreadCount, creationStyle, usesPhotos, workshopAssets]);
+  const creationBrief = useMemo(() => buildCreationWorkshopBrief(creationWorkshop), [creationWorkshop]);
+  const briefAssets = creationBrief.sourceAssets;
+  const createPrompt = creationBrief.prompt;
 
   const copyPrompt = async () => {
     const didCopy = await copyPlainText(createPrompt);
@@ -1238,8 +1152,8 @@ export function App() {
 
         {!snapshot.session.preview && !showCreateGuide && (
           <>
-            <button className="page-arrow page-arrow-left" onClick={() => turnPage("backward")} disabled={!canGoBack || Boolean(turn)} aria-label="Previous spread"><ArrowLeft size={22} /></button>
-            <button className="page-arrow page-arrow-right" onClick={() => turnPage("forward")} disabled={!canGoForward || Boolean(turn)} aria-label="Next spread"><ArrowRight size={22} /></button>
+            <button className="page-arrow page-arrow-left" onClick={() => turnPage("backward")} disabled={pageTurnNav.previous} aria-label="Previous spread"><ArrowLeft size={22} /></button>
+            <button className="page-arrow page-arrow-right" onClick={() => turnPage("forward")} disabled={pageTurnNav.next} aria-label="Next spread"><ArrowRight size={22} /></button>
           </>
         )}
 
@@ -1251,9 +1165,9 @@ export function App() {
               <p>{spread.body}</p>
             </div>
             <div className="reader-sheet-controls">
-              <button onClick={() => turnPage("backward")} disabled={!canGoBack || Boolean(turn)} aria-label="Previous spread"><ArrowLeft size={24} /></button>
+              <button onClick={() => turnPage("backward")} disabled={pageTurnNav.previous} aria-label="Previous spread"><ArrowLeft size={24} /></button>
               <span className="reader-sheet-progress"><strong>{snapshot.session.currentSpreadIndex + 1}</strong> / {snapshot.document.spreads.length}</span>
-              <button onClick={() => turnPage("forward")} disabled={!canGoForward || Boolean(turn)} aria-label="Next spread"><ArrowRight size={24} /></button>
+              <button onClick={() => turnPage("forward")} disabled={pageTurnNav.next} aria-label="Next spread"><ArrowRight size={24} /></button>
             </div>
           </aside>
         )}
@@ -1442,7 +1356,7 @@ export function App() {
                         type="button"
                         key={source.id}
                         className={`workshop-option ${creationSource === source.id ? "is-selected" : ""}`}
-                        onClick={() => setCreationSource(source.id)}
+                        onClick={() => dispatchCreationWorkshop({ type: "set-mode", mode: source.id })}
                         aria-pressed={creationSource === source.id}
                       >{source.label}</button>
                     ))}
@@ -1457,7 +1371,7 @@ export function App() {
                         type="button"
                         key={count}
                         className={`workshop-option ${creationSpreadCount === count ? "is-selected" : ""}`}
-                        onClick={() => setCreationSpreadCount(count)}
+                        onClick={() => dispatchCreationWorkshop({ type: "set-spread-count", spreadCount: count })}
                         aria-pressed={creationSpreadCount === count}
                         aria-label={`${count} spreads`}
                       >{count}</button>
@@ -1473,7 +1387,7 @@ export function App() {
                         type="button"
                         key={style}
                         className={`workshop-option ${creationStyle === style ? "is-selected" : ""}`}
-                        onClick={() => setCreationStyle(style)}
+                        onClick={() => dispatchCreationWorkshop({ type: "set-visual-direction", visualDirection: style })}
                         aria-pressed={creationStyle === style}
                       >{style}</button>
                     ))}
@@ -1489,15 +1403,15 @@ export function App() {
                         ref={addPhotoButton}
                         className="workshop-add-photo"
                         onClick={() => fileInput.current?.click()}
-                        disabled={assetImporting || workshopAssets.length >= MAX_WORKSHOP_ASSETS}
+                        disabled={!workshopHydrated || assetImporting || workshopAssets.length >= MAX_WORKSHOP_ASSETS}
                       >
-                        {assetImporting ? <SpinnerGap size={15} className="is-spinning" /> : <Plus size={15} weight="bold" />}
-                        <span>{assetImporting ? "Adding" : "Add"}</span>
+                        {!workshopHydrated || assetImporting ? <SpinnerGap size={15} className="is-spinning" /> : <Plus size={15} weight="bold" />}
+                        <span>{!workshopHydrated ? "Restoring" : assetImporting ? "Adding" : "Add"}</span>
                       </button>
                     </div>
 
                     {workshopAssets.length === 0 ? (
-                      <button type="button" className="workshop-photo-empty" onClick={() => fileInput.current?.click()} disabled={assetImporting}>
+                      <button type="button" className="workshop-photo-empty" onClick={() => fileInput.current?.click()} disabled={!workshopHydrated || assetImporting}>
                         <ImageSquare size={22} />
                         <span>Add photos in the order they should appear</span>
                       </button>
@@ -1524,13 +1438,17 @@ export function App() {
                       </ol>
                     )}
 
-                    <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => { void importWorkshopPhotos(event.currentTarget.files); event.currentTarget.value = ""; }} />
+                    <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={!workshopHydrated || assetImporting} onChange={(event) => { void importWorkshopPhotos(event.currentTarget.files); event.currentTarget.value = ""; }} />
 
                     {workshopImportError && (
                       <p className="workshop-import-error" role="alert">
                         <WarningCircle size={14} weight="fill" />
                         <span>{workshopImportError}</span>
-                        <button type="button" onClick={() => { setWorkshopImportError(null); fileInput.current?.click(); }}>Try another image</button>
+                        <button type="button" onClick={() => {
+                          setWorkshopImportError(null);
+                          if (workshopHydrated) fileInput.current?.click();
+                          else setWorkshopHydrationAttempt((attempt) => attempt + 1);
+                        }}>{workshopHydrated ? "Try another image" : "Try restoring again"}</button>
                       </p>
                     )}
                   </section>

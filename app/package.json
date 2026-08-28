@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/sync-site-manifest.mjs && vite",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "vite build && node scripts/prepare-sites-build.mjs",
+    "build": "node scripts/sync-site-manifest.mjs && vite build && node scripts/prepare-sites-build.mjs && node scripts/sync-sites-migrations.mjs",
     "preview": "vite preview",
     "test:sites": "npm run build && npm run test:sites:built",
     "test:sites:built": "node --test tests/*.test.mjs",

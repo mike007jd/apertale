@@ -12,9 +12,10 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { collectLocalAssetIds, deletePublication, getPublicationRecord, publishDocument, revokePublication } from "./publishingClient";
+import { deletePublication, getPublicationRecord, publishDocument, revokePublication } from "./publishingClient";
 import type { PublicationProgress, PublicationRecord } from "./publishingClient";
 import { recordDiagnostic } from "./diagnostics";
+import { listStoredProjectAssetIds } from "./projectArtifact";
 import type { DocumentState } from "./types";
 
 type Busy = "publishing" | "revoking" | "deleting" | null;
@@ -69,7 +70,7 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
   // inside the manifest. The count comes from the same collector the publishing
   // client uploads from — including a browser-local `spread.textureUrl` — so the
   // disclosure can never promise fewer images than actually leave this browser.
-  const localImageCount = useMemo(() => collectLocalAssetIds(documentState).length, [documentState]);
+  const localImageCount = useMemo(() => listStoredProjectAssetIds(documentState).length, [documentState]);
 
   // Escape listens on the window, not the card: a completed publish, revoke, or
   // delete can remove the button that had focus, and the dialog must still close.

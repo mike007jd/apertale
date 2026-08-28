@@ -562,6 +562,21 @@ describe("BookEngine document contract", () => {
     expect(engine.getSnapshot().document.coverAssetId).toBe(assetId);
     expect(engine.getLibrary().books.find((book) => book.id === engine.getSnapshot().document.id)?.coverAssetId).toBe(assetId);
 
+    const coverReuseWithoutAssetValidation = engine.dispatch({
+      type: "scene-patch",
+      requestId: "cover-is-not-scene-authorization",
+      expectedRevision: 2,
+      spreadId: "flavian-amphitheatre",
+      operations: [{
+        op: "add",
+        id: "cover-copy",
+        label: "Cover copy",
+        assetId,
+        page: "right",
+      }],
+    }, "agent");
+    expect(coverReuseWithoutAssetValidation).toMatchObject({ ok: false, code: "invalid", currentRevision: 2 });
+
     const undone = engine.dispatch({
       type: "undo",
       requestId: "undo-cover",

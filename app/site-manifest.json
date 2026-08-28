@@ -1,0 +1,15 @@
+{
+  "name": "Apertale",
+  "version": "1.1.0",
+  "webMcp": {
+    "registration": "document.modelContext.registerTool",
+    "tools": {
+      "context": "get_project_context",
+      "manageBook": "manage_book",
+      "composeSpread": "compose_spread",
+      "applyScenePatch": "apply_scene_patch",
+      "setPresentation": "set_presentation",
+      "undoProjectChange": "undo_project_change"
+    }
+  }
+}

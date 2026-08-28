@@ -1,14 +1,13 @@
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MOTION_PRESETS } from "./types";
+import siteManifest from "../site-manifest.json";
 
-export const SITE_TOOL_NAMES = [
-  "get_project_context",
-  "manage_book",
-  "compose_spread",
-  "apply_scene_patch",
-  "set_presentation",
-  "undo_project_change",
-] as const;
+export const SITE_TOOL = Object.freeze(siteManifest.webMcp.tools);
+const manifestToolNames = Object.values(SITE_TOOL);
+if (manifestToolNames.length !== 6 || new Set(manifestToolNames).size !== manifestToolNames.length) {
+  throw new TypeError("Invalid Apertale manifest: exactly six unique WebMCP tools are required.");
+}
+export const SITE_TOOL_NAMES = Object.freeze(manifestToolNames) as readonly [string, string, string, string, string, string];
 
 export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", "authoring-guide"] as const;
 export type ProjectContextDetail = (typeof PROJECT_CONTEXT_DETAILS)[number];

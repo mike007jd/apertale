@@ -1,3 +1,5 @@
+// Immutable fresh-binding bootstrap paired with drizzle/0001. Schema changes
+// ship as new numbered migrations; never rewrite this applied baseline.
 export const LIVING_BOOK_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS living_books (
     id TEXT PRIMARY KEY,

@@ -4,7 +4,7 @@ import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MOTION_PRESETS } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
-import { AUTHORING_GUIDE_DETAIL, PROJECT_CONTEXT_DETAILS, buildAuthoringGuide } from "./authoringContract";
+import { AUTHORING_GUIDE_DETAIL, PROJECT_CONTEXT_DETAILS, SITE_TOOL, buildAuthoringGuide } from "./authoringContract";
 const compact = (value: unknown) => JSON.stringify(value);
 
 type ToolInput = Record<string, unknown>;
@@ -127,7 +127,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
   const registrations = [
     register(
       {
-        name: "get_project_context",
+        name: SITE_TOOL.context,
         title: "Get project context",
         description: "Inspect the live Apertale shelf, open book, current spread, selection, local assets, theme, capabilities, and revision. Create flows must first read detail authoring-guide and obey that two-phase quality contract. Planning and ImageGen stay in the user's Codex conversation.",
         inputSchema: {
@@ -142,7 +142,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: (input, options) => runTool("get_project_context", options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runTool(SITE_TOOL.context, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["detail"]);
           const detail = typeof input.detail === "undefined" ? "compact" : requiredString(input, "detail");
           if (!(PROJECT_CONTEXT_DETAILS as readonly string[]).includes(detail)) invalid("detail is not supported.");
@@ -164,7 +164,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     ),
     register(
       {
-        name: "manage_book",
+        name: SITE_TOOL.manageBook,
         title: "Manage book",
         description: "Open a library book, create an independent 1–12 spread book, or assign a browser-local portrait cover. Create flows must read get_project_context detail authoring-guide and obey it. Before create, finish the story plan plus a generated portrait cover and original full-spread art for every spread. Do not use uploaded source photos as finished right-page art unless the user asked for a literal photo album.",
         inputSchema: {
@@ -199,7 +199,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool("manage_book", options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runTool(SITE_TOOL.manageBook, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["requestId", "expectedRevision", "action", "bookId", "coverAssetId", "title", "spreads"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
@@ -260,7 +260,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     ),
     register(
       {
-        name: "compose_spread",
+        name: SITE_TOOL.composeSpread,
         title: "Compose spread text",
         description: "Rewrite the title, body, or kicker of one existing spread while preserving its imported assets and interactions. Use a spread id returned by get_project_context.",
         inputSchema: {
@@ -276,7 +276,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool("compose_spread", options?.signal ?? uncancelledToolSignal, () => {
+        execute: (input, options) => runTool(SITE_TOOL.composeSpread, options?.signal ?? uncancelledToolSignal, () => {
           assertOnly(input, ["requestId", "expectedRevision", "spreadId", "title", "body", "kicker"]);
           return bookEngine.dispatch({
             type: "compose-spread",
@@ -293,7 +293,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     ),
     register(
       {
-        name: "apply_scene_patch",
+        name: SITE_TOOL.applyScenePatch,
         title: "Apply atomic scene patch",
         description: "Atomically set a purpose-built full-spread background and add, update, remove, or reorder up to 24 foreground layers. Set the repaired clean plate, then add 2–4 transparent subjects so lifting one never reveals a duplicate. Use validated browser-local asset ids. Generate art in the Agent conversation; use explicit handoff only when required. Do not place a source photo as finished right-page art. Arbitrary URLs and executable content are rejected.",
         inputSchema: {
@@ -355,7 +355,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool("apply_scene_patch", options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runTool(SITE_TOOL.applyScenePatch, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["requestId", "expectedRevision", "spreadId", "operations"]);
           if (!Array.isArray(input.operations) || input.operations.length < 1 || input.operations.length > 24) invalid("operations must contain 1–24 scene operations.");
           const parseTransform = (raw: unknown) => {
@@ -500,7 +500,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     ),
     register(
       {
-        name: "set_presentation",
+        name: SITE_TOOL.setPresentation,
         title: "Set presentation",
         description: "Switch the shared Apertale Day/Night presentation or Preview mode without changing book content or document revision.",
         inputSchema: {
@@ -514,7 +514,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
-        execute: (input, options) => runTool("set_presentation", options?.signal ?? uncancelledToolSignal, () => {
+        execute: (input, options) => runTool(SITE_TOOL.setPresentation, options?.signal ?? uncancelledToolSignal, () => {
           assertOnly(input, ["requestId", "theme", "preview"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
@@ -538,7 +538,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     ),
     register(
       {
-        name: "undo_project_change",
+        name: SITE_TOOL.undoProjectChange,
         title: "Undo project change",
         description: "Undo the exact reversible Apertale document change represented by an undo token while preserving non-overlapping later edits.",
         inputSchema: {
@@ -548,7 +548,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool("undo_project_change", options?.signal ?? uncancelledToolSignal, () => {
+        execute: (input, options) => runTool(SITE_TOOL.undoProjectChange, options?.signal ?? uncancelledToolSignal, () => {
           assertOnly(input, ["requestId", "expectedRevision", "undoToken"]);
           return bookEngine.dispatch({
             type: "undo",

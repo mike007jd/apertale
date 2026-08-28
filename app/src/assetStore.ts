@@ -1,11 +1,13 @@
-import { optimizeImportedImage } from "./imageOptimizer";
+import { MAX_SOURCE_IMAGE_BYTES, optimizeImportedImage } from "./imageOptimizer";
 
 const DATABASE_NAME = "apertale-assets";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "assets";
 const ASSET_PREFIX = "asset:";
+const LOCAL_ASSET_PATTERN = /^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SUPPORTED_SOURCE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
-type StoredAssetMetadata = {
+export type StoredAssetMetadata = {
   id: string;
   name: string;
   type: string;
@@ -22,7 +24,7 @@ type StoredAsset = StoredAssetMetadata & { blob: Blob };
 const objectUrls = new Map<string, string>();
 
 export function isStoredAssetId(value: string) {
-  return value.startsWith(ASSET_PREFIX);
+  return LOCAL_ASSET_PATTERN.test(value);
 }
 
 function openDatabase() {
@@ -66,7 +68,7 @@ async function withStore<T>(mode: IDBTransactionMode, operation: (store: IDBObje
   });
 }
 
-export async function storeLocalImage(file: File): Promise<StoredAssetMetadata> {
+async function storeLocalImage(file: File): Promise<StoredAssetMetadata> {
   const optimizedImage = await optimizeImportedImage(file);
   const metadata: StoredAssetMetadata = {
     id: `${ASSET_PREFIX}${crypto.randomUUID()}`,
@@ -81,6 +83,40 @@ export async function storeLocalImage(file: File): Promise<StoredAssetMetadata> 
   };
   await withStore("readwrite", (store) => store.put({ ...metadata, blob: optimizedImage.blob } satisfies StoredAsset));
   return metadata;
+}
+
+export type LocalImageImportBatch = {
+  assets: StoredAssetMetadata[];
+  rejected: number;
+  failed: number;
+};
+
+/**
+ * Applies the complete browser-local image admission policy while preserving
+ * picker order. A bad file is isolated so later valid selections still reach
+ * the registry; systemic processing/storage failures are reported separately.
+ */
+export async function storeLocalImages(files: Iterable<File>, limit = Number.POSITIVE_INFINITY): Promise<LocalImageImportBatch> {
+  const maximum = Math.max(0, Math.floor(limit));
+  const assets: StoredAssetMetadata[] = [];
+  let rejected = 0;
+  let failed = 0;
+  let attempted = 0;
+  for (const file of files) {
+    if (assets.length >= maximum) break;
+    if (!SUPPORTED_SOURCE_TYPES.has(file.type) || file.size <= 0 || file.size > MAX_SOURCE_IMAGE_BYTES) {
+      rejected += 1;
+      continue;
+    }
+    if (attempted >= maximum) break;
+    attempted += 1;
+    try {
+      assets.push(await storeLocalImage(file));
+    } catch {
+      failed += 1;
+    }
+  }
+  return { assets, rejected, failed };
 }
 
 async function getStoredAsset(assetId: string) {
