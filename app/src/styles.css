@@ -250,7 +250,7 @@ select:focus-visible {
   pointer-events: auto;
 }
 
-.library-intro > p {
+.library-intro > p:not(.library-scroll-cue) {
   margin: 0 0 9px;
   color: var(--accent);
   font-size: 11px;
@@ -313,7 +313,7 @@ select:focus-visible {
 
 .library-gallery {
   position: absolute;
-  top: clamp(330px, 38vh, 390px);
+  top: clamp(390px, 44vh, 420px);
   right: clamp(28px, 5vw, 82px);
   bottom: 54px;
   left: clamp(28px, 5vw, 82px);
@@ -321,7 +321,7 @@ select:focus-visible {
   grid-template-columns: repeat(5, minmax(0, 1fr));
   align-items: start;
   gap: clamp(16px, 2.6vw, 42px);
-  pointer-events: auto;
+  pointer-events: none;
   perspective: 1400px;
 }
 
@@ -336,6 +336,7 @@ select:focus-visible {
   color: var(--ink);
   background: transparent;
   cursor: pointer;
+  pointer-events: auto;
   transform: translateY(var(--book-shift, 0)) rotate(var(--book-rotation, 0deg));
   transform-origin: 50% 100%;
   transition: transform 260ms cubic-bezier(.2, .8, .2, 1), filter 260ms ease;
@@ -1527,7 +1528,7 @@ select:focus-visible {
   .context-menu button { padding-inline: 9px; font-size: 12px; }
   .context-menu button:first-child { display: none; }
   .library-intro { width: calc(100% - 40px); }
-  .library-gallery { top: 340px; right: 24px; left: 24px; gap: 16px; }
+  .library-gallery { top: 390px; right: 24px; left: 24px; gap: 16px; }
   .library-cover-frame { width: min(100%, 146px); }
 }
 
@@ -1878,18 +1879,18 @@ select:focus-visible {
   .library-sheet { padding: 10px max(14px, env(safe-area-inset-right)) 8px max(14px, env(safe-area-inset-left)); }
   .library-wordmark { font-size: 22px; }
   .library-intro { top: 54px; width: min(600px, calc(100% - 260px)); }
-  .library-intro > p,
+  .library-intro > p:not(.library-scroll-cue),
   .library-intro > span { display: none; }
   .library-intro h1 { font-size: clamp(29px, 4.6vw, 38px); line-height: .9; }
-  .library-actions { margin-top: 10px; }
+  .library-actions { margin-top: 8px; }
   .create-codex-button,
-  .guide-book-button { min-height: 38px; padding-inline: 14px; }
+  .guide-book-button { min-height: 36px; padding-inline: 14px; }
   .library-gallery {
-    top: 174px;
+    top: 196px;
     right: max(18px, env(safe-area-inset-right));
-    bottom: 20px;
+    bottom: 14px;
     left: max(18px, env(safe-area-inset-left));
-    grid-auto-columns: 112px;
+    grid-auto-columns: 108px;
     grid-template-columns: none;
     grid-auto-flow: column;
     align-items: start;
@@ -1901,9 +1902,9 @@ select:focus-visible {
   }
   .library-gallery::-webkit-scrollbar { display: none; }
   .library-card { gap: 5px; scroll-snap-align: center; }
-  .library-cover-frame { width: 88px; }
+  .library-cover-frame { width: 80px; }
   .library-card-copy small { font-size: 7.5px; }
-  .library-card-copy strong { min-height: 24px; font-size: 12px; }
+  .library-card-copy strong { min-height: 22px; font-size: 11.5px; }
   .demo-disclosure { bottom: 3px; font-size: 8px; }
 
   .bottom-controls { bottom: max(8px, env(safe-area-inset-bottom)); }
@@ -1976,4 +1977,443 @@ select:focus-visible {
   .workshop-agent-panel .copy-starter-button { min-height: 44px; }
   .workshop-media-note { display: flex; justify-content: center; }
   .workshop-media-note p { display: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   Publication surface, staged loading marks, and the authored mobile reading
+   composition. These extend the existing paper/lamp language rather than
+   introducing a second visual system.
+   --------------------------------------------------------------------------- */
+
+.book-loading-steps {
+  display: flex;
+  gap: 5px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.book-loading-steps li {
+  width: 22px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background-color var(--motion-state) var(--motion-ease-out);
+}
+
+.book-loading-steps li.is-done { background: color-mix(in srgb, var(--accent) 52%, transparent); }
+.book-loading-steps li.is-active { background: var(--accent); }
+
+.publish-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 17px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 16px 42px var(--shadow);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  cursor: pointer;
+  font-weight: 620;
+}
+
+.publish-button:hover { border-color: var(--accent); color: var(--accent); }
+.publish-button.is-live { border-color: color-mix(in srgb, #47a879 62%, var(--line)); color: #2f7f57; }
+:root[data-theme="night"] .publish-button.is-live { color: #86d3ac; }
+
+.publication-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 74;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow-y: auto;
+  background: rgba(31, 25, 19, .32);
+  -webkit-backdrop-filter: blur(9px) saturate(.86);
+  backdrop-filter: blur(9px) saturate(.86);
+  animation: workshop-in var(--motion-reveal) var(--motion-ease-out) both;
+}
+
+.publication-card {
+  width: min(468px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, white);
+  border-radius: 26px;
+  color: var(--ink);
+  background: #fffaf0;
+  box-shadow: 0 30px 80px rgba(39, 27, 17, .26);
+}
+
+:root[data-theme="night"] .publication-card {
+  border-color: rgba(255, 233, 200, .2);
+  background: rgba(38, 29, 23, .96);
+  box-shadow: 0 34px 90px rgba(0, 0, 0, .5), 0 0 70px rgba(255, 183, 87, .09);
+}
+
+.publication-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 0 16px 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.publication-card > header span { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-size: 12px; font-weight: 760; }
+.publication-card > header button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink); background: transparent; cursor: pointer; }
+.publication-card > header button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.publication-card > header button:disabled { opacity: .45; cursor: wait; }
+
+.publication-body { padding: 22px 24px 18px; overflow-y: auto; }
+
+.publication-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.publication-status i { width: 8px; height: 8px; border-radius: 50%; background: #a7a49c; }
+.publication-status.is-published i { background: #47a879; box-shadow: 0 0 0 4px rgba(71, 168, 121, .16); }
+.publication-status.is-publishing i { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.publication-status.is-revoked i { background: #b54638; }
+
+.publication-body h2 {
+  margin: 0;
+  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-size: clamp(26px, 4vw, 34px);
+  font-weight: 650;
+  line-height: 1.02;
+}
+
+.publication-lede { display: block; max-width: 44ch; margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+.publication-link {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px 15px 13px;
+  background: var(--accent-soft);
+}
+
+.publication-link-label { margin: 0 0 6px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+
+.publication-link-url {
+  margin: 0;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.publication-link-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+/* Recoverable clipboard failure sits beside the URL it refers to, so the link
+   stays on screen and selectable while the panel explains the manual path. */
+.publication-copy-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 10px 0 0;
+  color: #a53b2e;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.publication-copy-error svg { flex: none; margin-top: 1px; }
+:root[data-theme="night"] .publication-copy-error { color: #f0968a; }
+
+.publication-primary,
+.publication-secondary,
+.publication-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 0 17px;
+  cursor: pointer;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.publication-primary { border: 0; color: #fff; background: var(--accent); box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 26%, transparent); }
+.publication-primary:hover:not(:disabled) { transform: translateY(-1px); filter: saturate(1.06); }
+.publication-secondary { border: 1px solid var(--line); color: var(--ink); background: transparent; }
+.publication-secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.publication-secondary.is-caution:hover:not(:disabled) { border-color: #b8863a; color: #96651f; }
+.publication-danger { border: 1px solid rgba(181, 70, 56, .48); color: #b54638; background: transparent; }
+.publication-danger:hover:not(:disabled) { color: #fff; background: #b54638; }
+:root[data-theme="night"] .publication-danger { border-color: rgba(240, 141, 126, .42); color: #f0968a; }
+
+.publication-primary:disabled,
+.publication-secondary:disabled,
+.publication-danger:disabled { opacity: .5; cursor: wait; transform: none; }
+
+.publication-notice {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: start;
+  gap: 9px;
+  margin: 16px 0 0;
+  border-radius: 14px;
+  padding: 11px 13px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.publication-notice.is-stale { color: #8a5a15; background: rgba(214, 158, 61, .16); }
+.publication-notice.is-error { color: #a53b2e; background: rgba(181, 70, 56, .13); }
+:root[data-theme="night"] .publication-notice.is-stale { color: #f2c987; }
+:root[data-theme="night"] .publication-notice.is-error { color: #f0968a; }
+
+.publication-progress { margin-top: 16px; }
+.publication-progress p { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink); font-size: 13px; font-weight: 620; }
+.publication-progress small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; }
+
+.publication-progress-track {
+  height: 4px;
+  margin-top: 9px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.publication-progress-track i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width var(--motion-state) var(--motion-ease-out); }
+
+.publication-disclosures { display: grid; gap: 11px; margin: 20px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); list-style: none; }
+.publication-disclosures li { display: grid; grid-template-columns: 18px 1fr; align-items: start; gap: 9px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.publication-disclosures svg { margin-top: 1px; color: var(--accent); }
+.publication-disclosures strong { color: var(--ink); font-weight: 700; }
+
+.publication-actions { display: grid; gap: 9px; padding: 16px 24px 20px; border-top: 1px solid var(--line); background: #fff3e9; }
+:root[data-theme="night"] .publication-actions { background: #33261f; }
+.publication-confirm { display: grid; gap: 11px; border: 1px solid rgba(181, 70, 56, .4); border-radius: 18px; padding: 13px 14px; background: rgba(181, 70, 56, .07); }
+.publication-confirm p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.publication-confirm strong { display: block; margin-bottom: 4px; color: var(--ink); font-size: 13px; }
+.publication-confirm > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.workshop-import-error {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: start;
+  gap: 7px;
+  margin: 0;
+  border-radius: 12px;
+  padding: 9px 11px;
+  color: #a53b2e;
+  background: rgba(181, 70, 56, .12);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+:root[data-theme="night"] .workshop-import-error { color: #f0968a; }
+.workshop-import-error button { grid-column: 2; justify-self: start; margin-top: 6px; min-height: 30px; border: 1px solid currentColor; border-radius: 999px; padding: 0 11px; color: inherit; background: transparent; cursor: pointer; font-size: 10px; font-weight: 700; }
+
+/* Hidden on desktop: both surfaces below belong to the mobile portrait score. */
+.library-scroll-cue { display: none; }
+.reader-sheet { display: none; }
+
+/* ---------------------------------------------------------------------------
+   Mobile portrait reading composition (390 x 844 class devices).
+
+   The book keeps the top band at full spread width so the artwork stays the
+   subject, and the story continues onto a paper leaf below it with real reading
+   typography and thumb-sized page controls. This is one authored score, not a
+   scaled desktop layout.
+   --------------------------------------------------------------------------- */
+@media (max-width: 560px) and (orientation: portrait) {
+  .stage {
+    --reader-band-top: 62px;
+    /* Sized so the container aspect keeps the full spread at page width rather
+       than letting the renderer fit height and shrink into a postcard. */
+    --reader-band-height: clamp(196px, 33dvh, 286px);
+    --reader-band-bottom: calc(var(--reader-band-top) + var(--reader-band-height));
+  }
+
+  .stage > .book-scene {
+    position: absolute;
+    inset: var(--reader-band-top) 0 auto;
+    height: var(--reader-band-height);
+  }
+
+  .stage > .fallback-book {
+    inset: var(--reader-band-top) 14px auto;
+    height: var(--reader-band-height);
+    border-width: 9px;
+    border-radius: 18px;
+  }
+
+  .page-arrow { display: none; }
+  .bottom-controls .page-progress { display: none; }
+  .bottom-controls { grid-template-columns: auto minmax(0, auto); }
+
+  .element-rail {
+    top: calc(var(--reader-band-bottom) + 8px);
+    bottom: auto;
+    padding: 4px;
+  }
+
+  .element-rail button { min-height: 40px; }
+
+  .reader-sheet {
+    position: absolute;
+    z-index: 13;
+    top: calc(var(--reader-band-bottom) + 70px);
+    right: 12px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    left: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    background: var(--surface-strong);
+    box-shadow: 0 18px 44px var(--shadow);
+  }
+
+  .stage:not(:has(.element-rail)) .reader-sheet { top: calc(var(--reader-band-bottom) + 12px); }
+
+  .app-shell.is-preview .reader-sheet {
+    top: calc(var(--reader-band-bottom) + 12px);
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .reader-sheet-copy {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 18px 19px 10px;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .reader-sheet-kicker { margin: 0 0 8px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+
+  .reader-sheet-copy h2 {
+    margin: 0;
+    color: var(--ink);
+    font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+    font-size: 26px;
+    font-weight: 650;
+    letter-spacing: -.01em;
+    line-height: 1.08;
+  }
+
+  .reader-sheet-copy p { margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
+
+  .reader-sheet-controls {
+    display: grid;
+    grid-template-columns: 56px 1fr 56px;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 13px 12px;
+    border-top: 1px solid var(--line);
+  }
+
+  .reader-sheet-controls button {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    color: var(--ink);
+    background: var(--surface);
+    cursor: pointer;
+    transition: transform 90ms ease-out, border-color var(--motion-feedback) ease;
+  }
+
+  .reader-sheet-controls button:active:not(:disabled) { transform: scale(.93); border-color: var(--accent); }
+  .reader-sheet-controls button:disabled { opacity: .3; }
+  .reader-sheet-progress { color: var(--muted); font-size: 14px; text-align: center; }
+  .reader-sheet-progress strong { color: var(--ink); font-size: 18px; font-weight: 650; }
+
+  .reveal-card,
+  .reveal-card.is-left,
+  .reveal-card.is-right { bottom: calc(88px + env(safe-area-inset-bottom)); max-height: min(38dvh, 300px); }
+
+  /* First-fold density: the headline yields room, and the covers become real
+     browsable objects instead of a thin strip floating in dead space. */
+  .library-intro { top: 68px; }
+  .library-intro > p:not(.library-scroll-cue) { font-size: 10px; }
+  .library-intro h1 { font-size: clamp(28px, 8.6vw, 34px); }
+  .library-intro > span { max-width: 40ch; margin: 9px auto 0; font-size: 11.5px; line-height: 1.42; }
+
+  .library-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .create-codex-button,
+  .guide-book-button { justify-content: center; min-height: 44px; }
+
+  .library-gallery {
+    top: 384px;
+    align-items: center;
+    grid-auto-columns: minmax(180px, 56vw);
+    padding: 10px 12px 12px;
+  }
+
+  .library-cover-frame { width: min(100%, 206px); }
+  .library-card-copy strong { font-size: 17px; }
+
+  /* The cue rides in the intro's own flow so it can never collide with the two
+     action buttons above it, and the gallery starts below the gap it reserves. */
+  .library-scroll-cue {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin: 16px 0 0;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .library-scroll-cue {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+}
+
+/* The shared reader's read-only badge is a span, not the icon button the editor
+   collapses at narrow widths, so it must keep room for its label. */
+@media (max-width: 880px) {
+  span.preview-button {
+    width: auto;
+    min-height: 40px;
+    padding: 0 13px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
 }

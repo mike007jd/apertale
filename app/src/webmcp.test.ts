@@ -71,6 +71,13 @@ describe("WebMCP registration", () => {
     });
     expect(String(contextResult).length).toBeLessThanOrEqual(2200);
 
+    const contextWithoutHostOptions = await (tool("get_project_context").execute as unknown as (
+      input: Record<string, unknown>,
+    ) => Promise<unknown>)({});
+    expect(JSON.parse(String(contextWithoutHostOptions))).toMatchObject({
+      book: { id: "apertale-your-story", revision: 1 },
+    });
+
     const selectedRevealResult = await tool("get_project_context").execute({ detail: "selected-reveal" }, {
       signal: new AbortController().signal,
     });

@@ -88,6 +88,11 @@ async function getStoredAsset(assetId: string) {
   return (await withStore<StoredAsset | undefined>("readonly", (store) => store.get(assetId))) ?? null;
 }
 
+export async function getStoredAssetBlob(assetId: string): Promise<Blob | null> {
+  const stored = await getStoredAsset(assetId);
+  return stored?.blob ?? null;
+}
+
 export async function resolveAssetUrl(assetId: string) {
   if (!isStoredAssetId(assetId)) return assetId;
   const cached = objectUrls.get(assetId);
