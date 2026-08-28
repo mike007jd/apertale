@@ -2141,7 +2141,7 @@ select:focus-visible {
 }
 
 .publication-card > header span { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-size: 12px; font-weight: 760; }
-.publication-card > header button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink); background: transparent; cursor: pointer; }
+.publication-card > header button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 50%; color: var(--ink); background: transparent; cursor: pointer; }
 .publication-card > header button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .publication-card > header button:disabled { opacity: .45; cursor: wait; }
 
@@ -2270,10 +2270,10 @@ select:focus-visible {
 
 .publication-progress-track i { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width var(--motion-state) var(--motion-ease-out); }
 
-.publication-disclosures { display: grid; gap: 11px; margin: 20px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); list-style: none; }
-.publication-disclosures li { display: grid; grid-template-columns: 18px 1fr; align-items: start; gap: 9px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.publication-disclosures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 18px 0 0; padding: 14px 0 0; border-top: 1px solid var(--line); list-style: none; }
+.publication-disclosures li { display: grid; grid-template-columns: 18px 1fr; align-items: start; gap: 7px; min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.35; }
 .publication-disclosures svg { margin-top: 1px; color: var(--accent); }
-.publication-disclosures strong { color: var(--ink); font-weight: 700; }
+.publication-disclosures strong { display: block; margin-bottom: 2px; color: var(--ink); font-weight: 700; }
 
 .publication-actions { display: grid; gap: 9px; padding: 16px 24px 20px; border-top: 1px solid var(--line); background: #fff3e9; }
 :root[data-theme="night"] .publication-actions { background: #33261f; }
@@ -2281,6 +2281,13 @@ select:focus-visible {
 .publication-confirm p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .publication-confirm strong { display: block; margin-bottom: 4px; color: var(--ink); font-size: 13px; }
 .publication-confirm > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+@media (max-width: 560px) {
+  .publication-overlay { padding: 16px; }
+  .publication-body { padding: 18px 20px 14px; }
+  .publication-actions { padding: 14px 20px 18px; }
+  .publication-disclosures { grid-template-columns: 1fr; gap: 7px; }
+}
 
 /* Hidden on desktop: both surfaces below belong to the mobile portrait score. */
 .library-scroll-cue { display: none; }
