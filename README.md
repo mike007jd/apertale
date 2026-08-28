@@ -19,7 +19,7 @@ The application provides the medium—Three.js book rendering, assets, safe inte
 - Declarative hover and click interactions validated against closed presets.
 - Twenty-eight spreads across five independent books, including an eight-spread landmark atlas and a six-spread science book.
 - Fourteen dedicated ImageGen panorama spreads for the landmark atlas and science book, plus transparent illustrated layers and a three-frame lightning sequence.
-- A host-portable Sites bundle. Public hosting remains intentionally private until explicit republish approval and final judge-facing verification.
+- A host-portable Sites bundle. The public Site and anonymous share reader were live-verified on 2026-08-28; any republish remains an explicit release action.
 
 ## Try the collaboration loop
 
@@ -55,15 +55,17 @@ npm run typecheck
 npm test
 npm run test:sites
 npm run audit:cutouts
-npm run optimize:assets
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
 `npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 66 legacy v2 layers require genuine regeneration because visual review found clipped subjects, detached fragments, or contaminated edges. See [`app/qa/RELEASE_GATES_2026-08-27.md`](app/qa/RELEASE_GATES_2026-08-27.md) rather than treating the code/build passes as release completion.
 
+`npm run optimize:assets` is a maintenance command that rewrites checked-in runtime images. Run it only for an intentional asset-optimization change and review the resulting diff.
+
 ## Repository map
 
 - [`app/`](app/) — React, TypeScript, Three.js, WebMCP adapter, tests, and host-portable production bundle.
+- [`CONTEXT.md`](CONTEXT.md) — current domain ownership and adapter boundaries for page turns, authoring, assets, artifacts, and publishing schema.
 - [`.codex/skills/apertale-authoring/`](.codex/skills/apertale-authoring/) — Codex authoring skill for planning and building books through the six Site Tools.
 - [`docs/PRODUCT_ARCHITECTURE.md`](docs/PRODUCT_ARCHITECTURE.md) — active product, usage, asset, interaction, security, and delivery architecture.
 - [`docs/CHALLENGE_READINESS.md`](docs/CHALLENGE_READINESS.md) — active challenge gate separating verified local work from missing external delivery.
@@ -80,7 +82,7 @@ The normal creation loop is bring-your-own-Agent:
 
 1. Open Apertale in the supporting built-in browser and choose a sample or the Field Guide from the library.
 2. Use **Create Your Own** to open the blank-book workshop and hand the brief to the real Agent conversation beside the browser.
-3. Import source assets into the live page when needed. Apertale optimizes supported images locally before storing them; it does not upload them or spend a site-owner model quota.
+3. Import source assets into the live page when needed. Apertale optimizes them locally and uploads only the assets referenced by a book when the user explicitly publishes it; this flow does not spend a site-owner model quota.
 4. Ask Codex/ChatGPT to inspect and build the book.
 5. The Agent invokes the page's WebMCP tools using the user's own account/session.
 6. Continue editing together in one visible, undoable project.

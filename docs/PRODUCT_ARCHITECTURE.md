@@ -26,9 +26,9 @@ The user's ChatGPT/Codex supplies the intelligence. Apertale does not proxy ever
 
 ### Implementation snapshot
 
-Implemented in the current local build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the six-tool project surface; a repository-level Codex authoring skill; a typed host-side creation-brief contract that requires story planning and generated art before WebMCP layout; and IndexedDB-backed local image import whose stable IDs are discoverable and editable through WebMCP.
+Implemented in the current build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the six-tool project surface; a repository-level Codex authoring skill; a typed host-side creation-brief contract that requires story planning and generated art before WebMCP layout; IndexedDB-backed local image import; durable D1/R2 publication; and an anonymous read-only share reader.
 
-Required external delivery still open: a real supporting-host tool-execution acceptance run and the explicitly approved public repository, live URL, video, and Devpost submission. Direct host attachment transfer remains a post-v1.1 expansion rather than a hidden release dependency. The project stays private and local until the user approves release.
+The supporting-host tool run, public Site, and anonymous share lifecycle passed with the disclosures recorded in [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md). External delivery still open is the explicitly approved public repository, demo video, and Devpost submission. Direct host attachment transfer remains a post-v1.1 expansion rather than a hidden release dependency.
 
 ## 2. Feasibility decision
 
@@ -46,9 +46,9 @@ Primary current references:
 - [OpenAI WebMCP Challenge](https://openai.com/webmcp-challenge/)
 - [WebMCP specification](https://github.com/webmachinelearning/webmcp)
 
-The checked-in deployment verifier proves the public HTTP artifact, WebMCP document policy, manifest, and exact shipped tool identifiers. It deliberately cannot pass the host-only gate: real discovery and execution must follow [`SITE_TOOLS_ACCEPTANCE.md`](SITE_TOOLS_ACCEPTANCE.md) in an eligible ChatGPT desktop built-in browser.
+The checked-in deployment verifier proves the public HTTP artifact, WebMCP document policy, manifest, and exact shipped tool identifiers. It deliberately cannot replace the host-only gate; that separate discovery/execution run has passed with the host disclosure recorded in [`SITE_TOOLS_ACCEPTANCE.md`](SITE_TOOLS_ACCEPTANCE.md) and [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md).
 
-### Host contract still to verify
+### Host media contract still to verify
 
 Plain WebMCP tool arguments are structured JSON. A reliable direct contract for transferring a newly generated ImageGen file from the host conversation into an arbitrary webpage is not yet assumed.
 
@@ -72,7 +72,7 @@ If a supported host later exposes a verified attachment/file bridge, it can impl
 7. The user turns pages, hovers, clicks, drags, adjusts, switches Day/Night, and previews directly.
 8. The Agent can continue editing from the resulting live state.
 
-The bottom page surface is an explicit **Create Your Own** action. It opens a full-screen blank-book workshop where the user chooses length and visual direction; a clearly labeled action copies the resulting starter prompt for the real Agent conversation. That prompt is a two-phase host-side contract: inspect and plan a story, generate a dedicated portrait cover plus original full-spread artwork for every spread, then—and only then—create the book through the six Site Tools. A secondary **Image handoff** accepts chosen images only when direct host media transfer is unavailable and exposes ordered local asset ids. No copy action is styled as an editable input and the webpage never pretends to send a model request itself.
+The bottom page surface is an explicit **Create Your Own** action. It opens a full-screen blank-book workshop where the user chooses authoring mode, length, visual direction, and ordered source images; a clearly labeled action copies the resulting starter prompt for the real Agent conversation. That prompt is a two-phase host-side contract: inspect and plan a story, generate a dedicated portrait cover plus original full-spread artwork for every spread, then—and only then—create the book through the six Site Tools. A secondary **Image handoff** accepts chosen images only when direct host media transfer is unavailable and exposes ordered local asset ids. No copy action is styled as an editable input and the webpage never pretends to send a model request itself.
 
 ## 4. Architecture
 
@@ -263,17 +263,21 @@ Motion principles:
 
 ## 11. Persistence and privacy
 
-- Challenge/demo build: localStorage for project documents and IndexedDB for imported image blobs; local-first and no account required.
-- Imported assets remain in the user's browser. Export and cloud-storage adapters are planned, not implemented.
+- Draft project documents use localStorage and imported image blobs use IndexedDB; drafting remains local-first and requires no account.
+- Explicit publication writes the document manifest and hashed capabilities to D1 and uploads only its referenced image blobs to that book's R2 namespace.
+- Publish, revoke, republish, and permanent delete use capability-authenticated endpoints. Management and share tokens are unguessable, D1 stores only their SHA-256 hashes, and management capability never appears in the public URL.
+- A share URL is anonymous read-only capability access, not end-to-end encryption or a private account boundary. Revocation makes the manifest, shell, and assets return 404 with private no-store caching.
+- Permanent deletion first removes public reachability, then deletes R2 objects, then D1 state; interrupted cleanup remains retryable instead of claiming cross-resource atomicity.
+- Capability-only publishing has no account recovery. Losing the local management capability loses management access, and public write abuse/rate controls remain a production-policy limitation.
 - No analytics event contains prompt text, book prose, private photo data, or binary content.
-- The current Reset action applies only to the active curated sample and requires confirmation. General project delete and recoverable export remain planned.
+- Recoverable project export remains planned.
 
 ## 12. Repository and release policy
 
 - Customer-facing names, UI, README, screenshots, and sample copy use Apertale, not internal event language.
 - Historical event docs are retained as archive evidence and excluded from the primary navigation.
-- The repository remains local/private until README, license, asset provenance, secret scan, visual QA, and WebMCP host acceptance are complete.
-- Publishing the website or creating a public GitHub repository requires explicit user approval.
+- The public Site and anonymous share reader were live-verified on 2026-08-28; the source repository remains private.
+- Republishing the website or making the GitHub repository public requires explicit user approval.
 - A release must never embed an OpenAI API key.
 
 ## 13. Acceptance gates
@@ -306,15 +310,12 @@ Motion principles:
 - Current brand conflict check repeated before publication.
 - Asset licenses/provenance documented.
 - Repository contains no secrets and has a clean reproducible build.
-- Anonymous production smoke occurs only after the user approves republishing.
+- The current public version has passed anonymous production smoke; repeat that smoke after any explicitly approved republish.
 
-## 14. Delivery order
+## 14. Remaining delivery work
 
-1. Lock the project schema and declarative interaction engine.
-2. Deliver one polished Colosseum knowledge-diorama end to end.
-3. Keep each Sample Book as an independent project in the persistent library.
-4. Replace legacy Agent tools with the compact project-authoring surface while preserving compatibility.
-5. Build the remaining flagship Sample Books from real assets.
-6. Complete visual, performance, accessibility, WebMCP host, and security acceptance.
-7. Organize the public repository package.
-8. Re-run naming clearance and publish only with explicit approval.
+1. Run the independent pre-recording live verification against the intended production version.
+2. Record and publish the source-true demo video only after that verification passes.
+3. Make the repository public only with explicit approval, preserving history, license, provenance, and reproducible gates.
+4. Complete the Devpost fields and anonymous judge-view check before submission.
+5. Treat direct host attachment transfer and account-backed recovery as later adapters, not hidden v1.1 dependencies.

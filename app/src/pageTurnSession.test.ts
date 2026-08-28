@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  createSharedTurnController,
-  sharedReaderCanTurn,
-  sharedReaderNavDisabled,
-  sharedReaderSkipsPageTurnAnimation,
-} from "./SharedBookApp";
+  canTurnPage,
+  createPageTurnSession,
+  pageTurnNavDisabled,
+  skipsPageTurnAnimation,
+} from "./pageTurn";
 import type { TurnState } from "./types";
 
 type Harness = ReturnType<typeof makeHarness>;
@@ -21,7 +21,8 @@ function makeHarness(options: { spreadCount?: number; reducedMotion?: boolean } 
   const count = options.spreadCount ?? 4;
   let reducedMotion = options.reducedMotion ?? false;
 
-  const controller = createSharedTurnController({
+  const controller = createPageTurnSession({
+    surface: "shared",
     now: () => clock,
     requestFrame: (callback) => {
       handle += 1;
@@ -38,6 +39,7 @@ function makeHarness(options: { spreadCount?: number; reducedMotion?: boolean } 
       commits.push(direction);
       index = Math.max(0, Math.min(count - 1, index + (direction === "forward" ? 1 : -1)));
     },
+    navigationKey: () => index,
     reducedMotion: () => reducedMotion,
     canTurn: (direction) => (direction === "forward" ? index < count - 1 : index > 0),
   });
@@ -58,6 +60,7 @@ function makeHarness(options: { spreadCount?: number; reducedMotion?: boolean } 
     advance,
     hasPendingFrame: () => pending !== null,
     currentIndex: () => index,
+    setIndex: (value: number) => { index = value; },
     setReducedMotion: (value: boolean) => { reducedMotion = value; },
     liveTurn: () => turns[turns.length - 1],
     fireLateFrame: (ms = 0) => {
@@ -72,33 +75,33 @@ function settle(harness: Harness) {
   for (let step = 0; step < 80 && harness.hasPendingFrame(); step += 1) harness.advance(16);
 }
 
-describe("shared reader page turn", () => {
+describe("page-turn session lifecycle", () => {
   it("skips delayed animation for reduced motion and static fallback readers", () => {
-    expect(sharedReaderSkipsPageTurnAnimation(false, true)).toBe(false);
-    expect(sharedReaderSkipsPageTurnAnimation(true, true)).toBe(true);
-    expect(sharedReaderSkipsPageTurnAnimation(false, false)).toBe(true);
+    expect(skipsPageTurnAnimation(false, true)).toBe(false);
+    expect(skipsPageTurnAnimation(true, true)).toBe(true);
+    expect(skipsPageTurnAnimation(false, false)).toBe(true);
   });
 
   it("locks navigation until the animated reader has a complete frame", () => {
-    expect(sharedReaderNavDisabled(null, 1, 4, { backward: true, forward: true })).toEqual({
+    expect(pageTurnNavDisabled(null, 1, 4, { backward: true, forward: true })).toEqual({
       previous: true,
       next: true,
     });
-    expect(sharedReaderNavDisabled(null, 1, 4, { backward: false, forward: false })).toEqual({
+    expect(pageTurnNavDisabled(null, 1, 4, { backward: false, forward: false })).toEqual({
       previous: false,
       next: false,
     });
-    expect(sharedReaderCanTurn("forward", 1, 4, true)).toBe(false);
-    expect(sharedReaderCanTurn("backward", 1, 4, true)).toBe(false);
-    expect(sharedReaderCanTurn("forward", 1, 4, false)).toBe(true);
+    expect(canTurnPage("forward", 1, 4, true)).toBe(false);
+    expect(canTurnPage("backward", 1, 4, true)).toBe(false);
+    expect(canTurnPage("forward", 1, 4, false)).toBe(true);
   });
 
   it("unlocks only the page-turn direction whose adjacent artwork is ready", () => {
-    expect(sharedReaderNavDisabled(null, 1, 4, { backward: false, forward: true })).toEqual({
+    expect(pageTurnNavDisabled(null, 1, 4, { backward: false, forward: true })).toEqual({
       previous: false,
       next: true,
     });
-    expect(sharedReaderNavDisabled(null, 1, 4, { backward: true, forward: false })).toEqual({
+    expect(pageTurnNavDisabled(null, 1, 4, { backward: true, forward: false })).toEqual({
       previous: true,
       next: false,
     });
@@ -115,7 +118,7 @@ describe("shared reader page turn", () => {
     expect(harness.liveTurn()).toMatchObject({ direction: "forward" });
     expect(harness.liveTurn()!.progress).toBeGreaterThan(0);
     expect(harness.liveTurn()!.progress).toBeLessThan(1);
-    expect(sharedReaderNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
+    expect(pageTurnNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
       previous: true,
       next: true,
     });
@@ -129,7 +132,7 @@ describe("shared reader page turn", () => {
     expect(harness.currentIndex()).toBe(1);
     expect(harness.liveTurn()).toBeNull();
     expect(harness.controller.isTurning()).toBe(false);
-    expect(sharedReaderNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
+    expect(pageTurnNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
       previous: false,
       next: false,
     });
@@ -142,6 +145,19 @@ describe("shared reader page turn", () => {
     harness.controller.turnPage("forward");
     settle(harness);
     expect(harness.commits).toEqual(["forward"]);
+  });
+
+  it("does not overwrite explicit navigation that happens during a turn", () => {
+    const harness = makeHarness();
+    harness.controller.turnPage("forward");
+    harness.advance(80);
+    harness.setIndex(2);
+    harness.advance(16);
+
+    expect(harness.commits).toEqual([]);
+    expect(harness.currentIndex()).toBe(2);
+    expect(harness.liveTurn()).toBeNull();
+    expect(harness.hasPendingFrame()).toBe(false);
   });
 
   it("refuses to turn past either boundary", () => {
@@ -211,7 +227,7 @@ describe("shared reader page turn", () => {
     expect(harness.hasPendingFrame()).toBe(false);
     expect(harness.liveTurn()).toBeNull();
     expect(harness.controller.isTurning()).toBe(false);
-    expect(sharedReaderNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
+    expect(pageTurnNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
       previous: false,
       next: false,
     });
@@ -222,7 +238,7 @@ describe("shared reader page turn", () => {
     harness.controller.onPageGesture("forward", "start", 0);
     expect(harness.liveTurn()).toMatchObject({ direction: "forward", progress: 0 });
     expect(harness.controller.isTurning()).toBe(true);
-    expect(sharedReaderNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
+    expect(pageTurnNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
       previous: true,
       next: true,
     });

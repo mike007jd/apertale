@@ -22,7 +22,7 @@ This matrix is the current delivery truth for Apertale. A row is only marked pas
 | Day/Night, hover, click, drag, Preview | Passed | Story spreads and the animated storm carry authored hover, focus, click, motion, and reveal contracts; final public mobile verification switched the shared reader to Night while keeping the reader read-only. |
 | Reduced motion and 2D fallback | Passed locally | Forced fallback route and reduced-motion navigation passed; the shelf falls back to a real cover gallery instead of an empty centre. |
 | Accessibility baseline | Passed locally | Named controls, keyboard page navigation, modal autofocus, focus trap, Escape close, and semantic fallback navigation. |
-| Local code quality gates | Passed | The final closeout ran typecheck, 50/50 Vitest tests, production build, 14/14 built Sites tests, deployment verification, and `git diff --check`. See [`qa/livingbook-final-closeout-2026-08-28/REPORT.md`](qa/livingbook-final-closeout-2026-08-28/REPORT.md). |
+| Local code quality gates | Passed except the separate cutout gate below | The current simplify tree passed typecheck, 88/88 Vitest tests, production build, 16/16 built Sites tests, and `git diff --check`. The dated production evidence remains in [`qa/livingbook-final-closeout-2026-08-28/REPORT.md`](qa/livingbook-final-closeout-2026-08-28/REPORT.md). |
 | Runtime cutout asset gate | Blocked | The current alpha/padding audit passes 16 assets and rejects 66 still-referenced v2 cutouts. Contact-sheet review also found clipped subjects, detached fragments, and edge contamination, so the set requires genuine regeneration rather than padding-only repair. |
 
 ## External challenge delivery

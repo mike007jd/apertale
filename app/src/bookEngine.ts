@@ -1,6 +1,7 @@
 import { initialDocument, initialSession, sampleBooks } from "./sampleBook";
 import { recordDiagnostic } from "./diagnostics";
 import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS, resolveInteraction } from "./interaction";
+import { listProjectAssetReferences } from "./projectArtifact";
 import { MOTION_PRESETS } from "./types";
 import type {
   AnimateCommand,
@@ -687,16 +688,12 @@ export class BookEngine {
     const spread = nextDocument.spreads[spreadIndex];
     const elements = spread.elements;
     const knownAssetIds = new Set(this.libraryState.documents.flatMap((document) => (
-      document.spreads.flatMap((candidate) => [
-        candidate.textureUrl,
-        candidate.artwork?.sourceAssetId,
-        candidate.artwork?.cleanPlateAssetId,
-        ...candidate.elements.map((element) => element.assetId),
-      ].filter((assetId): assetId is string => Boolean(assetId)))
+      listProjectAssetReferences(document)
+        // A cover proves library ownership, not authorization to place the same
+        // browser-local image into a scene without the trusted Asset registry.
+        .filter((reference) => reference.location.kind !== "cover")
+        .map((reference) => reference.assetId)
     )));
-    this.libraryState.documents.forEach((document) => document.spreads.forEach((spread) => spread.elements.forEach((element) => {
-      element.frameAssetIds?.forEach((assetId) => knownAssetIds.add(assetId));
-    })));
     const validatedLocalAssetIds = new Set(command.validatedLocalAssetIds ?? []);
     const validAssetId = (assetId: string) => !assetId.startsWith("model:") && (
       knownAssetIds.has(assetId)

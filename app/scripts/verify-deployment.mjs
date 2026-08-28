@@ -1,15 +1,10 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
 
-const EXPECTED_TOOLS = [
-  "get_project_context",
-  "manage_book",
-  "compose_spread",
-  "apply_scene_patch",
-  "set_presentation",
-  "undo_project_change",
-];
+const localManifest = JSON.parse(readFileSync(new URL("../site-manifest.json", import.meta.url), "utf8"));
+export const SITE_TOOL_NAMES = Object.freeze(Object.values(localManifest.webMcp.tools));
 
 function fail(message) {
   throw new Error(`Deployment verification failed: ${message}`);
@@ -92,14 +87,14 @@ export async function verifyDeployment(value, fetchImpl = fetch) {
   const manifest = await manifestResponse.json();
   if (manifest?.name !== "Apertale") fail("the deployment manifest has the wrong product name.");
   if (manifest?.webMcp?.registration !== "document.modelContext.registerTool") fail("the deployment manifest has the wrong WebMCP registration API.");
-  if (JSON.stringify(manifest?.webMcp?.tools) !== JSON.stringify(EXPECTED_TOOLS)) fail("the deployment manifest does not declare exactly the six expected tools.");
+  if (JSON.stringify(manifest?.webMcp?.tools) !== JSON.stringify(SITE_TOOL_NAMES)) fail("the deployment manifest does not declare exactly the six expected tools.");
 
   const entryUrl = new URL(modulePath, response.url || baseUrl);
   const entryResponse = await fetchImpl(entryUrl, { redirect: "follow" });
   if (!entryResponse.ok) fail(`${entryUrl.href} returned HTTP ${entryResponse.status}.`);
   const entry = await entryResponse.text();
   const bundleGraph = await fetchBundleGraph(entryUrl, entry, fetchImpl);
-  const missingTools = EXPECTED_TOOLS.filter((name) => !bundleGraph.includes(name));
+  const missingTools = SITE_TOOL_NAMES.filter((name) => !bundleGraph.includes(name));
   if (missingTools.length > 0) fail(`the shipped entry bundle is missing tool identifiers: ${missingTools.join(", ")}.`);
 
   return {
@@ -108,7 +103,7 @@ export async function verifyDeployment(value, fetchImpl = fetch) {
     url: response.url || baseUrl.href,
     product: manifest.name,
     version: manifest.version,
-    tools: EXPECTED_TOOLS,
+    tools: SITE_TOOL_NAMES,
     headers: {
       originAgentCluster: response.headers.get("origin-agent-cluster"),
       permissionsPolicy: response.headers.get("permissions-policy"),

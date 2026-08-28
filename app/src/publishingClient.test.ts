@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getStoredAssetBlob } from "./assetStore";
+import { listStoredProjectAssetIds } from "./projectArtifact";
 import {
-  collectLocalAssetIds,
   deletePublication,
   getPublicationRecord,
   PublicationError,
@@ -13,6 +13,7 @@ import type { DocumentState } from "./types";
 
 vi.mock("./assetStore", () => ({
   getStoredAssetBlob: vi.fn(),
+  isStoredAssetId: (value: string) => /^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
 }));
 
 const getBlob = vi.mocked(getStoredAssetBlob);
@@ -229,29 +230,6 @@ describe("publishing client", () => {
     vi.unstubAllGlobals();
   });
 
-  it("extracts every local asset reference from cover, spread, artwork, elements, and frames", () => {
-    expect(collectLocalAssetIds(documentState({
-      coverTextureUrl: "/assets/covers/custom.png",
-      spreads: [{
-        ...documentState().spreads[0],
-        textureUrl: "/assets/generated/clean.png",
-        elements: [{
-          ...documentState().spreads[0].elements[0],
-          assetId: "procedural:hotspot:amber",
-        }],
-      }],
-    }))).toEqual([COVER_ID, CLEAN_ID, SOURCE_ID, FRAME_A_ID, FRAME_B_ID]);
-    expect(collectLocalAssetIds(documentState())).toEqual([
-      COVER_ID,
-      TEXTURE_ID,
-      CLEAN_ID,
-      SOURCE_ID,
-      ELEMENT_ID,
-      FRAME_A_ID,
-      FRAME_B_ID,
-    ]);
-  });
-
   it("creates a draft, uploads each local blob once, publishes the exact manifest, and persists the creator record", async () => {
     const api = installShareApi();
     const progress: PublicationProgress[] = [];
@@ -340,7 +318,7 @@ describe("publishing client", () => {
 
     const putCountAfterFirst = api.requests.filter((request) => request.method === "PUT").length;
     getBlob.mockImplementation(async (assetId: string) => (
-      [...collectLocalAssetIds(documentState()), NEW_ID].includes(assetId) ? PNG : null
+      [...listStoredProjectAssetIds(documentState()), NEW_ID].includes(assetId) ? PNG : null
     ));
     const republished = await publishDocument(documentState({
       revision: 5,

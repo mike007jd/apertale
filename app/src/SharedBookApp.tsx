@@ -1,7 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Moon, Sun, X } from "@phosphor-icons/react";
-import { recordDiagnostic } from "./diagnostics";
 import { hasReveal, resolveInteraction } from "./interaction";
+import {
+  canTurnPage,
+  createPageTurnSession,
+  pageTurnNavDisabled,
+  skipsPageTurnAnimation,
+} from "./pageTurn";
+import type { TurnDirection, TurnWaitState } from "./pageTurn";
 import type { BookSnapshot, DocumentState, ThemeId, TurnState } from "./types";
 
 const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: module.ThreeBook })));
@@ -23,185 +29,6 @@ function announce(...parts: Array<string | undefined | null>) {
     .filter(Boolean)
     .map((part) => (/[.!?…:;]$/u.test(part) ? part : `${part}.`))
     .join(" ");
-}
-
-type TurnDirection = "forward" | "backward";
-
-export type SharedTurnDeps = {
-  now: () => number;
-  requestFrame: (callback: (now: number) => void) => number;
-  cancelFrame: (handle: number) => void;
-  /** Publishes the live leaf state to the renderer. The object is mutated in place between frames. */
-  setTurn: (turn: TurnState) => void;
-  /** Advances the read-only document index. Only ever called once a turn has settled. */
-  commit: (direction: TurnDirection) => void;
-  reducedMotion: () => boolean;
-  canTurn: (direction: TurnDirection) => boolean;
-};
-
-/** Arrow and sheet controls stay inert while a leaf is in flight, including at the first/last spread. */
-export function sharedReaderCanTurn(
-  direction: TurnDirection,
-  spreadIndex: number,
-  spreadCount: number,
-  waitingForRenderer = false,
-) {
-  if (waitingForRenderer) return false;
-  return direction === "forward" ? spreadIndex < spreadCount - 1 : spreadIndex > 0;
-}
-
-type TurnWaitState = Record<TurnDirection, boolean>;
-
-export function sharedReaderNavDisabled(
-  turn: TurnState,
-  spreadIndex: number,
-  spreadCount: number,
-  waitingForRenderer: TurnWaitState = { backward: false, forward: false },
-) {
-  const locked = turn !== null;
-  return {
-    previous: locked || !sharedReaderCanTurn("backward", spreadIndex, spreadCount, waitingForRenderer.backward),
-    next: locked || !sharedReaderCanTurn("forward", spreadIndex, spreadCount, waitingForRenderer.forward),
-  };
-}
-
-export function sharedReaderSkipsPageTurnAnimation(reducedMotion: boolean, pageTurnVisible: boolean) {
-  return reducedMotion || !pageTurnVisible;
-}
-
-/**
- * The public reader turns pages with the same stateful leaf the editing reader
- * uses: the spread index only moves once the animation settles, so an arrow
- * click or a drag never swaps the illustrated spread underneath a leaf that is
- * still mid-flight. The controller is a plain factory rather than inline
- * component code so the commit timing stays directly testable without a DOM.
- */
-export function createSharedTurnController(deps: SharedTurnDeps) {
-  let frame: number | null = null;
-  let active: { direction: TurnDirection; progress: number } | null = null;
-  let gestureHeld = false;
-  let disposed = false;
-  let generation = 0;
-
-  const restProgress = (direction: TurnDirection) => (direction === "forward" ? 0 : 1);
-  const settledProgress = (direction: TurnDirection) => (direction === "forward" ? 1 : 0);
-  const progressFor = (direction: TurnDirection, amount: number) => (direction === "forward" ? amount : 1 - amount);
-
-  const stopFrame = () => {
-    if (frame !== null) deps.cancelFrame(frame);
-    frame = null;
-  };
-
-  const settleTurn = (direction: TurnDirection, commit: boolean) => {
-    if (disposed) return;
-    active = null;
-    gestureHeld = false;
-    frame = null;
-    deps.setTurn(null);
-    if (!disposed && commit) deps.commit(direction);
-  };
-
-  const animateTurn = (direction: TurnDirection, from: number, to: number, commit: boolean) => {
-    if (disposed) return;
-    stopFrame();
-    gestureHeld = false;
-    if (deps.reducedMotion()) {
-      // Reduced motion resolves instantly, including a gesture that already
-      // claimed the lock, so the reader can never be left unable to turn.
-      settleTurn(direction, commit);
-      return;
-    }
-    const turn = active ?? { direction, progress: from };
-    turn.direction = direction;
-    turn.progress = from;
-    active = turn;
-    deps.setTurn(turn);
-    const started = deps.now();
-    const duration = Math.max(240, 760 * Math.abs(to - from));
-    const animationGeneration = generation;
-    let frameCount = 0;
-    const tick = (now: number) => {
-      if (disposed || animationGeneration !== generation) return;
-      frameCount += 1;
-      if (deps.reducedMotion()) {
-        const measuredDuration = Math.max(1, now - started);
-        recordDiagnostic("page-turn:summary", {
-          direction,
-          surface: "shared",
-          durationMs: Math.round(measuredDuration),
-          frames: frameCount,
-          fps: Math.round((frameCount / measuredDuration) * 1000),
-        });
-        settleTurn(direction, commit);
-        return;
-      }
-      const linear = Math.min(1, (now - started) / duration);
-      const eased = 0.5 - Math.cos(Math.PI * linear) / 2;
-      turn.progress = from + (to - from) * eased;
-      if (linear < 1) {
-        if (disposed) return;
-        frame = deps.requestFrame(tick);
-        return;
-      }
-      const measuredDuration = Math.max(1, now - started);
-      recordDiagnostic("page-turn:summary", {
-        direction,
-        surface: "shared",
-        durationMs: Math.round(measuredDuration),
-        frames: frameCount,
-        fps: Math.round((frameCount / measuredDuration) * 1000),
-      });
-      settleTurn(direction, commit);
-    };
-    frame = deps.requestFrame(tick);
-  };
-
-  const turnPage = (direction: TurnDirection) => {
-    if (disposed || active) return;
-    if (!deps.canTurn(direction)) return;
-    animateTurn(direction, restProgress(direction), settledProgress(direction), true);
-  };
-
-  const onPageGesture = (direction: TurnDirection, phase: "start" | "move" | "end", amount: number) => {
-    if (disposed) return;
-    if (phase === "start") {
-      if (active || !deps.canTurn(direction)) return;
-      gestureHeld = true;
-      active = { direction, progress: restProgress(direction) };
-      deps.setTurn(active);
-      return;
-    }
-    if (phase === "move") {
-      if (!gestureHeld || !active || active.direction !== direction) return;
-      active.progress = progressFor(direction, amount);
-      return;
-    }
-    if (!gestureHeld || !active) return;
-    const held = active.direction;
-    const matches = held === direction;
-    const commit = matches && amount > 0.32;
-    const current = matches ? progressFor(held, amount) : active.progress;
-    const target = commit ? settledProgress(held) : restProgress(held);
-    gestureHeld = false;
-    animateTurn(held, current, target, commit);
-  };
-
-  const dispose = () => {
-    generation += 1;
-    disposed = true;
-    gestureHeld = false;
-    stopFrame();
-    active = null;
-  };
-
-  const activate = () => {
-    if (!disposed) return;
-    generation += 1;
-    disposed = false;
-    deps.setTurn(null);
-  };
-
-  return { turnPage, onPageGesture, isTurning: () => !disposed && active !== null, activate, dispose };
 }
 
 function supportsWebGl2() {
@@ -226,12 +53,14 @@ export function SharedBookApp() {
   const webGlAvailable = useMemo(supportsWebGl2, []);
   const spreadIndexRef = useRef(0);
   const spreadCountRef = useRef(0);
+  const documentIdRef = useRef<string | null>(null);
   const reducedMotionRef = useRef(false);
   const pageTurnVisibleRef = useRef(webGlAvailable);
   const rendererAvailableRef = useRef(webGlAvailable);
   const waitingForRendererRef = useRef<TurnWaitState>({ backward: webGlAvailable, forward: webGlAvailable });
   spreadIndexRef.current = spreadIndex;
   spreadCountRef.current = documentState?.spreads.length ?? 0;
+  documentIdRef.current = documentState?.id ?? null;
   reducedMotionRef.current = reducedMotion;
   rendererAvailableRef.current = webGlAvailable && !sceneFailed;
   pageTurnVisibleRef.current = webGlAvailable && !sceneFailed && sceneReady;
@@ -278,16 +107,18 @@ export function SharedBookApp() {
     setSpreadIndex((current) => Math.max(0, Math.min(spreadCountRef.current - 1, current + (direction === "forward" ? 1 : -1))));
   }, []);
 
-  const turnController = useMemo(() => createSharedTurnController({
+  const turnController = useMemo(() => createPageTurnSession({
+    surface: "shared",
     now: () => performance.now(),
     requestFrame: (callback) => requestAnimationFrame(callback),
     cancelFrame: (handle) => cancelAnimationFrame(handle),
     setTurn,
     commit: commitSpread,
+    navigationKey: () => `${documentIdRef.current}:${spreadIndexRef.current}`,
     // A delayed commit only makes sense while ThreeBook can render the leaf.
     // Static fallback readers and reduced-motion users navigate immediately.
-    reducedMotion: () => sharedReaderSkipsPageTurnAnimation(reducedMotionRef.current, pageTurnVisibleRef.current),
-    canTurn: (direction) => sharedReaderCanTurn(
+    reducedMotion: () => skipsPageTurnAnimation(reducedMotionRef.current, pageTurnVisibleRef.current),
+    canTurn: (direction) => canTurnPage(
       direction,
       spreadIndexRef.current,
       spreadCountRef.current,
@@ -343,7 +174,7 @@ export function SharedBookApp() {
     backward: showWebGl && (!sceneReady || !pageTurnReady.backward),
     forward: showWebGl && (!sceneReady || !pageTurnReady.forward),
   };
-  const nav = sharedReaderNavDisabled(turn, spreadIndex, snapshot.document.spreads.length, waitingForRenderer);
+  const nav = pageTurnNavDisabled(turn, spreadIndex, snapshot.document.spreads.length, waitingForRenderer);
 
   return (
     <main className="app-shell is-preview is-shared-reader">

@@ -1,7 +1,8 @@
-import { getStoredAssetBlob } from "./assetStore";
+import { getStoredAssetBlob, isStoredAssetId } from "./assetStore";
+import { listStoredProjectAssetIds } from "./projectArtifact";
 import type { DocumentState } from "./types";
 
-export type PublicationStatus = "draft" | "publishing" | "published" | "revoked";
+type PublicationStatus = "draft" | "publishing" | "published" | "revoked";
 
 export type PublicationRecord = {
   documentId: string;
@@ -19,7 +20,6 @@ export type PublicationProgress = {
 };
 
 const STORAGE_PREFIX = "apertale.publication.v1:";
-const LOCAL_ASSET_PATTERN = /^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f-]{27,35}$/i;
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -42,25 +42,6 @@ export class PublicationError extends Error {
     this.status = options.status ?? 0;
     this.retryable = options.retryable ?? false;
   }
-}
-
-export function collectLocalAssetIds(documentState: DocumentState): string[] {
-  const ids = new Set<string>();
-  const add = (value: string | undefined) => {
-    if (typeof value === "string" && LOCAL_ASSET_PATTERN.test(value)) ids.add(value);
-  };
-  add(documentState.coverAssetId);
-  add(documentState.coverTextureUrl);
-  for (const spread of documentState.spreads) {
-    add(spread.textureUrl);
-    add(spread.artwork?.cleanPlateAssetId);
-    add(spread.artwork?.sourceAssetId);
-    for (const element of spread.elements) {
-      add(element.assetId);
-      element.frameAssetIds?.forEach(add);
-    }
-  }
-  return [...ids];
 }
 
 export function getPublicationRecord(documentId: string): PublicationRecord | null {
@@ -197,7 +178,7 @@ function toPublicRecord(record: StoredPublicationRecord): PublicationRecord {
 }
 
 function uniqueAssetIds(values: string[] | undefined) {
-  return [...new Set((values ?? []).filter((assetId) => LOCAL_ASSET_PATTERN.test(assetId)))];
+  return [...new Set((values ?? []).filter(isStoredAssetId))];
 }
 
 function tokenFromBytes(bytes: Uint8Array) {
@@ -342,7 +323,7 @@ function clearStoredRecord(documentId: string) {
 }
 
 async function loadRequiredBlobs(documentState: DocumentState) {
-  const assetIds = collectLocalAssetIds(documentState);
+  const assetIds = listStoredProjectAssetIds(documentState);
   const blobs = new Map<string, Blob>();
   const missing: string[] = [];
   for (const assetId of assetIds) {

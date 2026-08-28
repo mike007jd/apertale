@@ -6,17 +6,16 @@ import {
   type CreationCompletionGate,
 } from "./authoringContract";
 
-export { creationCompletionGates, creationReportRequirements, REQUIRED_GATE_IDS };
-export type { CreationCompletionGate };
+export { creationCompletionGates, REQUIRED_GATE_IDS };
 
 export const AUTHORING_MODES = ["idea", "photos", "both"] as const;
 export type AuthoringMode = (typeof AUTHORING_MODES)[number];
 
-export const CREATION_SPREAD_COUNT_MIN = 1;
-export const CREATION_SPREAD_COUNT_MAX = 12;
-export const CREATION_SOURCE_ASSET_LIMIT = 24;
+const CREATION_SPREAD_COUNT_MIN = 1;
+const CREATION_SPREAD_COUNT_MAX = 12;
+const CREATION_SOURCE_ASSET_LIMIT = 24;
 
-export type CreationSourceAsset = {
+type CreationSourceAsset = {
   id: string;
   name: string;
 };

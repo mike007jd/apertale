@@ -1,6 +1,6 @@
 export const MAX_SOURCE_IMAGE_BYTES = 12_000_000;
-export const MAX_STORED_IMAGE_BYTES = 1_500_000;
-export const MAX_STORED_IMAGE_DIMENSION = 2048;
+const MAX_STORED_IMAGE_BYTES = 1_500_000;
+const MAX_STORED_IMAGE_DIMENSION = 2048;
 
 type DecodedImage = CanvasImageSource & { width: number; height: number; close?: () => void };
 

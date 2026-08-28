@@ -1,17 +1,15 @@
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MOTION_PRESETS } from "./types";
+import siteManifest from "../site-manifest.json";
 
-export const SITE_TOOL_NAMES = [
-  "get_project_context",
-  "manage_book",
-  "compose_spread",
-  "apply_scene_patch",
-  "set_presentation",
-  "undo_project_change",
-] as const;
+export const SITE_TOOL = Object.freeze(siteManifest.webMcp.tools);
+const manifestToolNames = Object.values(SITE_TOOL);
+if (manifestToolNames.length !== 6 || new Set(manifestToolNames).size !== manifestToolNames.length) {
+  throw new TypeError("Invalid Apertale manifest: exactly six unique WebMCP tools are required.");
+}
+export const SITE_TOOL_NAMES = Object.freeze(manifestToolNames) as readonly [string, string, string, string, string, string];
 
 export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", "authoring-guide"] as const;
-export type ProjectContextDetail = (typeof PROJECT_CONTEXT_DETAILS)[number];
 
 export const AUTHORING_GUIDE_DETAIL = "authoring-guide" as const;
 export const AUTHORING_GUIDE_ID = "apertale-authoring-guide" as const;
@@ -23,7 +21,7 @@ export const AUTHORING_GUIDE_FULL_SPREAD_COUNT = "exactly the agreed spread coun
 export const AUTHORING_GUIDE_PROVENANCE_COUNT = "1 cover + one per spread" as const;
 
 export const REQUIRED_GATE_IDS = ["inspect", "story", "plan", "art", "photo-truth", "layout", "evidence"] as const;
-export type RequiredGateId = (typeof REQUIRED_GATE_IDS)[number];
+type RequiredGateId = (typeof REQUIRED_GATE_IDS)[number];
 
 export const AUTHORING_HARD_GATE_IDS = [
   "inspect",
@@ -38,7 +36,7 @@ export const AUTHORING_HARD_GATE_IDS = [
   "provenance-revision",
   "verify",
 ] as const;
-export type AuthoringHardGateId = (typeof AUTHORING_HARD_GATE_IDS)[number];
+type AuthoringHardGateId = (typeof AUTHORING_HARD_GATE_IDS)[number];
 
 export const PHOTO_TRUTH_REQUIREMENT =
   "Use source photos as references and story truth. Do not use a raw uploaded photo as finished interior or right-page artwork unless the user explicitly requested a literal photo album.";

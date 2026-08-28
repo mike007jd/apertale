@@ -1,7 +1,7 @@
 # Apertale — Devpost Submission Draft
 
 > Prepared: 2026-08-27 NZST
-> Publication fields remain intentionally blank until their real destinations pass `CHALLENGE_READINESS.md`.
+> Only destinations that have passed `CHALLENGE_READINESS.md` are filled below.
 
 ## Project name
 
@@ -77,7 +77,7 @@ Show the wordmark and tagline: **Apertale — Open a page. Enter a world.**
 
 ## Submission fields
 
-- Live app URL: `PENDING_VERIFIED_LIVE_URL`
+- Live app URL: [https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/](https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/)
 - Public repository URL: `PENDING_PUBLIC_REPOSITORY_URL`
 - Public YouTube demo URL: `PENDING_PUBLIC_VIDEO_URL`
 - Figma design URL: [Apertale — Product Design v1.1](https://www.figma.com/design/3Kq19oItsbBczMIeB739cO/Apertale-%E2%80%94-Product-Design-v1.1?node-id=7-6)
