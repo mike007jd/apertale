@@ -33,10 +33,10 @@ const PROGRESS_COPY: Record<PublicationProgress["phase"], string> = {
 };
 
 const STATUS_COPY = {
-  draft: { label: "Not published", detail: "This book only exists in this browser." },
-  publishing: { label: "Publish interrupted", detail: "Your progress is saved in this browser. Resume to finish opening the link." },
-  published: { label: "Published", detail: "Anyone holding the link can open this book." },
-  revoked: { label: "Revoked", detail: "The previous link is dead. Nothing public remains." },
+  draft: { label: "Not published", detail: "Local only" },
+  publishing: { label: "Publish interrupted", detail: "Ready to resume" },
+  published: { label: "Published", detail: "Anyone with the link can view" },
+  revoked: { label: "Revoked", detail: "The previous link no longer works" },
 } as const;
 
 /**
@@ -192,8 +192,8 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
           <span className="publication-lede">
             {statusCopy.detail}
             {status !== "published" && (localImageCount === 0
-              ? ` Publishing uploads revision ${documentState.revision} of the manifest; this book references no browser-stored images.`
-              : ` Publishing uploads ${localImageCount} browser-stored image${localImageCount === 1 ? "" : "s"} and revision ${documentState.revision} of the manifest.`)}
+              ? ` · revision ${documentState.revision}`
+              : ` · ${localImageCount} image${localImageCount === 1 ? "" : "s"} · revision ${documentState.revision}`)}
           </span>
 
           {shareUrl && (
@@ -242,15 +242,15 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
           <ul className="publication-disclosures">
             <li>
               <ShieldWarning size={16} weight="fill" />
-              <span><strong>Anyone with the link can view this book.</strong> There is no sign-in and it is not a private album. Treat the link itself as the permission.</span>
+              <span><strong>Public link</strong>Anyone with it can view.</span>
             </li>
             <li>
               <ShieldWarning size={16} weight="fill" />
-              <span><strong>The creator capability stays in this browser.</strong> It is required to revoke or delete later and cannot be recovered. Clearing this browser's storage or using another device ends your ability to manage this publication.</span>
+              <span><strong>This browser</strong>Keep it to revoke or delete.</span>
             </li>
             <li>
               <ShieldWarning size={16} weight="fill" />
-              <span><strong>Review permission for every personal photo.</strong> Faces, names, and locations in your images become publicly readable. Do not publish photos you are not entitled to share.</span>
+              <span><strong>Your photos</strong>Share only with permission.</span>
             </li>
           </ul>
         </div>
@@ -278,12 +278,12 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
 
           {record && confirmingDelete && (
             <div className="publication-confirm" role="alertdialog" aria-label="Confirm permanent delete">
-              <p><strong>Delete this publication permanently?</strong> The public link, the uploaded images, and the published record are destroyed. This cannot be undone and the book cannot be restored from the server.</p>
+              <p><strong>Delete this publication?</strong> Removes the link, uploaded images, and server record. This cannot be undone.</p>
               <div>
-                <button className="publication-secondary" onClick={() => setConfirmingDelete(false)} disabled={Boolean(busy)}>Cancel deletion</button>
+                <button className="publication-secondary" onClick={() => setConfirmingDelete(false)} disabled={Boolean(busy)}>Keep it</button>
                 <button className="publication-danger" onClick={remove} disabled={Boolean(busy)}>
                   {busy === "deleting" ? <SpinnerGap size={17} weight="bold" className="is-spinning" /> : <Trash size={17} weight="fill" />}
-                  {busy === "deleting" ? "Deleting" : "Yes, delete permanently"}
+                  {busy === "deleting" ? "Deleting" : "Delete forever"}
                 </button>
               </div>
             </div>
