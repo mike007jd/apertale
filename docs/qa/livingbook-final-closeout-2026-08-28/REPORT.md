@@ -138,6 +138,7 @@ No confirmed actionable finding remains in the merged release diff.
 - PR #5: extensionless internal shell, merged.
 - PR #6: production verifier follows the lazy Vite chunk graph, merged.
 - PR #7: public shared-reader theme controls, merged.
+- PR #8: final production evidence and readiness ledger (this report).
 - Sites access mode: public.
 - GitHub repository visibility: private.
 - The final evidence report is delivered as a documentation-only pull request;
