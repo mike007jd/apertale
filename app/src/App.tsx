@@ -28,7 +28,8 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
-import { listAssetMetadata, releaseAssetUrls, resolveAssetUrl, storeLocalImage } from "./assetStore";
+import { getAssetMetadata, releaseAssetUrls, resolveAssetUrl, storeLocalImage } from "./assetStore";
+import { buildCreationBrief } from "./creationBrief";
 import { MAX_SOURCE_IMAGE_BYTES } from "./imageOptimizer";
 import { recordDiagnostic } from "./diagnostics";
 import {
@@ -71,8 +72,70 @@ type BookTransition = {
   cardRect: MotionRect;
 };
 
-const CREATION_STYLES = ["Paper collage", "Watercolor storybook", "Cinematic editorial", "Surprise me"] as const;
+const CREATION_STYLES = ["Paper collage", "Watercolor", "Cinematic", "Surprise me"] as const;
 const CREATION_LENGTHS = [4, 6, 8, 10, 12] as const;
+const CREATION_SOURCES = [
+  { id: "idea", label: "Idea" },
+  { id: "photos", label: "Photos" },
+  { id: "both", label: "Idea + photos" },
+] as const;
+/* One source image per spread covers a full book, and 12 optimized images stay
+   under ~18 MB in IndexedDB while the strip still scrolls in one row. */
+const MAX_WORKSHOP_ASSETS = 12;
+const WORKSHOP_ASSET_ORDER_KEY = "apertale:workshop-asset-order:v1";
+
+type CreationSource = (typeof CREATION_SOURCES)[number]["id"];
+type WorkshopAsset = { id: string; name: string; url: string };
+
+function readWorkshopAssetOrder(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(sessionStorage.getItem(WORKSHOP_ASSET_ORDER_KEY) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter((id): id is string => typeof id === "string" && id.startsWith("asset:")))]
+      .slice(0, MAX_WORKSHOP_ASSETS);
+  } catch {
+    return [];
+  }
+}
+
+function writeWorkshopAssetOrder(assets: readonly WorkshopAsset[]) {
+  try {
+    sessionStorage.setItem(WORKSHOP_ASSET_ORDER_KEY, JSON.stringify(assets.map((asset) => asset.id)));
+  } catch {
+    // A storage-blocked browser can still keep the current in-memory brief.
+  }
+}
+
+async function copyPlainText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // The selection fallback below keeps copy usable in restricted webviews.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  const priorFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  document.body.appendChild(textarea);
+  try {
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+    return document.execCommand?.("copy") ?? false;
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+    priorFocus?.focus();
+  }
+}
 
 function readRect(element: Element | null): MotionRect | null {
   if (!(element instanceof HTMLElement)) return null;
@@ -208,6 +271,7 @@ export function App() {
   const [turn, setTurn] = useState<TurnState>(null);
   const [webMcpAvailable, setWebMcpAvailable] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [showOutline, setShowOutline] = useState(false);
   const [showLibrary, setShowLibrary] = useState(true);
@@ -216,9 +280,11 @@ export function App() {
   const [showCreateGuide, setShowCreateGuide] = useState(false);
   const [showElementAgentGuide, setShowElementAgentGuide] = useState(false);
   const [elementPromptCopied, setElementPromptCopied] = useState(false);
+  const [elementPromptCopyError, setElementPromptCopyError] = useState(false);
   const [creationSpreadCount, setCreationSpreadCount] = useState(6);
   const [creationStyle, setCreationStyle] = useState<(typeof CREATION_STYLES)[number]>("Paper collage");
-  const [workshopAssetCount, setWorkshopAssetCount] = useState(0);
+  const [creationSource, setCreationSource] = useState<CreationSource>("idea");
+  const [workshopAssets, setWorkshopAssets] = useState<WorkshopAsset[]>([]);
   const [assetImporting, setAssetImporting] = useState(false);
   const [openingBook, setOpeningBook] = useState<OpeningBook | null>(null);
   const [readyBookId, setReadyBookId] = useState<string | null>(null);
@@ -234,6 +300,7 @@ export function App() {
   const turnFrame = useRef<number | null>(null);
   const turnState = useRef<TurnState>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const addPhotoButton = useRef<HTMLButtonElement | null>(null);
   const librarySheet = useRef<HTMLDivElement | null>(null);
   const libraryOpener = useRef<HTMLElement | null>(null);
   const createGuideCard = useRef<HTMLDivElement | null>(null);
@@ -268,15 +335,30 @@ export function App() {
   }), [snapshot.session.quality, snapshot.session.sceneThemeId]);
 
   useEffect(() => {
-    if (!showCreateGuide) return undefined;
+    if (!showCreateGuide || workshopAssets.length > 0) return undefined;
+    const selectedIds = readWorkshopAssetOrder();
+    if (selectedIds.length === 0) return undefined;
     let canceled = false;
-    listAssetMetadata(6)
-      .then((assets) => {
-        if (!canceled) setWorkshopAssetCount((current) => Math.max(current, assets.length));
+    getAssetMetadata(selectedIds)
+      .then(async (assets) => {
+        const metadataById = new Map(assets.map((asset) => [asset.id, asset]));
+        const resolved = await Promise.all(selectedIds.map(async (id) => {
+          const asset = metadataById.get(id);
+          if (!asset) return null;
+          try {
+            return { id: asset.id, name: asset.name, url: await resolveAssetUrl(asset.id) } satisfies WorkshopAsset;
+          } catch {
+            return null;
+          }
+        }));
+        if (canceled) return;
+        const hydrated = resolved.filter((asset): asset is WorkshopAsset => Boolean(asset));
+        writeWorkshopAssetOrder(hydrated);
+        setWorkshopAssets((current) => (current.length > 0 ? current : hydrated));
       })
       .catch(() => recordDiagnostic("workbench:asset-list-failed", {}));
     return () => { canceled = true; };
-  }, [showCreateGuide]);
+  }, [showCreateGuide, workshopAssets.length]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return undefined;
@@ -493,6 +575,7 @@ export function App() {
   const openCodexGuide = useCallback(() => {
     createGuideOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setCopied(false);
+    setCopyError(false);
     setShowCreateGuide(true);
   }, []);
 
@@ -515,6 +598,7 @@ export function App() {
     if (!selected) return;
     elementAgentOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setElementPromptCopied(false);
+    setElementPromptCopyError(false);
     setShowElementAgentGuide(true);
   }, [selected]);
 
@@ -533,9 +617,10 @@ export function App() {
 
   const copySelectedElementPrompt = useCallback(async () => {
     if (!selectedElementPrompt || !selected) return;
-    await navigator.clipboard?.writeText(selectedElementPrompt);
-    setElementPromptCopied(true);
-    recordDiagnostic("element-agent:starter-copied", { elementId: selected.id, spreadId: spread.id });
+    const didCopy = await copyPlainText(selectedElementPrompt);
+    setElementPromptCopied(didCopy);
+    setElementPromptCopyError(!didCopy);
+    recordDiagnostic(didCopy ? "element-agent:starter-copied" : "element-agent:copy-blocked", { elementId: selected.id, spreadId: spread.id });
   }, [selected, selectedElementPrompt, spread.id]);
 
   const openBookFromLibrary = useCallback((bookId: string, source?: HTMLElement) => {
@@ -752,7 +837,7 @@ export function App() {
     const keepFocusInside = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
       const controls = [...card.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-        .filter((control) => !control.hasAttribute("disabled"));
+        .filter((control) => !control.hasAttribute("disabled") && !control.hasAttribute("hidden"));
       if (controls.length === 0) return;
       const first = controls[0];
       const last = controls.at(-1)!;
@@ -836,42 +921,82 @@ export function App() {
 
   const importWorkshopPhotos = async (files: FileList | null) => {
     if (!files?.length) return;
+    const room = MAX_WORKSHOP_ASSETS - workshopAssets.length;
+    if (room <= 0) {
+      setWorkshopImportError(`This brief already holds ${MAX_WORKSHOP_ASSETS} photos. Remove one to add another.`);
+      return;
+    }
     setAssetImporting(true);
     setWorkshopImportError(null);
-    let imported = 0;
+    const imported: WorkshopAsset[] = [];
     try {
-      for (const file of Array.from(files).slice(0, 6 - workshopAssetCount)) {
+      // Files keep their picked order, and each import appends to the end of the strip.
+      for (const file of Array.from(files).slice(0, room)) {
         if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size <= 0 || file.size > MAX_SOURCE_IMAGE_BYTES) continue;
         const asset = await storeLocalImage(file);
-        imported += 1;
+        let url = "";
+        try { url = await resolveAssetUrl(asset.id); } catch { url = ""; }
+        imported.push({ id: asset.id, name: asset.name, url });
         recordDiagnostic("workbench:asset-handed-off", { assetId: asset.id, originalSize: asset.originalSize ?? asset.size, size: asset.size, optimized: asset.optimized ?? false });
       }
-      if (imported > 0) setWorkshopAssetCount((current) => Math.min(6, current + imported));
-      else setWorkshopImportError("That file was not a usable image. Choose PNG, JPEG, or WebP under 12 MB, then try the handoff again.");
+      if (imported.length > 0) {
+        setWorkshopAssets((current) => {
+          const next = [...current, ...imported].slice(0, MAX_WORKSHOP_ASSETS);
+          writeWorkshopAssetOrder(next);
+          return next;
+        });
+        setCreationSource((current) => (current === "idea" ? "both" : current));
+      } else {
+        setWorkshopImportError("That file was not a usable image. Choose PNG, JPEG, or WebP under 12 MB.");
+      }
     } catch {
-      setWorkshopImportError("This browser could not store those images. Free some space or try a private-window-free profile, then try again.");
+      setWorkshopImportError("This browser could not store those images. Free some space, then try again.");
     } finally {
       setAssetImporting(false);
     }
   };
 
+  const moveWorkshopAsset = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    setWorkshopAssets((current) => {
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      writeWorkshopAssetOrder(next);
+      return next;
+    });
+  };
+
+  const removeWorkshopAsset = (assetId: string) => {
+    // This is a brief-level edit only. The blob stays in IndexedDB so existing
+    // books and WebMCP asset lookups keep working.
+    setWorkshopAssets((current) => {
+      const next = current.filter((asset) => asset.id !== assetId);
+      writeWorkshopAssetOrder(next);
+      return next;
+    });
+    recordDiagnostic("workbench:asset-removed-from-brief", { assetId });
+    window.setTimeout(() => addPhotoButton.current?.focus(), 0);
+  };
+
+  const usesPhotos = creationSource !== "idea";
+  const briefAssets = usesPhotos ? workshopAssets : [];
+
   const createPrompt = useMemo(() => {
-    return [
-      "Work on the Apertale page that is open beside this conversation. It is a WebMCP-enabled living-book canvas.",
-      "First call get_project_context. Then create a new independent book; never overwrite a curated sample.",
-      `Use exactly ${creationSpreadCount} spreads and the visual direction: ${creationStyle}.`,
-      "Ask me for a short description, intended audience, and any source photos or illustrations here in this Agent conversation unless I already supplied them. Do not ask me to enter the same brief again inside Apertale.",
-      `Plan the complete book and a dedicated portrait cover before editing. Use your available image generation or editing capabilities for original artwork.${workshopAssetCount > 0 ? ` ${workshopAssetCount} image handoff${workshopAssetCount === 1 ? " is" : "s are"} already available through get_project_context(detail: "assets").` : ""}`,
-      "If the current host cannot transfer an attached or generated image through WebMCP, ask me to use the small Image handoff control in Apertale, then refresh get_project_context(detail: \"assets\"). Do not pretend a media transfer succeeded.",
-      "Build every spread through Apertale's Site Tools. Add purposeful hover, click, depth, and short frame animation only where they support the content. Keep the Apertale page open and show each revision there.",
-    ].join("\n");
-  }, [creationSpreadCount, creationStyle, workshopAssetCount]);
+    return buildCreationBrief({
+      mode: creationSource,
+      spreadCount: creationSpreadCount,
+      visualDirection: creationStyle,
+      sourceAssets: (usesPhotos ? workshopAssets : []).map(({ id, name }) => ({ id, name })),
+    }).prompt;
+  }, [creationSource, creationSpreadCount, creationStyle, usesPhotos, workshopAssets]);
 
   const copyPrompt = async () => {
-    await navigator.clipboard?.writeText(createPrompt);
-    setCopied(true);
-    recordDiagnostic("workbench:starter-copied", { spreads: creationSpreadCount, style: creationStyle });
-    window.setTimeout(() => setCopied(false), 1800);
+    const didCopy = await copyPlainText(createPrompt);
+    setCopied(didCopy);
+    setCopyError(!didCopy);
+    recordDiagnostic(didCopy ? "workbench:starter-copied" : "workbench:copy-blocked", { spreads: creationSpreadCount, style: creationStyle, source: creationSource, assets: briefAssets.length });
+    if (didCopy) window.setTimeout(() => setCopied(false), 1800);
   };
 
   const confirmReset = () => {
@@ -932,7 +1057,7 @@ export function App() {
               <h1 id="library-title">Open a world.<br />Then make one yours.</h1>
               <span>Browse anywhere. Create in Codex (ChatGPT desktop) with your own plan.</span>
               <div className="library-actions">
-                <button className="create-codex-button" onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create with Codex</button>
+                <button className="create-codex-button" onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create your own</button>
                 <button className="guide-book-button" onClick={() => openBookFromLibrary("apertale-field-guide")} onPointerEnter={() => prewarmReader("apertale-field-guide")} onFocus={() => prewarmReader("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={18} /> Read the Guide Book</button>
               </div>
               <p className="library-scroll-cue" aria-hidden="true">Swipe for all {library.books.length} books<ArrowRight size={14} weight="bold" /></p>
@@ -1183,7 +1308,7 @@ export function App() {
           </div>
           <button className="agent-prompt" onClick={openCodexGuide}>
             <Sparkle size={17} weight="fill" />
-            <span>Create with Codex</span>
+            <span>Create your own</span>
           </button>
           <div className="page-progress"><strong>{snapshot.session.currentSpreadIndex + 1}</strong><span>/</span>{snapshot.document.spreads.length}</div>
         </footer>
@@ -1213,77 +1338,140 @@ export function App() {
           <div className="workshop-ui" ref={createGuideCard}>
             <header className="workshop-topbar">
               <button className="workshop-wordmark" onClick={closeCodexGuide}><BookOpenText size={19} /> Apertale</button>
-              <span>New book workshop</span>
               <button className="workshop-close" autoFocus onClick={closeCodexGuide} aria-label="Close creation workshop"><X size={20} /></button>
             </header>
 
-            <div className="workshop-intro">
-              <p>Your blank book</p>
-              <h2 id="codex-guide-title">Set the canvas.<br />Tell your Agent the story.</h2>
-              <span>Choose only the shape of the book here. Your words and images belong in the Agent conversation.</span>
-            </div>
-
-            <div className="workshop-page-controls" aria-label="New book settings">
-              <fieldset className="workshop-choice workshop-length">
-                <legend><span>01</span> Length</legend>
-                <div>
-                  {CREATION_LENGTHS.map((count) => (
-                    <button type="button" key={count} className={creationSpreadCount === count ? "is-selected" : ""} onClick={() => setCreationSpreadCount(count)} aria-pressed={creationSpreadCount === count}>
-                      <strong>{count}</strong><small>spreads</small>
-                    </button>
-                  ))}
+            <div className="workshop-sheet">
+              <div className="workshop-sheet-scroll">
+                <div className="workshop-headline">
+                  <p>New book</p>
+                  <h2 id="codex-guide-title">Make one yours.</h2>
                 </div>
-              </fieldset>
-              <fieldset className="workshop-choice workshop-style">
-                <legend><span>02</span> Visual direction</legend>
-                <div>
-                  {CREATION_STYLES.map((style) => (
-                    <button type="button" key={style} className={creationStyle === style ? "is-selected" : ""} onClick={() => setCreationStyle(style)} aria-pressed={creationStyle === style}>
-                      {style}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-            </div>
 
-            <aside className="workshop-agent-panel" aria-label="Continue in your Agent">
-              <div className={`workbench-status ${webMcpAvailable ? "is-connected" : ""}`}>
-                <i /><span><strong>{webMcpAvailable ? "WebMCP connected" : "WebMCP-ready page"}</strong><small>{webMcpAvailable ? "Your Agent can operate this open book." : "Open this page in a WebMCP-capable Agent browser."}</small></span>
-              </div>
-              <p className="workshop-agent-boundary">Continue in Codex (ChatGPT desktop) beside this Site.</p>
-              <div className="workshop-handoff-copy">
-                <p>Continue in your Agent</p>
-                <h3>Bring the idea.<br />Bring the pictures.</h3>
-                <ol>
-                  <li><span>1</span><strong>Copy the starter</strong></li>
-                  <li><span>2</span><strong>Paste it in your Agent</strong></li>
-                  <li><span>3</span><strong>Add your request and images there</strong></li>
-                </ol>
-              </div>
-              <div className="workshop-selection-summary">
-                <span>{creationSpreadCount} spreads</span>
-                <span>{creationStyle}</span>
-              </div>
-              <button className="copy-starter-button" onClick={() => void copyPrompt()}>
-                {copied ? <Check size={18} weight="bold" /> : <Copy size={18} weight="bold" />}
-                {copied ? "Copied — paste in your Agent" : "Copy starter prompt"}
-              </button>
-              <div className="workshop-media-note">
-                <p>Start by attaching photos in your Agent chat. If that host cannot hand them to WebMCP yet, use this fallback once; images up to 12 MB are optimized locally.</p>
-                <button type="button" onClick={() => fileInput.current?.click()} disabled={assetImporting || workshopAssetCount >= 6}>
-                  {assetImporting ? <SpinnerGap size={14} className="is-spinning" /> : <Plus size={14} />}
-                  {assetImporting ? "Importing" : workshopAssetCount > 0 ? `${workshopAssetCount} image${workshopAssetCount === 1 ? "" : "s"} ready` : "Image handoff"}
-                </button>
-                <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => { void importWorkshopPhotos(event.currentTarget.files); event.currentTarget.value = ""; }} />
-                {workshopImportError && (
-                  <p className="workshop-import-error" role="alert">
-                    <WarningCircle size={14} weight="fill" />
-                    <span>{workshopImportError}</span>
-                    <button type="button" onClick={() => { setWorkshopImportError(null); fileInput.current?.click(); }}>Choose another image</button>
-                  </p>
+                <p className={`workshop-signal ${webMcpAvailable ? "is-connected" : ""}`}>
+                  <i aria-hidden="true" />
+                  <span>{webMcpAvailable ? "Ready beside Codex" : "Read here. Open in Codex (ChatGPT desktop) to create."}</span>
+                </p>
+
+                <fieldset className="workshop-field">
+                  <legend>Start from</legend>
+                  <div className="workshop-segment">
+                    {CREATION_SOURCES.map((source) => (
+                      <button
+                        type="button"
+                        key={source.id}
+                        className={`workshop-option ${creationSource === source.id ? "is-selected" : ""}`}
+                        onClick={() => setCreationSource(source.id)}
+                        aria-pressed={creationSource === source.id}
+                      >{source.label}</button>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <fieldset className="workshop-field">
+                  <legend>Spreads</legend>
+                  <div className="workshop-lengths">
+                    {CREATION_LENGTHS.map((count) => (
+                      <button
+                        type="button"
+                        key={count}
+                        className={`workshop-option ${creationSpreadCount === count ? "is-selected" : ""}`}
+                        onClick={() => setCreationSpreadCount(count)}
+                        aria-pressed={creationSpreadCount === count}
+                        aria-label={`${count} spreads`}
+                      >{count}</button>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <fieldset className="workshop-field">
+                  <legend>Style</legend>
+                  <div className="workshop-chips">
+                    {CREATION_STYLES.map((style) => (
+                      <button
+                        type="button"
+                        key={style}
+                        className={`workshop-option ${creationStyle === style ? "is-selected" : ""}`}
+                        onClick={() => setCreationStyle(style)}
+                        aria-pressed={creationStyle === style}
+                      >{style}</button>
+                    ))}
+                  </div>
+                </fieldset>
+
+                {usesPhotos && (
+                  <section className="workshop-photos" aria-label="Source images, in book order">
+                    <div className="workshop-photos-head">
+                      <span>Photos<small>{workshopAssets.length}/{MAX_WORKSHOP_ASSETS}</small></span>
+                      <button
+                        type="button"
+                        ref={addPhotoButton}
+                        className="workshop-add-photo"
+                        onClick={() => fileInput.current?.click()}
+                        disabled={assetImporting || workshopAssets.length >= MAX_WORKSHOP_ASSETS}
+                      >
+                        {assetImporting ? <SpinnerGap size={15} className="is-spinning" /> : <Plus size={15} weight="bold" />}
+                        <span>{assetImporting ? "Adding" : "Add"}</span>
+                      </button>
+                    </div>
+
+                    {workshopAssets.length === 0 ? (
+                      <button type="button" className="workshop-photo-empty" onClick={() => fileInput.current?.click()} disabled={assetImporting}>
+                        <ImageSquare size={22} />
+                        <span>Add photos in the order they should appear</span>
+                      </button>
+                    ) : (
+                      <ol className="workshop-photo-strip">
+                        {workshopAssets.map((asset, index) => (
+                          <li key={asset.id} className="workshop-photo">
+                            <figure>
+                              {asset.url
+                                ? <img src={asset.url} alt="" decoding="async" loading="lazy" />
+                                : <span className="workshop-photo-missing" aria-hidden="true"><ImageSquare size={20} /></span>}
+                              <figcaption>
+                                <span className="workshop-photo-index">{index + 1}</span>
+                                <span className="workshop-photo-name">{asset.name}</span>
+                              </figcaption>
+                            </figure>
+                            <div className="workshop-photo-actions">
+                              <button type="button" onClick={() => moveWorkshopAsset(index, -1)} disabled={index === 0} aria-label={`Move ${asset.name} earlier`}><ArrowLeft size={15} weight="bold" /></button>
+                              <button type="button" onClick={() => moveWorkshopAsset(index, 1)} disabled={index === workshopAssets.length - 1} aria-label={`Move ${asset.name} later`}><ArrowRight size={15} weight="bold" /></button>
+                              <button type="button" onClick={() => removeWorkshopAsset(asset.id)} aria-label={`Remove ${asset.name} from this brief`}><X size={15} weight="bold" /></button>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+
+                    <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => { void importWorkshopPhotos(event.currentTarget.files); event.currentTarget.value = ""; }} />
+
+                    {workshopImportError && (
+                      <p className="workshop-import-error" role="alert">
+                        <WarningCircle size={14} weight="fill" />
+                        <span>{workshopImportError}</span>
+                        <button type="button" onClick={() => { setWorkshopImportError(null); fileInput.current?.click(); }}>Try another image</button>
+                      </p>
+                    )}
+                  </section>
                 )}
               </div>
-            </aside>
+
+              <div className="workshop-actionbar">
+                <p className="workshop-summary">
+                  {creationSpreadCount} spreads · {creationStyle}{briefAssets.length > 0 ? ` · ${briefAssets.length} photo${briefAssets.length === 1 ? "" : "s"}` : ""}
+                </p>
+                <button className="copy-starter-button" onClick={() => void copyPrompt()}>
+                  {copied ? <Check size={18} weight="bold" /> : <Copy size={18} weight="bold" />}
+                  {copied ? "Copied — paste beside this page" : webMcpAvailable ? "Copy brief for Codex" : "Copy creation brief"}
+                </button>
+                {copyError && (
+                  <div className="copy-fallback" role="alert">
+                    <span>Copy was blocked. Select the brief below.</span>
+                    <textarea readOnly value={createPrompt} onFocus={(event) => event.currentTarget.select()} aria-label="Creation brief to copy manually" />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </section>
       )}
@@ -1311,6 +1499,12 @@ export function App() {
                 {elementPromptCopied ? <Check size={17} weight="bold" /> : <Copy size={17} weight="bold" />}
                 {elementPromptCopied ? "Copied — paste in your Agent" : "Copy element request"}
               </button>
+              {elementPromptCopyError && (
+                <div className="copy-fallback" role="alert">
+                  <span>Copy was blocked. Select the request below.</span>
+                  <textarea readOnly value={selectedElementPrompt} onFocus={(event) => event.currentTarget.select()} aria-label="Element request to copy manually" />
+                </div>
+              )}
             </footer>
           </div>
         </section>
