@@ -1,0 +1,169 @@
+{
+  "creationReadiness": {
+    "contractVersion": 2,
+    "ready": false,
+    "bookType": "photo-led-keepsake",
+    "effectiveSpreadCount": 4,
+    "blockingMissingFields": [
+      {
+        "field": "premise",
+        "reason": "The book needs a clear story, occasion, or promise."
+      },
+      {
+        "field": "audience",
+        "reason": "Audience materially changes the writing, pacing, and image direction."
+      },
+      {
+        "field": "sourceAssets",
+        "reason": "Photo-led books need at least one inspected source photo."
+      },
+      {
+        "field": "photoPolicy.sourceUse",
+        "reason": "Photo treatment changes the finished book and cannot be inferred safely."
+      },
+      {
+        "field": "photoPolicy.preserveIdentity",
+        "reason": "People must remain recognisable and source-true."
+      },
+      {
+        "field": "photoPolicy.allowFaceChanges",
+        "reason": "Face changes must be explicitly disabled for personal-photo work."
+      }
+    ],
+    "recommendations": [
+      "Use source photos as identity-faithful references, then build new full-spread scenes around them."
+    ],
+    "questions": [
+      "What is the book about, and what should the reader feel or remember?",
+      "Who is this book for?",
+      "Please add the photos you want this book to use.",
+      "May I reinterpret the photos inside new compositions, or should I preserve each original photo layout?",
+      "Should I preserve every person's identity and defining features exactly?",
+      "May I keep faces unchanged, with no identity-altering edits?"
+    ],
+    "recommended": {
+      "spreadCount": {
+        "minimum": 4,
+        "suggested": 6,
+        "maximum": 8
+      },
+      "style": "Warm editorial keepsake",
+      "assetNeeds": [
+        "1 dedicated portrait cover",
+        "1 complete generated 2:1 clean plate per spread",
+        "2–4 native-alpha foreground or interactive subjects per spread",
+        "1 ordered source photos with identity preserved"
+      ]
+    },
+    "photoBoundaries": {
+      "sourceUse": null,
+      "preserveIdentity": null,
+      "allowed": [
+        "identity-faithful extension",
+        "new environmental composition",
+        "non-facial stylisation"
+      ],
+      "prohibited": [
+        "identity or face changes",
+        "unstated people or events",
+        "distorted body proportions",
+        "unapproved crop of a preserved original"
+      ]
+    }
+  },
+  "before": {
+    "id": "book-the-starlight-stitch-5a1f32a8",
+    "title": "The Starlight Stitch",
+    "revision": 9,
+    "libraryCount": 6
+  },
+  "failedCreate": {
+    "ok": false,
+    "code": "creation_not_ready",
+    "currentRevision": 9,
+    "summary": "This creation brief needs a little more information before Apertale can create the book.",
+    "readiness": {
+      "contractVersion": 2,
+      "ready": false,
+      "bookType": "photo-led-keepsake",
+      "effectiveSpreadCount": 4,
+      "blockingMissingFields": [
+        {
+          "field": "premise",
+          "reason": "The book needs a clear story, occasion, or promise."
+        },
+        {
+          "field": "audience",
+          "reason": "Audience materially changes the writing, pacing, and image direction."
+        },
+        {
+          "field": "spreadCount",
+          "reason": "The brief requests 4 spreads but create contains 1."
+        },
+        {
+          "field": "sourceAssets",
+          "reason": "Photo-led books need at least one inspected source photo."
+        },
+        {
+          "field": "photoPolicy.sourceUse",
+          "reason": "Photo treatment changes the finished book and cannot be inferred safely."
+        },
+        {
+          "field": "photoPolicy.preserveIdentity",
+          "reason": "People must remain recognisable and source-true."
+        },
+        {
+          "field": "photoPolicy.allowFaceChanges",
+          "reason": "Face changes must be explicitly disabled for personal-photo work."
+        }
+      ],
+      "recommendations": [
+        "Use source photos as identity-faithful references, then build new full-spread scenes around them."
+      ],
+      "questions": [
+        "What is the book about, and what should the reader feel or remember?",
+        "Who is this book for?",
+        "Should I use 4 spreads from the brief or the 1-spread plan?",
+        "Please add the photos you want this book to use.",
+        "May I reinterpret the photos inside new compositions, or should I preserve each original photo layout?",
+        "Should I preserve every person's identity and defining features exactly?",
+        "May I keep faces unchanged, with no identity-altering edits?"
+      ],
+      "recommended": {
+        "spreadCount": {
+          "minimum": 4,
+          "suggested": 6,
+          "maximum": 8
+        },
+        "style": "Warm editorial keepsake",
+        "assetNeeds": [
+          "1 dedicated portrait cover",
+          "1 complete generated 2:1 clean plate per spread",
+          "2–4 native-alpha foreground or interactive subjects per spread",
+          "1 ordered source photos with identity preserved"
+        ]
+      },
+      "photoBoundaries": {
+        "sourceUse": null,
+        "preserveIdentity": null,
+        "allowed": [
+          "identity-faithful extension",
+          "new environmental composition",
+          "non-facial stylisation"
+        ],
+        "prohibited": [
+          "identity or face changes",
+          "unstated people or events",
+          "distorted body proportions",
+          "unapproved crop of a preserved original"
+        ]
+      }
+    }
+  },
+  "after": {
+    "id": "book-the-starlight-stitch-5a1f32a8",
+    "title": "The Starlight Stitch",
+    "revision": 9,
+    "libraryCount": 6
+  }
+}

@@ -4,7 +4,26 @@ import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MOTION_PRESETS } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
-import { AUTHORING_GUIDE_DETAIL, PROJECT_CONTEXT_DETAILS, SITE_TOOL, buildAuthoringGuide } from "./authoringContract";
+import {
+  QUALITY_CONTRACT_VERSION,
+  QUALITY_RUBRIC,
+  QUALITY_VISUAL_CRITERION_IDS,
+  buildQualityRenderManifest,
+  evaluateDeterministicQuality,
+  type QualityVisualReviewSubmission,
+} from "./qualityContract";
+import {
+  AUTHORING_GUIDE_DETAIL,
+  CREATION_BOOK_TYPES,
+  CREATION_READINESS_VERSION,
+  PHOTO_SOURCE_USES,
+  PROJECT_CONTEXT_DETAILS,
+  SITE_TOOL,
+  assessCreationReadiness,
+  buildAuthoringGuide,
+  creationBriefSourceAssetIds,
+  type CreationBriefPayload,
+} from "./authoringContract";
 const compact = (value: unknown) => JSON.stringify(value);
 
 type ToolInput = Record<string, unknown>;
@@ -104,6 +123,87 @@ const revealSchema = {
   additionalProperties: false,
 };
 
+const creationBriefSchema = {
+  type: "object",
+  description: "Versioned brief used by creation-readiness and reused unchanged by manage_book create after every blocker is resolved.",
+  properties: {
+    contractVersion: { type: "integer", enum: [CREATION_READINESS_VERSION] },
+    bookType: { type: "string", enum: [...CREATION_BOOK_TYPES] },
+    premise: { type: "string", maxLength: 500 },
+    audience: { type: "string", maxLength: 160 },
+    spreadCount: { type: "integer", minimum: 1, maximum: 12 },
+    visualDirection: { type: "string", maxLength: 160 },
+    sourceAssets: {
+      type: "array",
+      maxItems: 24,
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string", maxLength: 128 },
+          name: { type: "string", maxLength: 128 },
+        },
+        required: ["id", "name"],
+        additionalProperties: false,
+      },
+    },
+    photoPolicy: {
+      type: "object",
+      properties: {
+        sourceUse: { type: "string", enum: [...PHOTO_SOURCE_USES] },
+        preserveIdentity: { type: "boolean" },
+        allowFaceChanges: { type: "boolean" },
+        allowCrop: { type: "boolean" },
+        allowColorCorrection: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+};
+
+const qualityEvidenceSchema = {
+  type: "object",
+  properties: {
+    scope: { type: "string", enum: ["book", "cover", "spread"] },
+    spreadId: { type: "string", maxLength: 128 },
+    locator: { type: "string", minLength: 1, maxLength: 200 },
+    description: { type: "string", minLength: 1, maxLength: 300 },
+  },
+  required: ["scope", "locator", "description"],
+  additionalProperties: false,
+};
+
+const qualityReviewSchema = {
+  type: "object",
+  description: "Visual critique for the current rendered revision. Include every visual rubric criterion once.",
+  properties: {
+    contractVersion: { type: "integer", enum: [QUALITY_CONTRACT_VERSION] },
+    reviewedRevision: { type: "integer", minimum: 1 },
+    expectedRound: { type: "integer", minimum: 1, maximum: 2 },
+    sampleReady: { type: "boolean" },
+    summary: { type: "string", minLength: 1, maxLength: 800 },
+    checks: {
+      type: "array",
+      minItems: QUALITY_VISUAL_CRITERION_IDS.length,
+      maxItems: QUALITY_VISUAL_CRITERION_IDS.length,
+      items: {
+        type: "object",
+        properties: {
+          criterionId: { type: "string", enum: [...QUALITY_VISUAL_CRITERION_IDS] },
+          outcome: { type: "string", enum: ["pass", "blocker", "warn", "note"] },
+          message: { type: "string", minLength: 1, maxLength: 800 },
+          evidence: { type: "array", minItems: 1, maxItems: 24, items: qualityEvidenceSchema },
+          suggestedPatch: { type: "string", maxLength: 800 },
+        },
+        required: ["criterionId", "outcome", "message", "evidence"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["contractVersion", "reviewedRevision", "expectedRound", "sampleReady", "summary", "checks"],
+  additionalProperties: false,
+};
+
 function canceled(signal: AbortSignal) {
   if (signal.aborted) throw new DOMException("Tool execution was canceled.", "AbortError");
 }
@@ -129,32 +229,61 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: SITE_TOOL.context,
         title: "Get project context",
-        description: "Inspect the live Apertale shelf, open book, current spread, selection, local assets, theme, capabilities, and revision. Create flows must first read detail authoring-guide and obey that two-phase quality contract. Planning and ImageGen stay in the user's Codex conversation.",
+        description: "Inspect Apertale. Create flow: authoring-guide → creation-readiness → ask every returned blocking question → create with the same brief. After rendering, read quality-review, inspect real frames, record critique, patch at most twice, then publish only when allowed.",
         inputSchema: {
           type: "object",
           properties: {
             detail: {
               type: "string",
               enum: [...PROJECT_CONTEXT_DETAILS],
-              description: "Optional focused detail. authoring-guide is the create-quality contract; assets lists local imports; selected-reveal returns the knowledge card.",
+              description: "Use creation-readiness before create and quality-review after real rendering; assets lists imports.",
             },
+            creationBrief: creationBriefSchema,
           },
           additionalProperties: false,
         },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
         execute: (input, options) => runTool(SITE_TOOL.context, options?.signal ?? uncancelledToolSignal, async () => {
-          assertOnly(input, ["detail"]);
+          assertOnly(input, ["detail", "creationBrief"]);
           const detail = typeof input.detail === "undefined" ? "compact" : requiredString(input, "detail");
           if (!(PROJECT_CONTEXT_DETAILS as readonly string[]).includes(detail)) invalid("detail is not supported.");
           const context = bookEngine.getContext(detail === "selected-reveal");
           const snapshot = bookEngine.getSnapshot();
           const currentSpread = snapshot.document.spreads[snapshot.session.currentSpreadIndex];
+          const creationBrief = input.creationBrief as CreationBriefPayload | undefined;
+          const sourceAssetIds = creationBriefSourceAssetIds(creationBrief);
+          const validatedSourceAssets = detail === "creation-readiness" && sourceAssetIds.length > 0
+            ? await getAssetMetadata(sourceAssetIds)
+            : [];
+          const qualityLifecycle = detail === "quality-review" ? bookEngine.getQualityLifecycle() : null;
           const result = {
             ...context,
             assets: detail === "assets"
               ? await listAssetMetadata()
               : await getAssetMetadata(currentSpread.elements.map((element) => element.assetId)),
             ...(detail === AUTHORING_GUIDE_DETAIL ? { authoringGuide: buildAuthoringGuide() } : {}),
+            ...(detail === "creation-readiness"
+              ? {
+                  creationReadiness: assessCreationReadiness(creationBrief, {
+                    validatedSourceAssetIds: validatedSourceAssets.map((asset) => asset.id),
+                  }),
+                }
+              : {}),
+            ...(detail === "quality-review"
+              ? {
+                  qualityReview: {
+                    rubric: QUALITY_RUBRIC,
+                    review: bookEngine.getQualityGate(),
+                    deterministicChecks: evaluateDeterministicQuality(snapshot.document, qualityLifecycle?.renderEvidence ?? [], qualityLifecycle?.creationBrief),
+                    renderManifest: buildQualityRenderManifest(snapshot.document, globalThis.location?.href ?? ""),
+                    renderEvidence: qualityLifecycle?.renderEvidence ?? [],
+                    creationBrief: qualityLifecycle?.creationBrief ?? null,
+                    instructions: qualityLifecycle?.creationBrief?.bookType
+                      ? "Call manage_book action begin-critique, use set_presentation(spreadId) and the host browser screenshot capability to inspect the cover and every spread, then record every visual criterion with action record-critique. Schema evidence is not an aesthetic judgment."
+                      : "No creation brief is attached. Curated samples keep shipped provenance; for a legacy personal book, pass a complete brief through creation-readiness and call manage_book action adopt-creation-brief at this revision before critique.",
+                  },
+                }
+              : {}),
           };
           if (detail === AUTHORING_GUIDE_DETAIL) authoringGuideRead = true;
           return result;
@@ -166,12 +295,12 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: SITE_TOOL.manageBook,
         title: "Manage book",
-        description: "Open a library book, create an independent 1–12 spread book, or assign a browser-local portrait cover. Create flows must read get_project_context detail authoring-guide and obey it. Before create, finish the story plan plus a generated portrait cover and original full-spread art for every spread. Do not use uploaded source photos as finished right-page art unless the user asked for a literal photo album.",
+        description: "Open, create, attach a readiness-passed brief to one legacy personal book, set a cover, or record critique. Create and adopt-creation-brief reuse the exact brief that passed creation-readiness; if blocked, do not mutate. Prepare generated art or preserved-photo-album layouts. After real rendering, begin critique, inspect every frame, record every criterion, patch and re-check at most twice, and never publish with blockers.",
         inputSchema: {
           type: "object",
           properties: {
             ...requiredMutation,
-            action: { type: "string", enum: ["open", "create", "set-cover"] },
+            action: { type: "string", enum: ["open", "create", "adopt-creation-brief", "set-cover", "begin-critique", "record-critique"] },
             bookId: { type: "string", description: "Stable id from library.books when action is open." },
             coverAssetId: { type: "string", description: "Browser-local portrait image id returned by get_project_context(detail: assets)." },
             title: { type: "string", minLength: 1, maxLength: 100 },
@@ -190,22 +319,34 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
                 additionalProperties: false,
               },
             },
+            creationBrief: creationBriefSchema,
+            qualityReview: qualityReviewSchema,
           },
-          // All manage actions accept the inspected revision. Create and cover
-          // assignment enforce it; open keeps it as an explicit freshness
-          // acknowledgement so the published schema never understates what
-          // the mutating branches require.
+          // Every manage action consumes the inspected revision, including
+          // navigation that changes the active document context.
           required: ["requestId", "expectedRevision", "action"],
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: (input, options) => runTool(SITE_TOOL.manageBook, options?.signal ?? uncancelledToolSignal, async () => {
-          assertOnly(input, ["requestId", "expectedRevision", "action", "bookId", "coverAssetId", "title", "spreads"]);
+          assertOnly(input, ["requestId", "expectedRevision", "action", "bookId", "coverAssetId", "title", "spreads", "creationBrief", "qualityReview"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
           const action = requiredString(input, "action");
           if (action === "open") {
+            const expectedRevision = requiredRevision(input);
+            const currentRevision = bookEngine.getSnapshot().document.revision;
+            if (expectedRevision !== currentRevision) {
+              const result = {
+                ok: false,
+                code: "revision_conflict",
+                currentRevision,
+                summary: `Expected revision ${expectedRevision}; refresh context before opening another book.`,
+              };
+              sessionResults.set(requestId, result);
+              return result;
+            }
             const bookId = requiredString(input, "bookId");
             if (!bookEngine.openBook(bookId, "agent")) invalid("bookId is not present in the current library.");
             const result = { ok: true, bookId, summary: `Opened ${bookEngine.getSnapshot().document.title}.` };
@@ -226,10 +367,59 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             sessionResults.set(requestId, result);
             return result;
           }
-          if (action !== "create") invalid("action must be open, create, or set-cover.");
+          if (action === "begin-critique") {
+            const expectedRevision = requiredRevision(input);
+            if (expectedRevision !== bookEngine.getSnapshot().document.revision) {
+              const result = {
+                ok: false,
+                code: "revision_conflict",
+                currentRevision: bookEngine.getSnapshot().document.revision,
+                summary: `Expected revision ${expectedRevision}; refresh quality-review before starting critique.`,
+              };
+              sessionResults.set(requestId, result);
+              return result;
+            }
+            const result = bookEngine.beginQualityReview();
+            sessionResults.set(requestId, result);
+            return result;
+          }
+          if (action === "record-critique") {
+            const expectedRevision = requiredRevision(input);
+            if (expectedRevision !== bookEngine.getSnapshot().document.revision) {
+              const result = {
+                ok: false,
+                code: "revision_conflict",
+                currentRevision: bookEngine.getSnapshot().document.revision,
+                summary: `Expected revision ${expectedRevision}; refresh quality-review before recording critique.`,
+              };
+              sessionResults.set(requestId, result);
+              return result;
+            }
+            const result = bookEngine.recordQualityReview(input.qualityReview as QualityVisualReviewSubmission);
+            sessionResults.set(requestId, result);
+            return result;
+          }
+          if (action === "adopt-creation-brief") {
+            if (!authoringGuideRead) invalid("read get_project_context with detail authoring-guide before attaching a creation brief.");
+            const creationBrief = input.creationBrief as CreationBriefPayload | undefined;
+            const sourceAssetIds = creationBriefSourceAssetIds(creationBrief);
+            const validatedSourceAssets = await getAssetMetadata(sourceAssetIds);
+            canceled(options?.signal ?? uncancelledToolSignal);
+            const result = bookEngine.adoptCreationBrief(
+              creationBrief ?? {},
+              validatedSourceAssets.map((asset) => asset.id),
+              requiredRevision(input),
+            );
+            sessionResults.set(requestId, result);
+            return result;
+          }
+          if (action !== "create") invalid("action must be open, create, adopt-creation-brief, set-cover, begin-critique, or record-critique.");
           if (!authoringGuideRead) {
             invalid("read get_project_context with detail authoring-guide before creating a book.");
           }
+          const creationBrief = input.creationBrief as CreationBriefPayload | undefined;
+          const sourceAssetIds = creationBriefSourceAssetIds(creationBrief);
+          const validatedSourceAssets = await getAssetMetadata(sourceAssetIds);
           const title = boundedString(input, "title", 100);
           if (!Array.isArray(input.spreads) || input.spreads.length < 1 || input.spreads.length > 12) invalid("spreads must contain 1–12 spread drafts.");
           const spreads = input.spreads.map((raw, index) => {
@@ -251,6 +441,8 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             documentId: `book-${slug(title)}-${crypto.randomUUID().slice(0, 8)}`,
             title,
             spreads,
+            creationBrief: creationBrief ?? {},
+            validatedSourceAssetIds: validatedSourceAssets.map((asset) => asset.id),
           }, "agent");
           sessionResults.set(requestId, result);
           return result;
@@ -295,7 +487,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: SITE_TOOL.applyScenePatch,
         title: "Apply atomic scene patch",
-        description: "Atomically set a purpose-built full-spread background and add, update, remove, or reorder up to 24 foreground layers. Set the repaired clean plate, then add 2–4 transparent subjects so lifting one never reveals a duplicate. Use validated browser-local asset ids. Generate art in the Agent conversation; use explicit handoff only when required. Do not place a source photo as finished right-page art. Arbitrary URLs and executable content are rejected.",
+        description: "Atomically set a full-spread original composite reference, its purpose-built clean plate or approved preserved-photo layout, and add, update, remove, or reorder up to 24 foreground layers. Keep personal photo provenance in personalSourceAssetId, separate from sourceAssetId. The stored ready brief fixes which treatment is allowed. Use validated assets only; arbitrary URLs and executable content are rejected.",
         inputSchema: {
           type: "object",
           properties: {
@@ -309,8 +501,10 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
                 type: "object",
                 properties: {
                   op: { type: "string", enum: ["set-background", "add", "update", "remove", "reorder"] },
-                  cleanPlateAssetId: { type: "string", description: "Repaired full-spread background with every extracted foreground subject removed and hidden pixels inpainted." },
-                  sourceAssetId: { type: "string", description: "Optional original composite image retained as the separation reference." },
+                  cleanPlateAssetId: { type: "string", description: "Final 2:1 base: repaired clean plate or approved source-true photo layout." },
+                  sourceAssetId: { type: "string", description: "Original full-spread composite reference used to derive the clean plate. Required for every image-led spread." },
+                  personalSourceAssetId: { type: "string", description: "Declared personal source-photo provenance. Required when the creation brief contains source photos; never use this field for generated composites." },
+                  separation: { type: "string", enum: ["inpainted-clean-plate", "preserved-photo-layout"], description: "Use preserved-photo-layout only for an approved original-photo album." },
                   id: { type: "string" },
                   elementId: { type: "string" },
                   label: { type: "string", maxLength: 64 },
@@ -425,13 +619,15 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`operations[${index}] must be an object.`);
             const value = raw as ToolInput;
             const op = requiredString(value, "op");
-            const common = ["op", "cleanPlateAssetId", "sourceAssetId", "id", "elementId", "label", "assetId", "frameAssetIds", "page", "kind", "transform", "depth", "locked", "motion", "hover", "focus", "reveal", "index"];
+            const common = ["op", "cleanPlateAssetId", "sourceAssetId", "personalSourceAssetId", "separation", "id", "elementId", "label", "assetId", "frameAssetIds", "page", "kind", "transform", "depth", "locked", "motion", "hover", "focus", "reveal", "index"];
             assertOnly(value, common);
             if (op === "set-background") {
               return {
                 op,
                 cleanPlateAssetId: requiredString(value, "cleanPlateAssetId"),
-                sourceAssetId: boundedString(value, "sourceAssetId", 200, true),
+                sourceAssetId: boundedString(value, "sourceAssetId", 200),
+                personalSourceAssetId: boundedString(value, "personalSourceAssetId", 200, true),
+                separation: pick(value.separation, "separation", ["inpainted-clean-plate", "preserved-photo-layout"] as const),
               };
             }
             if (op === "remove") return { op, elementId: requiredString(value, "elementId") };
@@ -477,7 +673,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           });
           const requestedLocalAssetIds = [...new Set(operations.flatMap((operation) => {
             const ids = operation.op === "set-background"
-              ? [operation.cleanPlateAssetId, operation.sourceAssetId].filter((assetId): assetId is string => Boolean(assetId))
+              ? [operation.cleanPlateAssetId, operation.sourceAssetId, operation.personalSourceAssetId].filter((assetId): assetId is string => Boolean(assetId))
               : operation.op === "add"
                 ? [operation.assetId, ...(operation.frameAssetIds ?? [])]
                 : operation.op === "update" ? (operation.frameAssetIds ?? []) : [];
@@ -502,20 +698,21 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: SITE_TOOL.setPresentation,
         title: "Set presentation",
-        description: "Switch the shared Apertale Day/Night presentation or Preview mode without changing book content or document revision.",
+        description: "Switch Day/Night or Preview, or open one spread for rendered screenshot evidence, without changing document revision.",
         inputSchema: {
           type: "object",
           properties: {
             requestId: { type: "string", description: "Unique idempotency key for this session action." },
             theme: { type: "string", enum: ["paper-atelier", "midnight-desk"] },
             preview: { type: "boolean" },
+            spreadId: { type: "string", maxLength: 128 },
           },
           required: ["requestId"],
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
         execute: (input, options) => runTool(SITE_TOOL.setPresentation, options?.signal ?? uncancelledToolSignal, () => {
-          assertOnly(input, ["requestId", "theme", "preview"]);
+          assertOnly(input, ["requestId", "theme", "preview", "spreadId"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
@@ -526,10 +723,17 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             theme = requestedTheme as ThemeId;
           }
           if (typeof input.preview !== "undefined" && typeof input.preview !== "boolean") invalid("preview must be boolean.");
-          if (typeof input.theme === "undefined" && typeof input.preview === "undefined") invalid("set_presentation requires theme or preview.");
+          let spreadId = bookEngine.getSnapshot().document.spreads[bookEngine.getSnapshot().session.currentSpreadIndex]?.id;
+          if (typeof input.spreadId !== "undefined") {
+            spreadId = requiredString(input, "spreadId");
+            const spreadIndex = bookEngine.getSnapshot().document.spreads.findIndex((spread) => spread.id === spreadId);
+            if (spreadIndex < 0) invalid("spreadId is not present in the current book.");
+            bookEngine.setSpread(spreadIndex);
+          }
+          if (typeof input.theme === "undefined" && typeof input.preview === "undefined" && typeof input.spreadId === "undefined") invalid("set_presentation requires theme, preview, or spreadId.");
           if (typeof input.theme !== "undefined") bookEngine.setTheme(theme, "agent");
           if (typeof input.preview === "boolean") bookEngine.setPreview(input.preview, "agent");
-          const result = { ok: true, theme, preview: bookEngine.getSnapshot().session.preview, summary: "Presentation updated." };
+          const result = { ok: true, theme, preview: bookEngine.getSnapshot().session.preview, spreadId, summary: "Presentation updated." };
           sessionResults.set(requestId, result);
           return result;
         }),

@@ -1,7 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTHORING_GUIDE_DETAIL, PROJECT_CONTEXT_DETAILS, SITE_TOOL_NAMES, buildAuthoringGuide } from "./authoringContract";
 import { bookEngine, humanEdit } from "./bookEngine";
+import { QUALITY_VISUAL_CRITERION_IDS } from "./qualityContract";
 import { registerWebMcpTools } from "./webmcp";
+
+const readyStoryBrief = (spreadCount: number) => ({
+  contractVersion: 2,
+  bookType: "illustrated-storybook",
+  premise: "Explain a natural pattern through a clear visual story.",
+  audience: "Curious family readers",
+  spreadCount,
+  visualDirection: "Tactile watercolor collage",
+  sourceAssets: [],
+});
 
 describe("WebMCP registration", () => {
   afterEach(() => {
@@ -52,12 +63,16 @@ describe("WebMCP registration", () => {
     expect(JSON.stringify(manageBookSchema)).toContain("set-cover");
     expect(manageBookSchema.required).toContain("expectedRevision");
     expect(tool("get_project_context").description).toContain("authoring-guide");
-    expect(tool("manage_book").description).toContain("authoring-guide");
-    expect(tool("manage_book").description).toContain("generated portrait cover");
-    expect(tool("manage_book").description).toContain("original full-spread art");
-    expect(tool("manage_book").description).toContain("right-page art");
-    expect(tool("apply_scene_patch").description).toContain("purpose-built full-spread");
-    expect(tool("apply_scene_patch").description).toContain("source photo");
+    expect(tool("get_project_context").description).toContain("creation-readiness");
+    expect(tool("get_project_context").description).toContain("ask every returned blocking question");
+    expect(tool("manage_book").description).toContain("exact brief");
+    expect(tool("manage_book").description).toContain("do not mutate");
+    expect(tool("manage_book").description).toContain("preserved-photo-album");
+    expect(tool("manage_book").description).toContain("record critique");
+    expect(tool("manage_book").description).toContain("adopt-creation-brief");
+    expect(tool("get_project_context").description).toContain("quality-review");
+    expect(tool("apply_scene_patch").description).toContain("original composite reference");
+    expect(tool("apply_scene_patch").description).toContain("personalSourceAssetId");
 
     bookEngine.setSelection("bird");
     const contextResult = await tool("get_project_context").execute({}, { signal: new AbortController().signal });
@@ -83,6 +98,14 @@ describe("WebMCP registration", () => {
     ) => Promise<unknown>)({});
     expect(JSON.parse(String(contextWithoutHostOptions))).toMatchObject({
       book: { id: "apertale-your-story", revision: 1 },
+    });
+
+    const unownedQuality = JSON.parse(String(await tool("get_project_context").execute({ detail: "quality-review" }, {
+      signal: new AbortController().signal,
+    })));
+    expect(unownedQuality.qualityReview).toMatchObject({
+      creationBrief: null,
+      instructions: expect.stringContaining("adopt-creation-brief"),
     });
 
     const selectedRevealResult = await tool("get_project_context").execute({ detail: "selected-reveal" }, {
@@ -114,6 +137,45 @@ describe("WebMCP registration", () => {
     expect(JSON.parse(String(authoringGuideResult))).toMatchObject({
       authoringGuide: { id: "apertale-authoring-guide", contract: "two-phase" },
     });
+
+    const readinessResult = JSON.parse(String(await tool("get_project_context").execute({
+      detail: "creation-readiness",
+      creationBrief: {
+        contractVersion: 2,
+        bookType: "photo-led-keepsake",
+        premise: "A family keepsake.",
+        spreadCount: 4,
+        visualDirection: "Warm collage",
+        sourceAssets: [],
+      },
+    }, { signal: new AbortController().signal })));
+    expect(readinessResult.creationReadiness).toMatchObject({
+      ready: false,
+      blockingMissingFields: expect.arrayContaining([
+        expect.objectContaining({ field: "audience" }),
+        expect.objectContaining({ field: "sourceAssets" }),
+        expect.objectContaining({ field: "photoPolicy.sourceUse" }),
+      ]),
+      questions: expect.arrayContaining(["Who is this book for?", "Please add the photos you want this book to use."]),
+    });
+
+    const rejectedCreate = JSON.parse(String(await tool("manage_book").execute({
+      requestId: "create-incomplete-brief",
+      expectedRevision: 1,
+      action: "create",
+      title: "Incomplete Keepsake",
+      spreads: [{ title: "Opening", body: "This must not be created." }],
+      creationBrief: {
+        contractVersion: 2,
+        bookType: "photo-led-keepsake",
+        premise: "A family keepsake.",
+        spreadCount: 1,
+        visualDirection: "Warm collage",
+        sourceAssets: [],
+      },
+    }, { signal: new AbortController().signal })));
+    expect(rejectedCreate).toMatchObject({ ok: false, code: "creation_not_ready", readiness: { ready: false } });
+    expect(bookEngine.getSnapshot().document.revision).toBe(1);
 
     const canceled = new AbortController();
     canceled.abort();
@@ -160,13 +222,14 @@ describe("WebMCP registration", () => {
     expect(bird.transform.x).toBe(0.74);
 
     const beforePresentationRevision = bookEngine.getSnapshot().document.revision;
-    const presentation = await tool("set_presentation").execute({ requestId: "night-preview", theme: "midnight-desk", preview: true }, {
+    const presentation = await tool("set_presentation").execute({ requestId: "night-preview", theme: "midnight-desk", preview: true, spreadId: "city-for-small-things" }, {
       signal: new AbortController().signal,
     });
     const duplicatePresentation = await tool("set_presentation").execute({ requestId: "night-preview", theme: "paper-atelier" }, {
       signal: new AbortController().signal,
     });
     expect(duplicatePresentation).toBe(presentation);
+    expect(JSON.parse(String(presentation))).toMatchObject({ spreadId: "city-for-small-things" });
     expect(bookEngine.getSnapshot().session).toMatchObject({ sceneThemeId: "midnight-desk", preview: true });
     expect(bookEngine.getSnapshot().document.revision).toBe(beforePresentationRevision);
     await expect(tool("set_presentation").execute({
@@ -177,12 +240,28 @@ describe("WebMCP registration", () => {
     expect(bookEngine.getSnapshot().session.sceneThemeId).toBe("midnight-desk");
     bookEngine.setPreview(false);
 
-    const opened = JSON.parse(String(await tool("manage_book").execute({ requestId: "open-atlas", action: "open", bookId: "apertale-atlas-of-wonders" }, {
+    const openExpectedRevision = bookEngine.getSnapshot().document.revision;
+    await expect(tool("manage_book").execute({
+      requestId: "open-missing-revision",
+      action: "open",
+      bookId: "apertale-atlas-of-wonders",
+    }, { signal: new AbortController().signal })).rejects.toThrow("expectedRevision");
+    expect(JSON.parse(String(await tool("manage_book").execute({
+      requestId: "open-stale-revision",
+      expectedRevision: openExpectedRevision + 1,
+      action: "open",
+      bookId: "apertale-atlas-of-wonders",
+    }, { signal: new AbortController().signal })))).toMatchObject({
+      ok: false,
+      code: "revision_conflict",
+      currentRevision: openExpectedRevision,
+    });
+    const opened = JSON.parse(String(await tool("manage_book").execute({ requestId: "open-atlas", expectedRevision: openExpectedRevision, action: "open", bookId: "apertale-atlas-of-wonders" }, {
       signal: new AbortController().signal,
     })));
     expect(opened).toMatchObject({ ok: true, bookId: "apertale-atlas-of-wonders" });
     expect(bookEngine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "Codex opened Atlas of Living Wonders" });
-    const duplicateOpen = await tool("manage_book").execute({ requestId: "open-atlas", action: "open", bookId: "apertale-lantern-garden" }, {
+    const duplicateOpen = await tool("manage_book").execute({ requestId: "open-atlas", expectedRevision: openExpectedRevision, action: "open", bookId: "apertale-lantern-garden" }, {
       signal: new AbortController().signal,
     });
     expect(JSON.parse(String(duplicateOpen))).toEqual(opened);
@@ -194,6 +273,7 @@ describe("WebMCP registration", () => {
       action: "create",
       title: "How Tides Move",
       spreads: [{ title: "The Moon Pulls", body: "Gravity reaches across the water." }],
+      creationBrief: readyStoryBrief(1),
     }, { signal: new AbortController().signal })));
     expect(created).toMatchObject({ ok: true, changedIds: ["1-the-moon-pulls"] });
 
@@ -254,8 +334,9 @@ describe("WebMCP registration", () => {
       spreadId: "1-the-moon-pulls",
       operations: [{
         op: "set-background",
-        sourceAssetId: "/assets/generated/wonders-colosseum.png",
         cleanPlateAssetId: "/assets/generated/wonders-colosseum-clean-v2.png",
+        sourceAssetId: "/assets/generated/wonders-colosseum.png",
+        separation: "inpainted-clean-plate",
       }, {
         op: "add",
         id: "second-layer",
@@ -268,6 +349,53 @@ describe("WebMCP registration", () => {
     expect(bookEngine.getSnapshot().document.spreads[0].artwork).toMatchObject({
       separation: "inpainted-clean-plate",
       cleanPlateAssetId: "/assets/generated/wonders-colosseum-clean-v2.png",
+      sourceAssetId: "/assets/generated/wonders-colosseum.png",
+    });
+
+    const qualityContext = JSON.parse(String(await tool("get_project_context").execute({ detail: "quality-review" }, {
+      signal: new AbortController().signal,
+    })));
+    expect(qualityContext.qualityReview).toMatchObject({
+      rubric: { version: 1, maxReviewRounds: 2 },
+      review: { status: "needs-review", nextRound: 1 },
+      renderManifest: { documentId: expect.any(String), spreads: [{ id: "1-the-moon-pulls" }] },
+      renderEvidence: [],
+    });
+    expect(qualityContext.qualityReview.deterministicChecks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ criterionId: "render-evidence-completeness", outcome: "blocker" }),
+    ]));
+
+    const qualityStart = JSON.parse(String(await tool("manage_book").execute({
+      requestId: "begin-quality-round-one",
+      expectedRevision: layeredBackground.revision,
+      action: "begin-critique",
+    }, { signal: new AbortController().signal })));
+    expect(qualityStart).toMatchObject({ ok: true, nextRound: 1, remainingRounds: 2 });
+
+    const critique = JSON.parse(String(await tool("manage_book").execute({
+      requestId: "record-quality-round-one",
+      expectedRevision: layeredBackground.revision,
+      action: "record-critique",
+      qualityReview: {
+        contractVersion: 1,
+        reviewedRevision: layeredBackground.revision,
+        expectedRound: 1,
+        sampleReady: false,
+        summary: "The first rendered review found missing publication evidence.",
+        checks: QUALITY_VISUAL_CRITERION_IDS.map((criterionId) => ({
+          criterionId,
+          outcome: "pass",
+          message: `${criterionId} was inspected.`,
+          evidence: criterionId === "cover-appeal"
+            ? [{ scope: "cover", locator: "[data-book-id] img", description: "Rendered cover" }]
+            : [{ scope: "spread", spreadId: "1-the-moon-pulls", locator: ".book-scene canvas", description: "Rendered spread" }],
+        })),
+      },
+    }, { signal: new AbortController().signal })));
+    expect(critique).toMatchObject({
+      ok: true,
+      qualityReport: { round: 1, status: "blocked", publishAllowed: false },
+      qualityGate: { status: "blocked", remainingRounds: 1 },
     });
 
     cleanup();

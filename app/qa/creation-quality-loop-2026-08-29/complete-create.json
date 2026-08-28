@@ -1,0 +1,63 @@
+{
+  "ready": {
+    "contractVersion": 2,
+    "ready": true,
+    "bookType": "illustrated-storybook",
+    "effectiveSpreadCount": 1,
+    "blockingMissingFields": [],
+    "recommendations": [],
+    "questions": [],
+    "recommended": {
+      "spreadCount": {
+        "minimum": 4,
+        "suggested": 6,
+        "maximum": 8
+      },
+      "style": "Premium tactile cut-paper storybook with midnight blue, coral, and warm gold",
+      "assetNeeds": [
+        "1 dedicated portrait cover",
+        "1 complete generated 2:1 clean plate per spread",
+        "2–4 native-alpha foreground or interactive subjects per spread"
+      ]
+    },
+    "photoBoundaries": {
+      "sourceUse": null,
+      "preserveIdentity": null,
+      "allowed": [
+        "original illustration"
+      ],
+      "prohibited": [
+        "unlicensed or unseen personal-photo invention"
+      ]
+    }
+  },
+  "created": {
+    "ok": true,
+    "revision": 10,
+    "changedIds": [
+      "1-a-star-at-the-window"
+    ],
+    "undoToken": "ead95872-b079-4621-8005-7542694b7e11",
+    "summary": "Codex created The Starlight Stitch"
+  },
+  "coverSet": {
+    "ok": true,
+    "revision": 11,
+    "changedIds": [
+      "book-the-starlight-stitch-ed11916a"
+    ],
+    "undoToken": "207f30d0-88e6-4b98-8c99-baae021bbb6b",
+    "summary": "Codex set the cover for The Starlight Stitch"
+  },
+  "scenePatched": {
+    "ok": true,
+    "revision": 12,
+    "changedIds": [
+      "1-a-star-at-the-window:background",
+      "niu-niu",
+      "bubu"
+    ],
+    "undoToken": "56cdbe64-bbed-40f0-81b9-cd7b5e544035",
+    "summary": "Codex patched 3 scene elements"
+  }
+}

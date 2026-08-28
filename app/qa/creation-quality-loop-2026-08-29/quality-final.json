@@ -1,0 +1,637 @@
+{
+  "book": {
+    "id": "book-the-starlight-stitch-ed11916a",
+    "title": "The Starlight Stitch",
+    "revision": 15,
+    "coverAssetId": "asset:4b37cb3c-0907-4aa3-968f-dba78b365856"
+  },
+  "library": {
+    "activeBookId": "book-the-starlight-stitch-ed11916a",
+    "books": [
+      {
+        "id": "apertale-field-guide",
+        "title": "The Apertale Field Guide",
+        "spreadCount": 4
+      },
+      {
+        "id": "apertale-atlas-of-wonders",
+        "title": "Atlas of Living Wonders",
+        "spreadCount": 8
+      },
+      {
+        "id": "apertale-how-world-works",
+        "title": "How the World Works",
+        "spreadCount": 6
+      },
+      {
+        "id": "apertale-your-story",
+        "title": "Your Story, Made Alive",
+        "spreadCount": 5
+      },
+      {
+        "id": "apertale-lantern-garden",
+        "title": "The Lantern Garden",
+        "spreadCount": 5
+      },
+      {
+        "id": "book-the-starlight-stitch-5a1f32a8",
+        "title": "The Starlight Stitch",
+        "spreadCount": 6
+      },
+      {
+        "id": "book-the-starlight-stitch-ed11916a",
+        "title": "The Starlight Stitch",
+        "spreadCount": 1
+      }
+    ]
+  },
+  "outline": [
+    {
+      "id": "1-a-star-at-the-window",
+      "title": "A Star at the Window",
+      "order": 1,
+      "elementCount": 2
+    }
+  ],
+  "currentSpread": {
+    "id": "1-a-star-at-the-window",
+    "title": "A Star at the Window",
+    "order": 1,
+    "artwork": {
+      "cleanPlateAssetId": "asset:6a2047af-7d09-4c2c-8f19-be391979cff2",
+      "sourceAssetId": "asset:0e3b38ca-be2b-4853-92d2-62b0090534cc",
+      "foregroundLayerCount": 2
+    },
+    "elements": [
+      {
+        "id": "niu-niu",
+        "label": "Niu Niu",
+        "kind": "lifted",
+        "locked": false
+      },
+      {
+        "id": "bubu",
+        "label": "Bubu",
+        "kind": "lifted",
+        "locked": false
+      }
+    ]
+  },
+  "selection": null,
+  "theme": "paper-atelier",
+  "capabilities": [
+    "create-book",
+    "set-book-cover",
+    "compose-spread",
+    "full-spread-illustration-stage",
+    "clean-plate-background",
+    "layered-image-interaction",
+    "browser-image-optimization",
+    "presentation",
+    "undo"
+  ],
+  "assets": [
+    {
+      "id": "asset:50d49194-ba29-4ff7-8b4d-7bc10fbccbe9",
+      "name": "妞妞熊.png",
+      "type": "image/png",
+      "size": 332536,
+      "originalSize": 332536,
+      "width": 402,
+      "height": 492,
+      "optimized": false,
+      "createdAt": "2026-08-28T03:59:17.503Z"
+    },
+    {
+      "id": "asset:8b543c4c-2b26-4e29-b96d-43be8f19bf5c",
+      "name": "bubu.png",
+      "type": "image/png",
+      "size": 409073,
+      "originalSize": 409073,
+      "width": 768,
+      "height": 1024,
+      "optimized": false,
+      "createdAt": "2026-08-28T03:59:17.553Z"
+    }
+  ],
+  "qualityReview": {
+    "rubric": {
+      "id": "apertale-premium-book-quality",
+      "version": 1,
+      "maxReviewRounds": 2,
+      "spreadAssetPolicies": {
+        "illustrated-storybook": {
+          "separation": "inpainted-clean-plate",
+          "sourceUse": "reference-and-compose",
+          "requiresPersonalSourceAsset": false
+        },
+        "photo-led-keepsake": {
+          "separation": "inpainted-clean-plate",
+          "sourceUse": "reference-and-compose",
+          "requiresPersonalSourceAsset": true
+        },
+        "preserved-photo-album": {
+          "separation": "preserved-photo-layout",
+          "sourceUse": "preserve-original-layout",
+          "requiresPersonalSourceAsset": true
+        }
+      },
+      "criteria": [
+        {
+          "id": "cover-appeal",
+          "label": "Cover appeal",
+          "mode": "visual",
+          "description": "The dedicated portrait cover has a clear focal point, readable title treatment, and premium shelf appeal."
+        },
+        {
+          "id": "spread-composition",
+          "label": "2:1 spread composition",
+          "mode": "visual",
+          "description": "Each spread reads as one intentional 2:1 composition across the gutter without accidental dead zones or collisions."
+        },
+        {
+          "id": "text-safety-readability",
+          "label": "Text safety and readability",
+          "mode": "both",
+          "description": "Titles and copy remain inside safe zones with sufficient contrast, spacing, and readable line lengths."
+        },
+        {
+          "id": "visual-character-consistency",
+          "label": "Visual and character consistency",
+          "mode": "visual",
+          "description": "Style, palette, recurring characters, proportions, and defining details stay coherent across the whole book."
+        },
+        {
+          "id": "photo-fidelity-integration",
+          "label": "Personal-photo fidelity",
+          "mode": "visual",
+          "description": "People remain recognisable and source-true, while personal photos feel naturally integrated under the agreed photo policy."
+        },
+        {
+          "id": "crop-skew-occlusion-scale",
+          "label": "Crop, skew, occlusion, and scale",
+          "mode": "visual",
+          "description": "Images avoid accidental crop, skew, obstruction, stretched anatomy, and implausible relative scale."
+        },
+        {
+          "id": "missing-or-fallback-assets",
+          "label": "Missing or fallback assets",
+          "mode": "deterministic",
+          "description": "The cover and every spread use their intended final assets; no blank, placeholder, or fallback plate remains."
+        },
+        {
+          "id": "alpha-edge-matte",
+          "label": "Transparent edges and matte",
+          "mode": "visual",
+          "description": "Foreground subjects have true transparent edges without rectangles, baked checkerboards, halos, or chroma spill."
+        },
+        {
+          "id": "layered-spread-contract",
+          "label": "Layered spread contract",
+          "mode": "deterministic",
+          "description": "Every spread has one complete generated clean plate or preserved-photo final base and two to four non-procedural foreground or interactive layers."
+        },
+        {
+          "id": "creation-asset-policy",
+          "label": "Creation asset policy",
+          "mode": "deterministic",
+          "description": "Every spread follows the ready brief's generated or preserved-photo policy, and personal source assets remain in their declared role."
+        },
+        {
+          "id": "narrative-coherence",
+          "label": "Story or album coherence",
+          "mode": "visual",
+          "description": "The sequence has an intelligible opening, development, turn, and ending, or a clear keepsake chronology."
+        },
+        {
+          "id": "meaningful-interaction",
+          "label": "Meaningful interaction",
+          "mode": "both",
+          "description": "Every spread includes an interaction that adds story, knowledge, or delight instead of decorative motion alone."
+        },
+        {
+          "id": "premium-sample-value",
+          "label": "Premium sample value",
+          "mode": "visual",
+          "description": "The finished book is credible beside The Starlight Stitch and The Blue Road Home as a promotional sample."
+        },
+        {
+          "id": "render-evidence-completeness",
+          "label": "Render evidence completeness",
+          "mode": "deterministic",
+          "description": "The current revision has real rendered evidence for the cover and every spread before visual critique."
+        }
+      ]
+    },
+    "review": {
+      "status": "ready",
+      "message": "Quality check passed. This revision is ready to publish.",
+      "report": {
+        "contractVersion": 1,
+        "rubricVersion": 1,
+        "documentId": "book-the-starlight-stitch-ed11916a",
+        "reviewedRevision": 15,
+        "round": 2,
+        "maxRounds": 2,
+        "creationBrief": {
+          "audience": "Families with children ages six and up",
+          "bookType": "illustrated-storybook",
+          "contractVersion": 2,
+          "premise": "A tiny star and two friends mend a path of light home.",
+          "sourceAssets": [],
+          "spreadCount": 1,
+          "visualDirection": "Premium tactile cut-paper storybook with midnight blue, coral, and warm gold"
+        },
+        "status": "ready",
+        "checks": [
+          {
+            "criterionId": "missing-or-fallback-assets",
+            "outcome": "pass",
+            "message": "A dedicated cover asset is present.",
+            "evidence": [
+              {
+                "scope": "cover",
+                "locator": "[data-book-id] .library-cover-frame img",
+                "description": "Creator shelf cover"
+              }
+            ]
+          },
+          {
+            "criterionId": "missing-or-fallback-assets",
+            "outcome": "pass",
+            "message": "Spread 1 has a final base.",
+            "evidence": [
+              {
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window",
+                "locator": ".book-scene canvas",
+                "description": "Rendered spread 1: A Star at the Window"
+              }
+            ]
+          },
+          {
+            "criterionId": "layered-spread-contract",
+            "outcome": "pass",
+            "message": "Spread 1 has one final base and 2 foreground layers.",
+            "evidence": [
+              {
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window",
+                "locator": ".book-scene canvas",
+                "description": "Rendered spread 1: A Star at the Window"
+              }
+            ]
+          },
+          {
+            "criterionId": "meaningful-interaction",
+            "outcome": "pass",
+            "message": "Spread 1 has an authored interaction.",
+            "evidence": [
+              {
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window",
+                "locator": ".book-scene canvas",
+                "description": "Rendered spread 1: A Star at the Window"
+              }
+            ]
+          },
+          {
+            "criterionId": "text-safety-readability",
+            "outcome": "pass",
+            "message": "Spread 1 copy is within the authoring bounds.",
+            "evidence": [
+              {
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window",
+                "locator": ".book-scene canvas",
+                "description": "Rendered spread 1: A Star at the Window"
+              }
+            ]
+          },
+          {
+            "criterionId": "creation-asset-policy",
+            "outcome": "pass",
+            "message": "Every spread follows the ready creation asset policy.",
+            "evidence": [
+              {
+                "scope": "book",
+                "locator": ".book-app",
+                "description": "Creation brief and final spread asset policy"
+              }
+            ]
+          },
+          {
+            "criterionId": "render-evidence-completeness",
+            "outcome": "pass",
+            "message": "The current revision has rendered cover and spread evidence.",
+            "evidence": [
+              {
+                "scope": "cover",
+                "locator": "[data-book-id] .library-cover-frame img",
+                "description": "Creator shelf cover"
+              }
+            ]
+          },
+          {
+            "criterionId": "cover-appeal",
+            "evidence": [
+              {
+                "description": "07b-current-revision-cover.png, rendered revision 15 cover",
+                "locator": "[data-book-id=\"book-the-starlight-stitch-ed11916a\"] .library-cover-frame img",
+                "scope": "cover"
+              }
+            ],
+            "message": "The portrait cover has a clear stitched-star focal point, readable title treatment, and strong shelf presence.",
+            "outcome": "pass"
+          },
+          {
+            "criterionId": "spread-composition",
+            "evidence": [
+              {
+                "description": "07-story-render-after-patch.png, rendered revision 15 spread",
+                "locator": ".book-scene canvas",
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window"
+              }
+            ],
+            "message": "The repaired 2:1 plate now has one star focal point, balanced friends, and no duplicated subjects across the gutter.",
+            "outcome": "pass"
+          },
+          {
+            "criterionId": "text-safety-readability",
+            "evidence": [
+              {
+                "description": "07-story-render-after-patch.png, rendered revision 15 spread",
+                "locator": ".book-scene canvas",
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window"
+              }
+            ],
+            "message": "Title and body remain readable in the left safe zone; the lowered Niu Niu layer no longer collides with copy.",
+            "outcome": "pass"
+          },
+          {
+            "criterionId": "visual-character-consistency",
+            "evidence": [
+              {
+                "description": "07-story-render-after-patch.png, rendered revision 15 spread",
+                "locator": ".book-scene canvas",
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window"
+              }
+            ],
+            "message": "The two foreground friends are intentionally brighter and flatter than the richly textured clean plate, but remain coherent as tactile cut-paper interaction layers.",
+            "outcome": "warn",
+            "suggestedPatch": "For a future longer edition, regenerate foreground friends under the same midnight key light as the clean plate; this one-spread edition is publishable with the difference recorded."
+          },
+          {
+            "criterionId": "photo-fidelity-integration",
+            "evidence": [
+              {
+                "description": "07-story-render-after-patch.png, rendered revision 15 spread",
+                "locator": ".book-scene canvas",
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window"
+              }
+            ],
+            "message": "The ready brief declares no personal photos; the generated composite and repaired plate keep their intended roles.",
+            "outcome": "pass"
+          },
+          {
+            "criterionId": "crop-skew-occlusion-scale",
+            "evidence": [
+              {
+                "description": "07-story-render-after-patch.png, rendered revision 15 spread",
+                "locator": ".book-scene canvas",
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window"
+              }
+            ],
+            "message": "Both friends remain fully visible with natural proportions and do not obstruct the star, lamp, copy, or page edge.",
+            "outcome": "pass"
+          },
+          {
+            "criterionId": "alpha-edge-matte",
+            "evidence": [
+              {
+                "description": "07-story-render-after-patch.png, rendered revision 15 spread",
+                "locator": ".book-scene canvas",
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window"
+              }
+            ],
+            "message": "Both interactive character layers show true clean transparency without rectangular backgrounds or visible matte halos.",
+            "outcome": "pass"
+          },
+          {
+            "criterionId": "narrative-coherence",
+            "evidence": [
+              {
+                "description": "07-story-render-after-patch.png, rendered revision 15 spread",
+                "locator": ".book-scene canvas",
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window"
+              }
+            ],
+            "message": "The single-spread micro-story reads clearly: the friends find the fallen star and stitch its light into a road home.",
+            "outcome": "pass"
+          },
+          {
+            "criterionId": "meaningful-interaction",
+            "evidence": [
+              {
+                "description": "07-story-render-after-patch.png, rendered revision 15 spread",
+                "locator": ".book-scene canvas",
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window"
+              }
+            ],
+            "message": "Each friend has a distinct hover/focus response and a story-specific reveal tied to mending the star.",
+            "outcome": "pass"
+          },
+          {
+            "criterionId": "premium-sample-value",
+            "evidence": [
+              {
+                "description": "07-story-render-after-patch.png, rendered revision 15 spread",
+                "locator": ".book-scene canvas",
+                "scope": "spread",
+                "spreadId": "1-a-star-at-the-window"
+              }
+            ],
+            "message": "The dedicated cover, repaired cinematic plate, layered friends, safe typography, and interaction now form a credible premium one-spread showcase.",
+            "outcome": "pass"
+          }
+        ],
+        "blockerCount": 0,
+        "warningCount": 1,
+        "noteCount": 0,
+        "warningsRecorded": true,
+        "sampleReady": true,
+        "publishAllowed": true,
+        "summary": "Round two removes the duplicated-character blocker. The one-spread book is sample-ready with one recorded lighting-style warning."
+      },
+      "nextRound": null,
+      "remainingRounds": 0
+    },
+    "deterministicChecks": [
+      {
+        "criterionId": "missing-or-fallback-assets",
+        "outcome": "pass",
+        "message": "A dedicated cover asset is present.",
+        "evidence": [
+          {
+            "scope": "cover",
+            "locator": "[data-book-id] .library-cover-frame img",
+            "description": "Creator shelf cover"
+          }
+        ]
+      },
+      {
+        "criterionId": "missing-or-fallback-assets",
+        "outcome": "pass",
+        "message": "Spread 1 has a final base.",
+        "evidence": [
+          {
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window",
+            "locator": ".book-scene canvas",
+            "description": "Rendered spread 1: A Star at the Window"
+          }
+        ]
+      },
+      {
+        "criterionId": "layered-spread-contract",
+        "outcome": "pass",
+        "message": "Spread 1 has one final base and 2 foreground layers.",
+        "evidence": [
+          {
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window",
+            "locator": ".book-scene canvas",
+            "description": "Rendered spread 1: A Star at the Window"
+          }
+        ]
+      },
+      {
+        "criterionId": "meaningful-interaction",
+        "outcome": "pass",
+        "message": "Spread 1 has an authored interaction.",
+        "evidence": [
+          {
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window",
+            "locator": ".book-scene canvas",
+            "description": "Rendered spread 1: A Star at the Window"
+          }
+        ]
+      },
+      {
+        "criterionId": "text-safety-readability",
+        "outcome": "pass",
+        "message": "Spread 1 copy is within the authoring bounds.",
+        "evidence": [
+          {
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window",
+            "locator": ".book-scene canvas",
+            "description": "Rendered spread 1: A Star at the Window"
+          }
+        ]
+      },
+      {
+        "criterionId": "creation-asset-policy",
+        "outcome": "pass",
+        "message": "Every spread follows the ready creation asset policy.",
+        "evidence": [
+          {
+            "scope": "book",
+            "locator": ".book-app",
+            "description": "Creation brief and final spread asset policy"
+          }
+        ]
+      },
+      {
+        "criterionId": "render-evidence-completeness",
+        "outcome": "pass",
+        "message": "The current revision has rendered cover and spread evidence.",
+        "evidence": [
+          {
+            "scope": "cover",
+            "locator": "[data-book-id] .library-cover-frame img",
+            "description": "Creator shelf cover"
+          }
+        ]
+      }
+    ],
+    "renderManifest": {
+      "contractVersion": 1,
+      "documentId": "book-the-starlight-stitch-ed11916a",
+      "revision": 15,
+      "pageUrl": "http://127.0.0.1:5173/",
+      "screenshotBoundary": "Rendered evidence proves the frame existed. Use the host browser/screenshot capability for aesthetic judgments; schema alone cannot judge visual quality.",
+      "cover": {
+        "assetId": "asset:4b37cb3c-0907-4aa3-968f-dba78b365856",
+        "evidenceLocator": "[data-book-id=\"book-the-starlight-stitch-ed11916a\"] .library-cover-frame img"
+      },
+      "spreads": [
+        {
+          "id": "1-a-star-at-the-window",
+          "order": 1,
+          "title": "A Star at the Window",
+          "body": "Niu Niu and Bubu find a fallen star at the window. Together they stitch its warm light into a road home.",
+          "finalBaseAssetId": "asset:6a2047af-7d09-4c2c-8f19-be391979cff2",
+          "separation": "inpainted-clean-plate",
+          "sourceAssetId": "asset:0e3b38ca-be2b-4853-92d2-62b0090534cc",
+          "personalSourceAssetId": null,
+          "foregroundLayers": [
+            {
+              "id": "niu-niu",
+              "label": "Niu Niu",
+              "assetId": "asset:50d49194-ba29-4ff7-8b4d-7bc10fbccbe9",
+              "interaction": true
+            },
+            {
+              "id": "bubu",
+              "label": "Bubu",
+              "assetId": "asset:8b543c4c-2b26-4e29-b96d-43be8f19bf5c",
+              "interaction": true
+            }
+          ],
+          "evidenceLocator": ".book-scene canvas"
+        }
+      ]
+    },
+    "renderEvidence": [
+      {
+        "documentId": "book-the-starlight-stitch-ed11916a",
+        "scope": "cover",
+        "theme": "paper-atelier",
+        "surface": "shelf",
+        "locator": "[data-book-id=\"book-the-starlight-stitch-ed11916a\"] .library-cover-frame img",
+        "revision": 15,
+        "renderedAt": "2026-08-28T13:11:24.598Z"
+      },
+      {
+        "documentId": "book-the-starlight-stitch-ed11916a",
+        "scope": "spread",
+        "spreadId": "1-a-star-at-the-window",
+        "theme": "paper-atelier",
+        "surface": "webgl",
+        "locator": ".book-scene canvas",
+        "revision": 15,
+        "renderedAt": "2026-08-28T13:11:27.777Z"
+      }
+    ],
+    "creationBrief": {
+      "audience": "Families with children ages six and up",
+      "bookType": "illustrated-storybook",
+      "contractVersion": 2,
+      "premise": "A tiny star and two friends mend a path of light home.",
+      "sourceAssets": [],
+      "spreadCount": 1,
+      "visualDirection": "Premium tactile cut-paper storybook with midnight blue, coral, and warm gold"
+    },
+    "instructions": "Call manage_book action begin-critique, use set_presentation(spreadId) and the host browser screenshot capability to inspect the cover and every spread, then record every visual criterion with action record-critique. Schema evidence is not an aesthetic judgment."
+  }
+}

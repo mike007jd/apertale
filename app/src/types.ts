@@ -1,3 +1,5 @@
+import type { CreationBriefPayload, CreationReadinessAssessment } from "./authoringContract";
+
 export type ThemeId = "paper-atelier" | "midnight-desk";
 export type QualityTier = "balanced" | "reduced";
 export const MOTION_PRESETS = ["gentle-float", "fly-across", "water-bob", "soft-pulse", "slow-orbit"] as const;
@@ -70,15 +72,19 @@ export type BookElement = {
 /**
  * A full-spread illustration prepared for layered interaction.
  *
- * `sourceAssetId` is the original composite reference. `cleanPlateAssetId`
- * is the repaired background after the interactive subjects have been
- * removed and their hidden pixels inpainted. Foreground subjects live in
- * `Spread.elements`, so lifting one never reveals a duplicate underneath.
+ * `sourceAssetId` keeps the original full-spread composite reference used to
+ * derive the clean plate. `personalSourceAssetId` separately records a
+ * declared user photo when identity/source-use rules apply.
+ * `cleanPlateAssetId` is either the generated background after extracted
+ * subjects were removed, or an approved source-true photo layout that must not
+ * be reillustrated. Generated work without a declared photo source omits it.
+ * Foreground subjects live in `Spread.elements`.
  */
 export type LayeredArtwork = {
   cleanPlateAssetId: string;
   sourceAssetId?: string;
-  separation: "inpainted-clean-plate";
+  personalSourceAssetId?: string;
+  separation: "inpainted-clean-plate" | "preserved-photo-layout";
 };
 
 export type Spread = {
@@ -140,7 +146,15 @@ type ConflictResult = {
   summary: string;
 };
 
-export type DocumentResult = MutationResult | ConflictResult;
+export type CreationNotReadyResult = {
+  ok: false;
+  code: "creation_not_ready";
+  currentRevision: number;
+  summary: string;
+  readiness: CreationReadinessAssessment;
+};
+
+export type DocumentResult = MutationResult | ConflictResult | CreationNotReadyResult;
 
 type LiftCommand = {
   type: "lift";
@@ -156,6 +170,8 @@ export type CreateBookCommand = {
   documentId: string;
   title: string;
   spreads: Array<Pick<Spread, "id" | "title" | "body" | "kicker">>;
+  creationBrief: CreationBriefPayload;
+  validatedSourceAssetIds: string[];
 };
 
 export type SetBookCoverCommand = {
@@ -181,7 +197,9 @@ export type ScenePatchOperation =
   | {
       op: "set-background";
       cleanPlateAssetId: string;
-      sourceAssetId?: string;
+      sourceAssetId: string;
+      personalSourceAssetId?: string;
+      separation?: LayeredArtwork["separation"];
     }
   | {
       op: "add";

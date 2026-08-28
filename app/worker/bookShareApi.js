@@ -1,3 +1,6 @@
+import qualityRubric from "./qualityRubric.json" with { type: "json" };
+import bundledAssetCatalog from "./bundledAssetCatalog.json" with { type: "json" };
+
 const MANAGEABLE_STATUSES = new Set(["draft", "revoked"]);
 const ASSET_ID_PATTERN = /^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -18,6 +21,10 @@ const FOCUS_RESPONSES = new Set(["none", "spotlight", "rise-and-center", "orbit-
 const REVEAL_KINDS = new Set(["none", "caption", "fact-card"]);
 const PROCEDURAL_ASSET_PATTERN = /^procedural:hotspot:(amber|aqua|jade|rose)$/u;
 const BUNDLED_ASSET_PATTERN = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._/-]{0,503}$/u;
+const QUALITY_OUTCOMES = new Set(["pass", "blocker", "warn", "note"]);
+const QUALITY_CRITERIA = new Set(qualityRubric.criteria.map((criterion) => criterion.id));
+const QUALITY_VISUAL_CRITERIA = new Set(qualityRubric.criteria.filter((criterion) => criterion.mode !== "deterministic").map((criterion) => criterion.id));
+const BUNDLED_ASSETS = new Set(bundledAssetCatalog.assets);
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -84,7 +91,7 @@ function assertAssetReference(value, references) {
     references.add(value);
     return;
   }
-  if ((BUNDLED_ASSET_PATTERN.test(value) && !value.split("/").includes("..")) || PROCEDURAL_ASSET_PATTERN.test(value)) return;
+  if ((BUNDLED_ASSET_PATTERN.test(value) && BUNDLED_ASSETS.has(value)) || PROCEDURAL_ASSET_PATTERN.test(value)) return;
   throw new HttpError(400, "invalid_manifest", "Shared books may reference only uploaded or bundled assets.");
 }
 
@@ -217,18 +224,195 @@ function validateManifest(manifest) {
     assertAssetReference(spread.textureUrl, references);
     if (typeof spread.artwork !== "undefined") {
       if (!isRecord(spread.artwork)) throw new HttpError(400, "invalid_manifest", message);
-      assertOnly(spread.artwork, ["cleanPlateAssetId", "sourceAssetId", "separation"], message);
-      if (spread.artwork.separation !== "inpainted-clean-plate") {
+      assertOnly(spread.artwork, ["cleanPlateAssetId", "sourceAssetId", "personalSourceAssetId", "separation"], message);
+      if (!["inpainted-clean-plate", "preserved-photo-layout"].includes(spread.artwork.separation)) {
         throw new HttpError(400, "invalid_manifest", `Spread ${order + 1} has an invalid artwork contract.`);
       }
       if (typeof spread.artwork.cleanPlateAssetId !== "string") throw new HttpError(400, "invalid_manifest", message);
       assertAssetReference(spread.artwork.cleanPlateAssetId, references);
       assertAssetReference(spread.artwork.sourceAssetId, references);
+      assertAssetReference(spread.artwork.personalSourceAssetId, references);
     }
     const elementIds = new Set();
     spread.elements.forEach((element) => validateElement(element, order + 1, references, elementIds));
   });
   return references;
+}
+
+function hasMeaningfulInteraction(element) {
+  return Boolean(
+    element.motion
+    || (element.interaction && (
+      element.interaction.hover !== "none"
+      || element.interaction.focus !== "none"
+      || element.interaction.reveal?.kind !== "none"
+    )),
+  );
+}
+
+function validateCreationBrief(manifest, brief, blocked) {
+  if (!isRecord(brief) || brief.contractVersion !== 2 || !Object.hasOwn(qualityRubric.spreadAssetPolicies, brief.bookType)) {
+    blocked("A validated creation brief is required for publication.");
+  }
+  if (brief.spreadCount !== manifest.spreads.length || !Array.isArray(brief.sourceAssets) || brief.sourceAssets.length > 24) {
+    blocked("The creation brief does not match the final spread plan.");
+  }
+  if (
+    typeof brief.premise !== "string" || brief.premise.trim().length < 1 || brief.premise.trim().length > 500
+    || typeof brief.audience !== "string" || brief.audience.trim().length < 1 || brief.audience.trim().length > 160
+    || typeof brief.visualDirection !== "string" || brief.visualDirection.trim().length < 1 || brief.visualDirection.trim().length > 160
+  ) blocked("The creation brief is missing its premise, audience, or visual direction.");
+  const sourceIds = new Set();
+  brief.sourceAssets.forEach((asset) => {
+    if (
+      !isRecord(asset)
+      || !ASSET_ID_PATTERN.test(asset.id)
+      || typeof asset.name !== "string"
+      || asset.name.trim().length < 1
+      || asset.name.trim().length > 128
+      || sourceIds.has(asset.id)
+    ) {
+      blocked("The creation brief contains an invalid source asset.");
+    }
+    sourceIds.add(asset.id);
+  });
+  const policy = qualityRubric.spreadAssetPolicies[brief.bookType];
+  if (sourceIds.size > 0 && brief.photoPolicy?.sourceUse !== policy.sourceUse) blocked("The creation brief's source-photo treatment is inconsistent.");
+  if (brief.bookType !== "illustrated-storybook" && sourceIds.size === 0) blocked("Photo books require declared source assets.");
+  if (sourceIds.size > 0 && (
+    brief.photoPolicy?.preserveIdentity !== true || brief.photoPolicy?.allowFaceChanges !== false
+  )) blocked("Books using personal photos must preserve identity and disable face changes.");
+  if (brief.bookType === "preserved-photo-album" && (
+    typeof brief.photoPolicy?.allowCrop !== "boolean" || typeof brief.photoPolicy?.allowColorCorrection !== "boolean"
+  )) blocked("Preserved-photo albums require explicit crop and colour boundaries.");
+  return { policy, sourceIds };
+}
+
+function validateCreationAssetPolicy(manifest, brief, blocked) {
+  const { policy, sourceIds } = validateCreationBrief(manifest, brief, blocked);
+  if (sourceIds.has(manifest.coverAssetId)) blocked("A personal source photo cannot replace the dedicated cover.");
+  manifest.spreads.forEach((spread, order) => {
+    const artwork = spread.artwork;
+    if (!artwork || artwork.separation !== policy.separation) blocked(`Spread ${order + 1} does not match the ready creation asset policy.`);
+    if (!artwork.sourceAssetId) blocked(`Spread ${order + 1} must retain its original composite reference.`);
+    if (brief.bookType !== "preserved-photo-album" && artwork.sourceAssetId === artwork.cleanPlateAssetId) {
+      blocked(`Spread ${order + 1} must keep its original composite separate from the repaired clean plate.`);
+    }
+    if (brief.bookType !== "preserved-photo-album" && sourceIds.has(artwork.sourceAssetId)) {
+      blocked(`Spread ${order + 1} uses a personal photo as its generated composite reference.`);
+    }
+    const requiresPersonalSource = policy.requiresPersonalSourceAsset || sourceIds.size > 0;
+    if (requiresPersonalSource) {
+      if (!artwork.personalSourceAssetId || !sourceIds.has(artwork.personalSourceAssetId)) blocked(`Spread ${order + 1} must retain a declared personal-photo source.`);
+    } else if (artwork.personalSourceAssetId) {
+      blocked(`Spread ${order + 1} has an undeclared personal-photo reference.`);
+    }
+    if (brief.bookType !== "preserved-photo-album" && sourceIds.has(artwork.cleanPlateAssetId)) {
+      blocked(`Spread ${order + 1} uses a source photo as generated final artwork.`);
+    }
+    if (spread.elements.some((element) => sourceIds.has(element.assetId) || element.frameAssetIds?.some((assetId) => sourceIds.has(assetId)))) {
+      blocked(`Spread ${order + 1} uses a declared source photo as a foreground final.`);
+    }
+  });
+}
+
+function validateDeterministicPublishQuality(manifest, creationBrief) {
+  const blocked = (message) => { throw new HttpError(409, "quality_blocked", message); };
+  validateCreationAssetPolicy(manifest, creationBrief, blocked);
+  if (!manifest.coverAssetId && !manifest.coverTextureUrl) {
+    throw new HttpError(409, "quality_blocked", "Add a dedicated cover before publishing.");
+  }
+  manifest.spreads.forEach((spread, order) => {
+    if (!spread.artwork?.cleanPlateAssetId) {
+      throw new HttpError(409, "quality_blocked", `Spread ${order + 1} needs a final generated clean plate or preserved-photo layout.`);
+    }
+    const foreground = spread.elements.filter((element) => !PROCEDURAL_ASSET_PATTERN.test(element.assetId));
+    if (foreground.length < 2 || foreground.length > 4) {
+      throw new HttpError(409, "quality_blocked", `Spread ${order + 1} needs 2 to 4 foreground layers.`);
+    }
+    if (!spread.elements.some(hasMeaningfulInteraction)) {
+      throw new HttpError(409, "quality_blocked", `Spread ${order + 1} needs a meaningful interaction.`);
+    }
+    if (spread.title.trim().length < 1 || spread.title.length > 100 || spread.body.length > 800) {
+      throw new HttpError(409, "quality_blocked", `Spread ${order + 1} copy is outside the publication quality bounds.`);
+    }
+  });
+}
+
+function validateQualityEvidence(value, spreadIds) {
+  return isRecord(value)
+    && ["book", "cover", "spread"].includes(value.scope)
+    && typeof value.locator === "string"
+    && value.locator.trim().length > 0
+    && typeof value.description === "string"
+    && value.description.trim().length > 0
+    && (value.scope !== "spread" || (typeof value.spreadId === "string" && spreadIds.has(value.spreadId)));
+}
+
+function validateQualityAttestation(manifest, quality) {
+  const blocked = (message) => { throw new HttpError(409, "quality_blocked", message); };
+  if (!isRecord(quality)) blocked("A completed quality review is required before publishing.");
+  if (
+    quality.contractVersion !== 1
+    || quality.rubricVersion !== qualityRubric.version
+    || quality.maxRounds !== qualityRubric.maxReviewRounds
+    || !isRecord(quality.creationBrief)
+    || quality.documentId !== manifest.id
+    || quality.reviewedRevision !== manifest.revision
+    || !Number.isInteger(quality.round)
+    || quality.round < 1
+    || quality.round > qualityRubric.maxReviewRounds
+    || quality.status !== "ready"
+    || quality.sampleReady !== true
+    || quality.publishAllowed !== true
+    || quality.warningsRecorded !== true
+    || !Array.isArray(quality.checks)
+    || quality.checks.length < QUALITY_CRITERIA.size
+    || quality.checks.length > 100
+  ) blocked("The quality review does not match this publishable revision.");
+
+  const seen = new Set();
+  const evidenceByCriterion = new Map();
+  const spreadIds = new Set(manifest.spreads.map((spread) => spread.id));
+  let blockerCount = 0;
+  let warningCount = 0;
+  let noteCount = 0;
+  quality.checks.forEach((check) => {
+    if (
+      !isRecord(check)
+      || !QUALITY_CRITERIA.has(check.criterionId)
+      || !QUALITY_OUTCOMES.has(check.outcome)
+      || typeof check.message !== "string"
+      || check.message.trim().length < 1
+      || !Array.isArray(check.evidence)
+      || check.evidence.length < 1
+      || check.evidence.some((item) => !validateQualityEvidence(item, spreadIds))
+      || (["blocker", "warn"].includes(check.outcome) && (typeof check.suggestedPatch !== "string" || check.suggestedPatch.trim().length < 1))
+    ) blocked("The quality review contains an incomplete criterion result.");
+    seen.add(check.criterionId);
+    evidenceByCriterion.set(check.criterionId, [...(evidenceByCriterion.get(check.criterionId) ?? []), ...check.evidence]);
+    if (check.outcome === "blocker") blockerCount += 1;
+    if (check.outcome === "warn") warningCount += 1;
+    if (check.outcome === "note") noteCount += 1;
+  });
+  if ([...QUALITY_CRITERIA].some((criterionId) => !seen.has(criterionId))) blocked("The quality review is missing required criteria.");
+  QUALITY_VISUAL_CRITERIA.forEach((criterionId) => {
+    const evidence = evidenceByCriterion.get(criterionId) ?? [];
+    if (criterionId === "cover-appeal") {
+      if (!evidence.some((item) => item.scope === "cover")) blocked("The cover critique needs cover evidence.");
+    } else if ([...spreadIds].some((spreadId) => !evidence.some((item) => item.scope === "spread" && item.spreadId === spreadId))) {
+      blocked(`The ${criterionId} critique must cover every spread.`);
+    }
+  });
+  if (
+    blockerCount !== 0
+    || quality.blockerCount !== blockerCount
+    || quality.warningCount !== warningCount
+    || quality.noteCount !== noteCount
+  ) blocked("The quality review severity counts are inconsistent.");
+  const renderEvidenceCheck = quality.checks.find((check) => check.criterionId === "render-evidence-completeness");
+  if (!renderEvidenceCheck || renderEvidenceCheck.outcome !== "pass") blocked("Current rendered evidence is required before publishing.");
+  validateCreationAssetPolicy(manifest, quality.creationBrief, blocked);
 }
 
 function assetHref(shareToken, assetId) {
@@ -248,6 +432,7 @@ function hydrateManifest(manifest, shareToken) {
     if (spread.artwork) {
       spread.artwork.cleanPlateAssetId = hydrate(spread.artwork.cleanPlateAssetId);
       spread.artwork.sourceAssetId = hydrate(spread.artwork.sourceAssetId);
+      spread.artwork.personalSourceAssetId = hydrate(spread.artwork.personalSourceAssetId);
     }
     spread.elements.forEach((element) => {
       element.assetId = hydrate(element.assetId);
@@ -379,6 +564,8 @@ export function createBookShareApi({
     }
     const manifest = payload?.manifest;
     const references = validateManifest(manifest);
+    validateDeterministicPublishQuality(manifest, payload?.quality?.creationBrief);
+    validateQualityAttestation(manifest, payload?.quality);
     const uploaded = new Set(await repository.listAssetIds(bookId));
     const missing = [...references].filter((assetId) => !uploaded.has(assetId));
     if (missing.length > 0) {

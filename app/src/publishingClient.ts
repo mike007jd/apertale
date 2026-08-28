@@ -1,5 +1,6 @@
 import { getStoredAssetBlob, isStoredAssetId } from "./assetStore";
 import { listStoredProjectAssetIds } from "./projectArtifact";
+import { assertPublishableQuality, type QualityReport } from "./qualityContract";
 import type { DocumentState } from "./types";
 
 type PublicationStatus = "draft" | "publishing" | "published" | "revoked";
@@ -51,6 +52,7 @@ export function getPublicationRecord(documentId: string): PublicationRecord | nu
 
 export async function publishDocument(
   documentState: DocumentState,
+  qualityReport: QualityReport | null | undefined,
   onProgress?: (progress: PublicationProgress) => void,
 ): Promise<PublicationRecord> {
   const existing = readStoredRecord(documentState.id);
@@ -61,6 +63,15 @@ export async function publishDocument(
     throw new PublicationError(
       "This book already has a live share link. Revoke it before publishing a new revision.",
       { code: "revision_changed", status: 409, retryable: false },
+    );
+  }
+
+  try {
+    assertPublishableQuality(documentState, qualityReport);
+  } catch {
+    throw new PublicationError(
+      "This revision must pass the Apertale quality check before it can be published.",
+      { code: "quality_blocked", status: 409, retryable: false },
     );
   }
 
@@ -106,7 +117,7 @@ export async function publishDocument(
         authorization: bearer(record.manageToken),
         "content-type": "application/json",
       },
-      body: JSON.stringify({ manifest: documentState, shareToken }),
+      body: JSON.stringify({ manifest: documentState, shareToken, quality: qualityReport }),
     },
   );
   const shareUrl = readSameOriginShareUrl(published.shareUrl, shareToken);

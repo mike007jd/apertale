@@ -1,8 +1,23 @@
 import { initialDocument, initialSession, sampleBooks } from "./sampleBook";
+import { assessCreationReadiness, type CreationBriefPayload } from "./authoringContract";
 import { recordDiagnostic } from "./diagnostics";
 import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS, resolveInteraction } from "./interaction";
 import { listProjectAssetReferences } from "./projectArtifact";
+import {
+  QUALITY_REVIEW_MAX_ROUNDS,
+  buildQualityReport,
+  creationAssetPolicyIssues,
+  evaluateDeterministicQuality,
+  qualityGateState,
+  validateVisualReview,
+} from "./qualityContract";
 import { MOTION_PRESETS } from "./types";
+import type {
+  AuthoringQualityLifecycle,
+  QualityGateState,
+  QualityRenderEvidence,
+  QualityVisualReviewSubmission,
+} from "./qualityContract";
 import type {
   AnimateCommand,
   BookElement,
@@ -59,6 +74,7 @@ type CreateBookUndoRecord = {
   direction: "undo" | "redo";
   previous: DocumentState;
   created: DocumentState;
+  quality: AuthoringQualityLifecycle;
 };
 
 type BookCoverUndoRecord = {
@@ -98,6 +114,7 @@ type StoredLibrary = {
   activeBookId: string;
   documents: DocumentState[];
   sampleSourceVersion?: number;
+  authoringQuality?: Record<string, AuthoringQualityLifecycle>;
 };
 
 function validDocument(parsed: DocumentState) {
@@ -118,7 +135,23 @@ function validDocument(parsed: DocumentState) {
 }
 
 function defaultLibrary(): StoredLibrary {
-  return { activeBookId: initialDocument.id, documents: clone(sampleBooks), sampleSourceVersion: SAMPLE_SOURCE_VERSION };
+  return {
+    activeBookId: initialDocument.id,
+    documents: clone(sampleBooks),
+    sampleSourceVersion: SAMPLE_SOURCE_VERSION,
+    authoringQuality: {},
+  };
+}
+
+function validQualityLifecycle(value: unknown): value is AuthoringQualityLifecycle {
+  if (!value || typeof value !== "object") return false;
+  const lifecycle = value as Partial<AuthoringQualityLifecycle>;
+  return Boolean(lifecycle.creationBrief && typeof lifecycle.creationBrief === "object")
+    && Number.isInteger(lifecycle.reviewRounds)
+    && Number(lifecycle.reviewRounds) >= 0
+    && Number(lifecycle.reviewRounds) <= QUALITY_REVIEW_MAX_ROUNDS
+    && ["needs-review", "checking", "ready", "blocked", "needs-user-input"].includes(String(lifecycle.reviewStatus))
+    && Array.isArray(lifecycle.renderEvidence);
 }
 
 function loadLibrary(): StoredLibrary {
@@ -195,7 +228,11 @@ function loadLibrary(): StoredLibrary {
     });
     const activeBookId = documents.some((book) => book.id === parsed.activeBookId) ? parsed.activeBookId : documents[0]?.id;
     if (!activeBookId) return defaultLibrary();
-    return { activeBookId, documents, sampleSourceVersion: SAMPLE_SOURCE_VERSION };
+    const documentIds = new Set(documents.map((document) => document.id));
+    const authoringQuality = Object.fromEntries(Object.entries(parsed.authoringQuality ?? {}).filter(([documentId, lifecycle]) => (
+      documentIds.has(documentId) && validQualityLifecycle(lifecycle)
+    )));
+    return { activeBookId, documents, sampleSourceVersion: SAMPLE_SOURCE_VERSION, authoringQuality };
   } catch {
     return defaultLibrary();
   }
@@ -224,12 +261,249 @@ export class BookEngine {
   private snapshot: BookSnapshot = this.makeSnapshot();
   private storageWarningPending = false;
 
+  private qualityLifecycles() {
+    this.libraryState.authoringQuality ??= {};
+    return this.libraryState.authoringQuality;
+  }
+
+  private qualityLifecycle(documentId = this.documentState.id) {
+    return this.libraryState.authoringQuality?.[documentId] ?? null;
+  }
+
+  private ensureQualityLifecycle(documentId = this.documentState.id) {
+    const existing = this.qualityLifecycle(documentId);
+    if (existing) return existing;
+    const lifecycle: AuthoringQualityLifecycle = {
+      creationBrief: {},
+      reviewRounds: 0,
+      reviewStatus: "needs-review",
+      renderEvidence: [],
+    };
+    this.qualityLifecycles()[documentId] = lifecycle;
+    return lifecycle;
+  }
+
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
 
   getSnapshot = () => this.snapshot;
+
+  getQualityGate(): QualityGateState {
+    return qualityGateState(this.documentState, this.qualityLifecycle());
+  }
+
+  getQualityLifecycle() {
+    const lifecycle = this.qualityLifecycle();
+    return lifecycle ? clone(lifecycle) : null;
+  }
+
+  adoptCreationBrief(
+    creationBrief: CreationBriefPayload,
+    validatedSourceAssetIds: string[],
+    expectedRevision: number,
+  ) {
+    if (expectedRevision !== this.documentState.revision) {
+      return {
+        ok: false as const,
+        code: "revision_conflict" as const,
+        currentRevision: this.documentState.revision,
+        summary: `Expected revision ${expectedRevision}; refresh creation-readiness before attaching the brief.`,
+      };
+    }
+    if (sampleBooks.some((sample) => sample.id === this.documentState.id)) {
+      return {
+        ok: false as const,
+        code: "invalid" as const,
+        currentRevision: this.documentState.revision,
+        summary: "Curated samples keep their shipped provenance and cannot adopt a personal creation brief.",
+      };
+    }
+    const existing = this.qualityLifecycle();
+    if (existing?.creationBrief?.bookType) {
+      return {
+        ok: false as const,
+        code: "creation_brief_already_attached" as const,
+        currentRevision: this.documentState.revision,
+        summary: "This book already has its immutable creation brief.",
+      };
+    }
+    const readiness = assessCreationReadiness(creationBrief, {
+      expectedSpreadCount: this.documentState.spreads.length,
+      validatedSourceAssetIds,
+    });
+    if (!readiness.ready) {
+      return {
+        ok: false as const,
+        code: "creation_not_ready" as const,
+        currentRevision: this.documentState.revision,
+        summary: "This legacy book needs a complete creation brief before quality review.",
+        readiness,
+      };
+    }
+    this.qualityLifecycles()[this.documentState.id] = {
+      creationBrief: clone(creationBrief),
+      reviewRounds: 0,
+      reviewStatus: "needs-review",
+      renderEvidence: [],
+    };
+    this.persist();
+    this.emit();
+    return {
+      ok: true as const,
+      currentRevision: this.documentState.revision,
+      summary: "Attached the ready creation brief. Render this revision before critique.",
+      qualityGate: this.getQualityGate(),
+    };
+  }
+
+  beginQualityReview() {
+    const lifecycle = this.ensureQualityLifecycle();
+    if (!lifecycle.creationBrief?.bookType) {
+      return {
+        ok: false as const,
+        code: "creation_brief_required" as const,
+        currentRevision: this.documentState.revision,
+        summary: "Attach a readiness-passed creation brief before starting quality review.",
+        qualityGate: this.getQualityGate(),
+      };
+    }
+    if (lifecycle.report?.publishAllowed && lifecycle.report.reviewedRevision === this.documentState.revision) {
+      return {
+        ok: true as const,
+        currentRevision: this.documentState.revision,
+        alreadyReviewed: true,
+        nextRound: null,
+        remainingRounds: QUALITY_REVIEW_MAX_ROUNDS - lifecycle.reviewRounds,
+      };
+    }
+    if (lifecycle.reviewStatus === "checking") {
+      return {
+        ok: true as const,
+        currentRevision: this.documentState.revision,
+        nextRound: lifecycle.reviewRounds + 1,
+        remainingRounds: QUALITY_REVIEW_MAX_ROUNDS - lifecycle.reviewRounds,
+      };
+    }
+    if (lifecycle.reviewRounds >= QUALITY_REVIEW_MAX_ROUNDS && !lifecycle.report?.publishAllowed) {
+      return {
+        ok: false as const,
+        code: "quality_review_limit" as const,
+        currentRevision: this.documentState.revision,
+        summary: "Two quality review rounds are complete. Ask for new material or a user decision.",
+        qualityGate: this.getQualityGate(),
+      };
+    }
+    if (lifecycle.report && !lifecycle.report.publishAllowed && lifecycle.report.reviewedRevision === this.documentState.revision) {
+      return {
+        ok: false as const,
+        code: "quality_patch_required" as const,
+        currentRevision: this.documentState.revision,
+        summary: "Apply the suggested patches before starting the next quality review round.",
+        qualityGate: this.getQualityGate(),
+      };
+    }
+    lifecycle.reviewStatus = "checking";
+    this.persist();
+    this.emit();
+    return {
+      ok: true as const,
+      currentRevision: this.documentState.revision,
+      nextRound: lifecycle.reviewRounds + 1,
+      remainingRounds: QUALITY_REVIEW_MAX_ROUNDS - lifecycle.reviewRounds,
+    };
+  }
+
+  recordRenderEvidence(input: Omit<QualityRenderEvidence, "renderedAt">) {
+    const documentState = input.documentId === this.documentState.id
+      ? this.documentState
+      : this.libraryState.documents.find((document) => document.id === input.documentId);
+    if (
+      !documentState
+      || input.revision !== documentState.revision
+      || sampleBooks.some((sample) => sample.id === documentState.id)
+    ) return false;
+    if (input.scope === "spread" && !documentState.spreads.some((spread) => spread.id === input.spreadId)) return false;
+    const lifecycle = this.ensureQualityLifecycle(documentState.id);
+    const next: QualityRenderEvidence = {
+      ...input,
+      renderedAt: new Date().toISOString(),
+    };
+    lifecycle.renderEvidence = [
+      ...lifecycle.renderEvidence.filter((item) => !(
+        item.revision !== documentState.revision
+        || (item.scope === next.scope && item.spreadId === next.spreadId && item.theme === next.theme && item.surface === next.surface)
+      )),
+      next,
+    ].slice(-26);
+    this.persist();
+    this.emit();
+    return true;
+  }
+
+  recordQualityReview(submission: QualityVisualReviewSubmission) {
+    const lifecycle = this.ensureQualityLifecycle();
+    const nextRound = lifecycle.reviewRounds + 1;
+    if (lifecycle.reviewStatus !== "checking") {
+      return {
+        ok: false as const,
+        code: "quality_review_not_started" as const,
+        currentRevision: this.documentState.revision,
+        summary: "Start the quality review before recording the visual critique.",
+        qualityGate: this.getQualityGate(),
+      };
+    }
+    if (nextRound > QUALITY_REVIEW_MAX_ROUNDS) {
+      return {
+        ok: false as const,
+        code: "quality_review_limit" as const,
+        currentRevision: this.documentState.revision,
+        summary: "Two quality review rounds are complete. Ask for new material or a user decision.",
+        qualityGate: this.getQualityGate(),
+      };
+    }
+    if (lifecycle.report && !lifecycle.report.publishAllowed && lifecycle.report.reviewedRevision === this.documentState.revision) {
+      return {
+        ok: false as const,
+        code: "quality_patch_required" as const,
+        currentRevision: this.documentState.revision,
+        summary: "Apply the suggested patches before recording the next quality review round.",
+        qualityGate: this.getQualityGate(),
+      };
+    }
+    const invalid = validateVisualReview(this.documentState, submission, nextRound);
+    if (invalid) {
+      return {
+        ok: false as const,
+        code: "invalid_quality_review" as const,
+        currentRevision: this.documentState.revision,
+        summary: invalid,
+        qualityGate: this.getQualityGate(),
+      };
+    }
+    const deterministic = evaluateDeterministicQuality(this.documentState, lifecycle.renderEvidence, lifecycle.creationBrief);
+    const report = buildQualityReport(this.documentState, nextRound, deterministic, submission, lifecycle.creationBrief);
+    lifecycle.reviewRounds = nextRound;
+    lifecycle.reviewStatus = report.status;
+    lifecycle.report = report;
+    this.persist();
+    this.showAction(
+      "agent",
+      report.publishAllowed ? "success" : "error",
+      report.publishAllowed
+        ? "Quality check passed — this revision is ready to publish"
+        : report.status === "needs-user-input"
+          ? "Quality blockers remain after two rounds — new material or a decision is needed"
+          : "Quality check found blockers to fix",
+    );
+    return {
+      ok: true as const,
+      currentRevision: this.documentState.revision,
+      qualityReport: clone(report),
+      qualityGate: this.getQualityGate(),
+    };
+  }
 
   private makeSnapshot(): BookSnapshot {
     return {
@@ -245,6 +519,18 @@ export class BookEngine {
   }
 
   private persist() {
+    const quality = this.qualityLifecycle();
+    if (
+      quality?.report?.publishAllowed
+      && quality.report.reviewedRevision !== this.documentState.revision
+    ) {
+      // A post-approval edit starts a fresh bounded review cycle. Blocked
+      // cycles retain their count so patching cannot manufacture a third try.
+      quality.reviewRounds = 0;
+      quality.reviewStatus = "needs-review";
+      quality.renderEvidence = [];
+      delete quality.report;
+    }
     try {
       const documentIndex = this.libraryState.documents.findIndex((book) => book.id === this.documentState.id);
       if (documentIndex >= 0) this.libraryState.documents[documentIndex] = clone(this.documentState);
@@ -319,6 +605,9 @@ export class BookEngine {
           ? {
               cleanPlateAssetId: spread.artwork.cleanPlateAssetId,
               sourceAssetId: spread.artwork.sourceAssetId ?? null,
+              ...(spread.artwork.personalSourceAssetId
+                ? { personalSourceAssetId: spread.artwork.personalSourceAssetId }
+                : {}),
               foregroundLayerCount: spread.elements.filter((element) => !element.assetId.startsWith("procedural:")).length,
             }
           : null,
@@ -358,6 +647,7 @@ export class BookEngine {
       books: this.libraryState.documents.map((book) => ({
         id: book.id,
         title: book.title,
+        revision: book.revision,
         spreadCount: book.spreads.length,
         coverAssetId: book.coverAssetId,
         coverTextureUrl: book.coverTextureUrl ?? book.spreads[0]?.textureUrl ?? "/assets/generated/day-background.png",
@@ -529,6 +819,22 @@ export class BookEngine {
   }
 
   private applyCreateBook(command: CreateBookCommand, source: CommandSource): DocumentResult {
+    const readiness = assessCreationReadiness(command.creationBrief, {
+      expectedSpreadCount: command.spreads.length,
+      validatedSourceAssetIds: command.validatedSourceAssetIds,
+    });
+    if (!readiness.ready) {
+      const result = {
+        ok: false as const,
+        code: "creation_not_ready" as const,
+        currentRevision: this.documentState.revision,
+        summary: "This creation brief needs a little more information before Apertale can create the book.",
+        readiness,
+      };
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
     const title = command.title.trim();
     const validSpreads = command.spreads.length >= 1
       && command.spreads.length <= 12
@@ -568,6 +874,13 @@ export class BookEngine {
       })),
     };
     this.documentState = nextDocument;
+    const quality: AuthoringQualityLifecycle = {
+      creationBrief: clone(command.creationBrief),
+      reviewRounds: 0,
+      reviewStatus: "needs-review",
+      renderEvidence: [],
+    };
+    this.qualityLifecycles()[nextDocument.id] = quality;
     this.sessionState = { ...this.sessionState, currentSpreadIndex: 0, selectionId: null };
     const undoToken = crypto.randomUUID();
     this.undoRecords.set(undoToken, {
@@ -576,6 +889,7 @@ export class BookEngine {
       direction: "undo",
       previous: before,
       created: clone(nextDocument),
+      quality: clone(quality),
     });
     const summary = `${source === "agent" ? "Codex" : "You"} created ${title}`;
     const result: MutationResult = {
@@ -741,13 +1055,19 @@ export class BookEngine {
 
     for (const operation of command.operations) {
       if (operation.op === "set-background") {
-        if (!validAssetId(operation.cleanPlateAssetId) || (operation.sourceAssetId && !validAssetId(operation.sourceAssetId))) {
-          return fail("The clean plate and source must be known browser-local image assets.");
+        if (
+          !validAssetId(operation.cleanPlateAssetId)
+          || !operation.sourceAssetId
+          || !validAssetId(operation.sourceAssetId)
+          || (operation.personalSourceAssetId && !validAssetId(operation.personalSourceAssetId))
+        ) {
+          return fail("The clean plate, original composite, and any personal source must be known image assets.");
         }
         spread.artwork = {
           cleanPlateAssetId: operation.cleanPlateAssetId,
           sourceAssetId: operation.sourceAssetId,
-          separation: "inpainted-clean-plate",
+          personalSourceAssetId: operation.personalSourceAssetId,
+          separation: operation.separation ?? "inpainted-clean-plate",
         };
         changedIds.push(`${spread.id}:background`);
         continue;
@@ -845,6 +1165,12 @@ export class BookEngine {
       && elements.filter((element) => !element.assetId.startsWith("procedural:")).length < 2
     ) {
       return fail("A clean background requires at least two extracted foreground image layers in the same finished scene.");
+    }
+
+    const creationBrief = this.qualityLifecycle()?.creationBrief;
+    if (creationBrief?.bookType) {
+      const policyIssues = creationAssetPolicyIssues(nextDocument, creationBrief);
+      if (policyIssues.length > 0) return fail(policyIssues[0]);
     }
 
     nextDocument.revision += 1;
@@ -1131,11 +1457,16 @@ export class BookEngine {
         return result;
       }
       this.libraryState.documents.splice(createdIndex, 1);
+      const currentQuality = this.qualityLifecycle(record.created.id);
+      if (currentQuality) record.quality = clone(currentQuality);
+      delete this.qualityLifecycles()[record.created.id];
     } else if (this.libraryState.documents.some((book) => book.id === record.created.id)) {
       const result = this.conflict("undo_conflict", `Book ${record.created.id} already exists; redo did not replace it.`);
       this.requestResults.set(command.requestId, result);
       this.showAction(source, "error", result.summary);
       return result;
+    } else {
+      this.qualityLifecycles()[record.created.id] = clone(record.quality);
     }
 
     this.documentState = next;
@@ -1148,6 +1479,7 @@ export class BookEngine {
       direction: record.direction === "undo" ? "redo" : "undo",
       previous: record.direction === "undo" ? clone(next) : clone(record.previous),
       created: record.direction === "redo" ? clone(next) : clone(record.created),
+      quality: clone(record.quality),
     });
     const verb = record.direction === "undo" ? "removed the new book and restored" : "recreated";
     const summary = `${source === "agent" ? "Codex" : "You"} ${verb} ${next.title}`;

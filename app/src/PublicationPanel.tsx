@@ -16,6 +16,7 @@ import { deletePublication, getPublicationRecord, publishDocument, revokePublica
 import type { PublicationProgress, PublicationRecord } from "./publishingClient";
 import { recordDiagnostic } from "./diagnostics";
 import { listStoredProjectAssetIds } from "./projectArtifact";
+import type { QualityGateState } from "./qualityContract";
 import type { DocumentState } from "./types";
 
 type Busy = "publishing" | "revoking" | "deleting" | null;
@@ -23,6 +24,7 @@ type Busy = "publishing" | "revoking" | "deleting" | null;
 type Props = {
   document: DocumentState;
   record: PublicationRecord | null;
+  qualityGate: QualityGateState;
   onRecordChange: (record: PublicationRecord | null) => void;
   onClose: () => void;
 };
@@ -48,7 +50,7 @@ const STATUS_COPY = {
  * capability that authorises revoke and delete never leaves that client, so it
  * is never rendered, copied, or written into a URL here.
  */
-export function PublicationPanel({ document: documentState, record, onRecordChange, onClose }: Props) {
+export function PublicationPanel({ document: documentState, record, qualityGate, onRecordChange, onClose }: Props) {
   const [busy, setBusy] = useState<Busy>(null);
   const [progress, setProgress] = useState<PublicationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +67,21 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
   const stale = record?.status === "published"
     && typeof record.publishedRevision === "number"
     && record.publishedRevision !== documentState.revision;
+  const qualityCopy = qualityGate.status === "ready"
+    ? {
+        label: qualityGate.report?.warningCount ? "Ready with notes" : "Ready to publish",
+        detail: qualityGate.report?.warningCount
+          ? `${qualityGate.report.warningCount} warning${qualityGate.report.warningCount === 1 ? "" : "s"} recorded in the critique.`
+          : "The current revision passed structural and visual review.",
+      }
+    : qualityGate.status === "checking"
+      ? { label: "Checking quality", detail: qualityGate.message }
+      : qualityGate.status === "needs-user-input"
+        ? { label: "Needs source material", detail: qualityGate.message }
+        : qualityGate.status === "blocked"
+          ? { label: "Fix quality blockers", detail: qualityGate.message }
+          : { label: "Quality check needed", detail: qualityGate.message };
+  const qualityBlockers = qualityGate.report?.checks.filter((check) => check.outcome === "blocker") ?? [];
 
   // Only browser-local blobs are uploaded; bundled `/assets/...` references travel
   // inside the manifest. The count comes from the same collector the publishing
@@ -136,9 +153,10 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
   }, [busy, record?.status, confirmingDelete]);
 
   const publish = useCallback(() => {
+    if (!qualityGate.report?.publishAllowed) return;
     setProgress({ phase: "creating", completed: 0, total: 1 });
-    void run("publishing", () => publishDocument(documentState, setProgress), "Apertale could not publish this book.");
-  }, [documentState, run]);
+    void run("publishing", () => publishDocument(documentState, qualityGate.report, setProgress), "Apertale could not publish this book.");
+  }, [documentState, qualityGate.report, run]);
 
   const revoke = useCallback(() => {
     if (!record) return;
@@ -196,6 +214,28 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
               ? ` · revision ${documentState.revision}`
               : ` · ${localImageCount} image${localImageCount === 1 ? "" : "s"} · revision ${documentState.revision}`)}
           </span>
+
+          {status !== "published" && (
+            <div className={`publication-quality is-${qualityGate.status}`} role="status" aria-live="polite">
+              {qualityGate.status === "checking"
+                ? <SpinnerGap size={17} weight="bold" className="is-spinning" />
+                : qualityGate.status === "ready"
+                  ? <Check size={17} weight="bold" />
+                  : <WarningCircle size={17} weight="fill" />}
+              <div><strong>{qualityCopy.label}</strong><span>{qualityCopy.detail}</span></div>
+            </div>
+          )}
+
+          {status !== "published" && qualityBlockers.length > 0 && (
+            <ul className="publication-quality-findings" aria-label="Quality blockers">
+              {qualityBlockers.slice(0, 3).map((finding, index) => (
+                <li key={`${finding.criterionId}-${index}`}>
+                  <strong>{finding.message}</strong>
+                  {finding.suggestedPatch && <span>{finding.suggestedPatch}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
 
           {shareUrl && (
             <div className="publication-link">
@@ -258,7 +298,7 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
 
         <footer className="publication-actions">
           {status !== "published" && (
-            <button className="publication-primary" onClick={publish} disabled={Boolean(busy)}>
+            <button className="publication-primary" onClick={publish} disabled={Boolean(busy) || qualityGate.status !== "ready"}>
               {busy === "publishing" ? <SpinnerGap size={17} weight="bold" className="is-spinning" /> : <UploadSimple size={17} weight="bold" />}
               {busy === "publishing" ? "Publishing" : status === "revoked" ? "Publish again" : status === "publishing" ? "Resume publishing" : "Publish and share"}
             </button>

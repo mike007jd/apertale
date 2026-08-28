@@ -834,6 +834,39 @@ select:focus-visible {
   object-fit: cover;
 }
 
+.fallback-book.is-composited { display: block; }
+.fallback-book .fallback-composite-base {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.fallback-book .fallback-composite-layer {
+  position: absolute;
+  width: 22%;
+  height: auto;
+  max-height: 54%;
+  object-fit: contain;
+  transform-origin: center;
+  filter: drop-shadow(0 8px 9px rgba(21, 14, 9, .22));
+}
+.fallback-composite-copy {
+  position: absolute;
+  z-index: 80;
+  top: 9%;
+  left: 6%;
+  width: min(31%, 320px);
+  padding: clamp(10px, 1.4vw, 18px);
+  border-radius: 14px;
+  color: #fff8e8;
+  background: rgba(12, 14, 18, .62);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+  backdrop-filter: blur(5px);
+}
+.fallback-composite-copy p { margin: 0; font-size: clamp(10px, 1.2vw, 14px); line-height: 1.42; }
+.fallback-composite-copy > p:first-child { margin-bottom: 7px; font-size: 10px; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
+.fallback-composite-copy h2 { margin: 0 0 9px; font: 700 clamp(19px, 2.7vw, 38px)/1.02 "Iowan Old Style", Baskerville, Georgia, serif; }
+
 .page-arrow {
   position: absolute;
   z-index: 12;
@@ -1189,6 +1222,23 @@ select:focus-visible {
 .workshop-signal.is-connected { color: var(--ink); border-color: rgba(71, 168, 121, .4); }
 .workshop-signal.is-connected i { background: #47a879; box-shadow: 0 0 0 4px rgba(71, 168, 121, .14); }
 
+.workshop-readiness {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, #b47a24 32%, var(--line));
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: color-mix(in srgb, #8f5e18 76%, var(--ink));
+  background: color-mix(in srgb, #f2c879 12%, var(--surface));
+}
+
+.workshop-readiness > svg { margin-top: 1px; }
+.workshop-readiness div { display: grid; gap: 3px; min-width: 0; }
+.workshop-readiness strong { font-size: 11.5px; }
+.workshop-readiness span { color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+
 /* Creation is a full workspace, not a form modal. The live Three.js stage
    supplies the blank physical book while this layer supplies only controls. */
 .app-shell.is-creation-active .book-library,
@@ -1358,6 +1408,7 @@ select:focus-visible {
 }
 
 .workshop-segment { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.workshop-photo-use { grid-template-columns: 1fr 1fr; }
 .workshop-lengths { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
 .workshop-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 
@@ -2225,6 +2276,45 @@ select:focus-visible {
 }
 
 .publication-lede { display: block; max-width: 44ch; margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+
+.publication-quality {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.publication-quality > svg { margin-top: 1px; }
+.publication-quality > div { display: grid; gap: 3px; }
+.publication-quality strong { font-size: 12px; }
+.publication-quality span { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.publication-quality.is-ready { color: #2f7553; border-color: rgba(47, 117, 83, .3); }
+.publication-quality.is-checking { color: #386f94; border-color: rgba(56, 111, 148, .3); }
+.publication-quality.is-blocked,
+.publication-quality.is-needs-user-input { color: #9b6122; border-color: rgba(155, 97, 34, .32); }
+
+.publication-quality-findings {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.publication-quality-findings li {
+  display: grid;
+  gap: 2px;
+  border-left: 2px solid rgba(155, 97, 34, .45);
+  padding-left: 9px;
+}
+
+.publication-quality-findings strong { font-size: 11px; line-height: 1.35; }
+.publication-quality-findings span { color: var(--muted); font-size: 10.5px; line-height: 1.4; }
 
 .publication-link {
   margin-top: 18px;

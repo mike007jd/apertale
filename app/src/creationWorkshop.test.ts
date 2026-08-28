@@ -82,6 +82,28 @@ describe("creation workshop session", () => {
     expect(buildCreationWorkshopBrief(ideaOnly).sourceAssets).toEqual([]);
   });
 
+  it("maps the user's explicit photo treatment to one consistent book contract", () => {
+    const withPhoto = reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
+      type: "append-assets",
+      assets: [workshopAsset(1)],
+    });
+    const illustrated = buildCreationWorkshopBrief(reduceCreationWorkshop(withPhoto, {
+      type: "set-photo-use",
+      photoUse: "illustrated-keepsake",
+    }));
+    expect(illustrated).toMatchObject({ generatedFullSpreadCount: 6, preservedPhotoSpreadCount: 0 });
+    expect(illustrated.prompt).toContain("Book type: photo-led-keepsake");
+
+    const preserved = buildCreationWorkshopBrief(reduceCreationWorkshop(withPhoto, {
+      type: "set-photo-use",
+      photoUse: "preserve-originals",
+    }));
+    expect(preserved).toMatchObject({ generatedFullSpreadCount: 0, preservedPhotoSpreadCount: 6 });
+    expect(preserved.prompt).toContain("Book type: preserved-photo-album");
+    expect(preserved.prompt).toContain("preserved original-photo layout count 6");
+    expect(preserved.prompt).not.toContain("purpose-built full-spread artwork for every spread");
+  });
+
   it("keeps restored order when a new import reaches the reducer first", () => {
     const importedFirst = reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
       type: "append-assets",
