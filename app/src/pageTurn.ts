@@ -3,7 +3,7 @@ import type { TurnState } from "./types";
 
 export type TurnDirection = "forward" | "backward";
 export type TurnWaitState = Record<TurnDirection, boolean>;
-export type PageTurnSurface = "editor" | "shared";
+type PageTurnSurface = "editor" | "shared";
 
 export type PageTurnSessionDeps = {
   surface: PageTurnSurface;

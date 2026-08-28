@@ -2,7 +2,7 @@ import { getStoredAssetBlob, isStoredAssetId } from "./assetStore";
 import { listStoredProjectAssetIds } from "./projectArtifact";
 import type { DocumentState } from "./types";
 
-export type PublicationStatus = "draft" | "publishing" | "published" | "revoked";
+type PublicationStatus = "draft" | "publishing" | "published" | "revoked";
 
 export type PublicationRecord = {
   documentId: string;

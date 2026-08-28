@@ -19,7 +19,7 @@ export const CREATION_SOURCES = [
 export const MAX_WORKSHOP_ASSETS = 12;
 const WORKSHOP_ASSET_ORDER_KEY = "apertale:workshop-asset-order:v1";
 
-export type CreationStyle = (typeof CREATION_STYLES)[number];
+type CreationStyle = (typeof CREATION_STYLES)[number];
 export type WorkshopAsset = { id: string; name: string; url: string };
 
 export type CreationWorkshopState = {

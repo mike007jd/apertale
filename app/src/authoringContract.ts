@@ -10,7 +10,6 @@ if (manifestToolNames.length !== 6 || new Set(manifestToolNames).size !== manife
 export const SITE_TOOL_NAMES = Object.freeze(manifestToolNames) as readonly [string, string, string, string, string, string];
 
 export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", "authoring-guide"] as const;
-export type ProjectContextDetail = (typeof PROJECT_CONTEXT_DETAILS)[number];
 
 export const AUTHORING_GUIDE_DETAIL = "authoring-guide" as const;
 export const AUTHORING_GUIDE_ID = "apertale-authoring-guide" as const;
@@ -22,7 +21,7 @@ export const AUTHORING_GUIDE_FULL_SPREAD_COUNT = "exactly the agreed spread coun
 export const AUTHORING_GUIDE_PROVENANCE_COUNT = "1 cover + one per spread" as const;
 
 export const REQUIRED_GATE_IDS = ["inspect", "story", "plan", "art", "photo-truth", "layout", "evidence"] as const;
-export type RequiredGateId = (typeof REQUIRED_GATE_IDS)[number];
+type RequiredGateId = (typeof REQUIRED_GATE_IDS)[number];
 
 export const AUTHORING_HARD_GATE_IDS = [
   "inspect",
@@ -37,7 +36,7 @@ export const AUTHORING_HARD_GATE_IDS = [
   "provenance-revision",
   "verify",
 ] as const;
-export type AuthoringHardGateId = (typeof AUTHORING_HARD_GATE_IDS)[number];
+type AuthoringHardGateId = (typeof AUTHORING_HARD_GATE_IDS)[number];
 
 export const PHOTO_TRUTH_REQUIREMENT =
   "Use source photos as references and story truth. Do not use a raw uploaded photo as finished interior or right-page artwork unless the user explicitly requested a literal photo album.";

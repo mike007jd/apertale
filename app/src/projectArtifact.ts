@@ -1,7 +1,7 @@
 import { isStoredAssetId } from "./assetStore";
 import type { DocumentState } from "./types";
 
-export type ProjectAssetLocation =
+type ProjectAssetLocation =
   | { kind: "cover"; field: "coverAssetId" | "coverTextureUrl" }
   | { kind: "spread"; spreadId: string; field: "textureUrl" | "cleanPlateAssetId" | "sourceAssetId" }
   | { kind: "element"; spreadId: string; elementId: string; field: "assetId" | "frameAssetId"; frameIndex?: number };

@@ -133,7 +133,7 @@ export type MutationResult = {
   summary: string;
 };
 
-export type ConflictResult = {
+type ConflictResult = {
   ok: false;
   code: "revision_conflict" | "undo_conflict" | "not_found" | "locked" | "invalid";
   currentRevision: number;
@@ -142,7 +142,7 @@ export type ConflictResult = {
 
 export type DocumentResult = MutationResult | ConflictResult;
 
-export type LiftCommand = {
+type LiftCommand = {
   type: "lift";
   requestId: string;
   expectedRevision: number;
@@ -251,7 +251,7 @@ export type AnimateCommand = {
   motion: MotionSpec | null;
 };
 
-export type UndoCommand = {
+type UndoCommand = {
   type: "undo";
   requestId: string;
   expectedRevision: number;
