@@ -2,7 +2,7 @@
 
 Date: 2026-08-28  
 Target: local production build, then deployed public Site and share reader  
-Status: local implementation and Live Verify passed; production release pending
+Status: complete — merged, deployed, and production Live Verify passed
 
 ## Workflow inventory
 
@@ -14,8 +14,8 @@ Status: local implementation and Live Verify passed; production release pending
 | LV-04 | Short landscape side-browser shelf | Header and actions remain visible; the shelf itself scrolls vertically; no page-level clipping | PASS — evidence 03 at 760×432; page overflow is 0 and shelf reached `scrollTop 30 / max 30` |
 | LV-05 | Mobile portrait shelf and reader | Cards remain usable, controls fit, and reader content remains reachable | PASS — evidence 02 and 04 at 390×844; no horizontal or page-level overflow; reader navigation reached spread 4/6 |
 | LV-06 | Site Tools authoring preflight | Six tools remain discoverable; create is rejected before `authoring-guide` and the guide becomes available | PASS — genuine in-app host discovered exactly 6 tools; preflight bypass rejected; book id and revision 9 stayed unchanged; guide returned 11 hard gates |
-| LV-07 | Public Site smoke | Anonymous visitor can load the Site over HTTPS | Not run |
-| LV-08 | Public share reader smoke | Anonymous visitor can load the published book and navigate it | Not run |
+| LV-07 | Public Site smoke | Anonymous visitor can load the Site over HTTPS | PASS — Sites version 13; browser `GET /` 200 with required WebMCP headers; evidence 05 shows the deployed personal-first shelf |
+| LV-08 | Public share reader smoke | Anonymous visitor can load the published book and navigate it | PASS — retained Starlight link returns 200, exposes no Publish/Create controls, turns to spread 2/6, and switches to Night; evidence 06 |
 
 ## Provider implementation record
 
@@ -32,12 +32,24 @@ Status: local implementation and Live Verify passed; production release pending
 - The creation workshop remains deliberately light: mode, spread count, visual style, one summary line, and one primary handoff action.
 - No new critical or high-severity code-review findings remain in this change set.
 
+## Release
+
+- Pull request: <https://github.com/mike007jd/apertale/pull/12>
+- Merge commit: `7720ca42582884d6a844c7b32ed51e9b21e128d3`
+- GitHub repository visibility: private
+- Sites deployment: public version 13, succeeded
+- Public Site: <https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/>
+- Public Starlight reader: <https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/share/EuyDfVjurmjTsnZxAHNmmZJ-8eYCaB-Ofn4Eb84wK_U>
+- Local and remote feature branches from PR #12 were removed after merge.
+
 ## Automated evidence
 
 - Full Vitest suite: 62 passed across 10 files.
 - Built Sites contract suite: 14 passed.
 - TypeScript typecheck and production build: passed.
 - `git diff --check`: passed.
+- `npm run verify:deployment -- https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site`: passed for Apertale 1.1.0, exact six tools, `Origin-Agent-Cluster: ?1`, and `Permissions-Policy: tools=(self)`.
+- Production in-app host: exact six Site Tools discovered; pre-guide create rejected; active Starlight id and revision 15 remained unchanged; authoring guide returned the required 1 cover, one full-spread image per spread, and 11 hard gates.
 - `npm run audit:cutouts`: unchanged known separate asset gate — 16 v3 assets pass while 66 referenced legacy v2 cutouts fail transparent-padding/edge quality. No image asset changed in this closeout; see `app/qa/RELEASE_GATES_2026-08-27.md` and the prior final-closeout ledger.
 
 ## Evidence
@@ -46,3 +58,5 @@ Status: local implementation and Live Verify passed; production release pending
 - `evidence/02-your-books-390x844.png`
 - `evidence/03-your-books-760x432-scrolled.png`
 - `evidence/04-reader-390x844-spread-4.png`
+- `evidence/05-production-your-books-1280x720.png`
+- `evidence/06-production-starlight-night-spread-2.png`
