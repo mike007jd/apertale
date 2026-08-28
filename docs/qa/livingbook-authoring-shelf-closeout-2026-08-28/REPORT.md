@@ -52,6 +52,41 @@ Status: complete — merged, deployed, and production Live Verify passed
 - Production in-app host: exact six Site Tools discovered; pre-guide create rejected; active Starlight id and revision 15 remained unchanged; authoring guide returned the required 1 cover, one full-spread image per spread, and 11 hard gates.
 - `npm run audit:cutouts`: unchanged known separate asset gate — 16 v3 assets pass while 66 referenced legacy v2 cutouts fail transparent-padding/edge quality. No image asset changed in this closeout; see `app/qa/RELEASE_GATES_2026-08-27.md` and the prior final-closeout ledger.
 
+## Public-share page-turn corrective release
+
+A production follow-up found that the anonymous `/share/...` reader committed
+the next spread immediately and always passed `turn={null}` to the 3D book.
+The public work therefore changed content without the physical leaf turn used
+by the main reader.
+
+- Claude Opus 5 implemented the public-reader motion controller and direct UI
+  wiring. Cursor CLI with Grok 4.6 High hardened navigation, gesture,
+  reduced-motion, and disposal behavior. Codex independently reviewed the
+  combined implementation through a final GO verdict.
+- The public reader now captures the current and destination spreads, animates
+  the 3D leaf, commits the new spread only after settlement, and locks both
+  navigation surfaces while the turn is in flight.
+- Per-direction readiness keeps a turn unavailable until its adjacent artwork
+  is decoded. Static fallback and reduced-motion readers navigate immediately
+  instead of waiting for an invisible animation.
+- Review fixes cover React Strict Mode effect replay, stale animation frames,
+  loading-canvas gesture bypass, slow-network blank leaves, and readiness
+  invalidation after a committed turn.
+- Automated gates: TypeScript passed; 79 Vitest tests passed across 11 files;
+  14 built Sites contract tests passed; production build and `git diff --check`
+  passed.
+- Production Live Verify on the retained Starlight link: at 80 ms after both a
+  forward and backward click, the old spread remained announced and both page
+  controls were disabled. After settlement, the destination spread was
+  announced, backward navigation re-enabled, and diagnostics recorded
+  `page-turn:capture` with `role: shared-spread-rt` plus a shared-surface turn
+  summary.
+- Corrective PR: <https://github.com/mike007jd/apertale/pull/14>; merge commit
+  `8d2284344d09fd96f199c303f1e7c1572a991bc3`.
+- Sites version 14; deployment
+  `appgdep_6a9125b8597081918c6485e70537233d`; production HTTP contract and the
+  exact six Site Tools passed again.
+
 ## Evidence
 
 - `evidence/01-first-visit-explore-1280x720.png`
