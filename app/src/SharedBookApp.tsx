@@ -99,7 +99,7 @@ export function SharedBookApp() {
   };
 
   return (
-    <main className="app-shell is-preview">
+    <main className="app-shell is-preview is-shared-reader">
       <header className="topbar">
         <span className="wordmark" aria-label="Apertale shared book">Apertale</span>
         <div className="topbar-actions">
