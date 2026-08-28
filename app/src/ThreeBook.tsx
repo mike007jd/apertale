@@ -15,6 +15,7 @@ type Props = {
   onHover: (elementId: string | null) => void;
   onMoveElement: (elementId: string, x: number, y: number) => void;
   onPageGesture: (direction: "forward" | "backward", phase: "start" | "move" | "end", amount: number) => void;
+  onPageTurnReady?: (direction: "forward" | "backward", ready: boolean) => void;
   onLoading: (documentId: string) => void;
   onReady: (documentId: string) => void;
   onFailure: () => void;
@@ -511,10 +512,10 @@ function buildSceneElement(
   };
 }
 
-export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure }: Props) {
+export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const propsRef = useRef({ snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure });
-  propsRef.current = { snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onLoading, onReady, onFailure };
+  const propsRef = useRef({ snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onFailure });
+  propsRef.current = { snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onFailure };
   const sceneStructureKey = JSON.stringify({
     id: snapshot.document.id,
     mode,
@@ -1028,6 +1029,11 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     let raf = 0;
     let lastSpreadId = "";
     let lastPrefetchedSpreadIndex = -1;
+    const lastPageTurnReadiness: Record<"forward" | "backward", boolean | null> = {
+      forward: null,
+      backward: null,
+    };
+    let lastReadinessSpreadIndex = -1;
     const dayPaperColor = new THREE.Color(0xfffbef);
     const nightPaperColor = new THREE.Color(0xe6dccb);
     const dayPageBlockColor = new THREE.Color(0xe8dcc4);
@@ -1052,12 +1058,28 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       const { snapshot: current, turn: currentTurn } = propsRef.current;
       const spread = current.document.spreads[current.session.currentSpreadIndex];
       const pagePair = pagePairs.get(spread.id);
+      const previous = current.document.spreads[current.session.currentSpreadIndex - 1];
+      const next = current.document.spreads[current.session.currentSpreadIndex + 1];
+      if (lastReadinessSpreadIndex !== current.session.currentSpreadIndex) {
+        lastReadinessSpreadIndex = current.session.currentSpreadIndex;
+        lastPageTurnReadiness.backward = null;
+        lastPageTurnReadiness.forward = null;
+      }
       if (pagePair && lastPrefetchedSpreadIndex !== current.session.currentSpreadIndex) {
         lastPrefetchedSpreadIndex = current.session.currentSpreadIndex;
-        const previous = current.document.spreads[current.session.currentSpreadIndex - 1];
-        const next = current.document.spreads[current.session.currentSpreadIndex + 1];
         if (previous) ensureSpreadLoaded(previous);
         if (next) ensureSpreadLoaded(next);
+      }
+      if (pagePair) {
+        const readiness = {
+          backward: !previous || pagePairs.has(previous.id),
+          forward: !next || pagePairs.has(next.id),
+        };
+        (["backward", "forward"] as const).forEach((direction) => {
+          if (lastPageTurnReadiness[direction] === readiness[direction]) return;
+          lastPageTurnReadiness[direction] = readiness[direction];
+          propsRef.current.onPageTurnReady?.(direction, readiness[direction]);
+        });
       }
 
       const night = current.session.sceneThemeId === "midnight-desk";
