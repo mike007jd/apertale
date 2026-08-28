@@ -1,6 +1,8 @@
 import { createBookShareApi } from "./bookShareApi.js";
 import { D1BookRepository } from "./d1BookRepository.js";
 
+const APP_SHELL_PATH = "/app-shell.html";
+
 function withWebMcpDocumentPolicy(response) {
   const headers = new Headers(response.headers);
   headers.set("Origin-Agent-Cluster", "?1");
@@ -61,7 +63,7 @@ export async function handleRequest(request, env, options = {}) {
       }));
     }
     const indexUrl = new URL(request.url);
-    indexUrl.pathname = "/index.html";
+    indexUrl.pathname = APP_SHELL_PATH;
     indexUrl.search = "";
     return withWebMcpDocumentPolicy(await env.ASSETS.fetch(new Request(indexUrl, request)));
   }
@@ -74,7 +76,7 @@ export async function handleRequest(request, env, options = {}) {
   }
 
   const indexUrl = new URL(request.url);
-  indexUrl.pathname = "/index.html";
+  indexUrl.pathname = APP_SHELL_PATH;
   indexUrl.search = "";
   return withWebMcpDocumentPolicy(await env.ASSETS.fetch(new Request(indexUrl, request)));
 }
