@@ -1,5 +1,7 @@
 # Apertale release gates — checked 2026-08-28 NZST
 
+> Historical snapshot for commit `9023995`. Use `npm run verify:release` and [`../../docs/CHALLENGE_READINESS.md`](../../docs/CHALLENGE_READINESS.md) for the current tree.
+
 ## Current private tree
 
 - `npm run typecheck` — passed.

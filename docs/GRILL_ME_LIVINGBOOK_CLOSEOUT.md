@@ -1,10 +1,10 @@
 # Apertale / LivingBook — GRILL ME 收官产品基线
 
-> 状态：后续收官任务的单一产品基线
+> 状态：历史决策记录；当前实现与交付状态以 [`PRODUCT_ARCHITECTURE.md`](PRODUCT_ARCHITECTURE.md) 和 [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md) 为准
 >
 > 核对日期：2026-08-28 NZST
 >
-> 适用范围：创作入口、照片 handoff、D1/R2 持久化、成品分享、首屏性能与比赛提交。与旧文档冲突时，以本文件为准；样书内容与视觉资产仍以现有样书规格和资产来源文档为准。
+> 保留范围：创作入口、照片 handoff、D1/R2 capability、撤销/删除顺序、隐私边界和首屏性能的决策来源。
 
 ## 1. 一句话结论
 
@@ -112,14 +112,13 @@ Apertale 让用户在自己的 ChatGPT/Codex 对话中完成理解、故事设�
 - 核心成功路径测试覆盖草稿、上传、发布、匿名读取和图片读取；关键失败路径证明撤销后 manifest、资产和 HTML shell 都 fail closed。
 - 首屏 reader 卸载、Three.js 延迟加载、当前 spread 优先、相邻 spread 预取和独立浏览器创作说明。
 
-### 尚未验证或尚未接入
+### 该检查点之后的结果与剩余边界
 
-- 当前 React 编辑器还没有调用发布 API，也没有把 IndexedDB Blob 批量交给 R2；确切接入点是 `BookEngine.getSnapshot().document`、`assetStore` 的 Blob 读取能力和 workshop/reader 的发布控件。不要在没有审查并行任务 diff 前修改这些文件。
-- D1/R2 尚未在真实 Sites 版本中 provision、迁移或跑 live CRUD；本地 Node 测试不能替代平台 binding 验收。
-- `/share/:token` 的本地 reader 已复用现有 ThreeBook，但真实公开域名的匿名访问、R2 Range/缓存行为和撤销传播尚待 Sites E2E。
+- React 编辑器已经接入发布、撤销、复制分享链接和永久删除；发布只上传当前 manifest 引用的 IndexedDB Blob。
+- D1/R2 的真实 Sites CRUD、匿名 reader、撤销和删除生命周期已经通过生产验证；证据见 [`qa/livingbook-final-closeout-2026-08-28/REPORT.md`](qa/livingbook-final-closeout-2026-08-28/REPORT.md)。
 - 当前 capability-only 匿名创建没有账号恢复和全局滥用/配额控制。公开写入前至少要完成速率/总量保护或明确采用可验证的创作者身份；每书大小限制不足以抵御批量滥用。
 - “Open in ChatGPT”通用深链待官方契约确认；当前 UI 只说明正确操作，不生成未验证协议。
-- 两条 Site Tools 真实 E2E、公开 repo、公开 live URL、带音频且少于 3 分钟的 YouTube 视频仍是外部门槛。
+- 两条 Site Tools E2E 和公开 live URL 已通过；公开 repo、带音频且少于 3 分钟的 YouTube 视频与 Devpost 仍是外部门槛。
 
 ## 4. 比赛硬门槛
 

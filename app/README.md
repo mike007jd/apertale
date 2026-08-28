@@ -9,7 +9,7 @@ WebMCP is agent-neutral, not universally callable. Any Agent whose browser or ho
 ## Current product slice
 
 - A clean first-run editorial library with five independent generated hardcovers laid directly on the page, an Apertale Field Guide, and a shared **Create Your Own** blank-book workshop on both the library and reader surfaces.
-- The workshop keeps only book length and visual direction on the open 3D pages. It copies an Agent-ready starter; the user supplies the story, audience, and photos in their Agent conversation instead of completing a duplicate site form. A quiet **Image handoff** fallback creates browser-local assets only when the current host cannot transfer media through WebMCP.
+- The workshop keeps authoring mode, book length, visual direction, and an ordered source-photo handoff on the open 3D pages. It copies an Agent-ready starter; the user supplies the story and audience in their Agent conversation instead of completing a duplicate site form. A quiet **Image handoff** fallback creates browser-local assets only when the current host cannot transfer media through WebMCP.
 - Real Three.js/WebGL book scene with curved pages, cover depth, shadows, two-sided textures, pointer-driven page turns, and freeze-to-texture composition sampling so illustrated layers remain visible during forward and backward turns.
 - `Paper Atelier` Day and `Midnight Desk` Night presentations over one document.
 - Declarative hover, focus, reveal, and motion behavior drawn from closed reviewed presets.
@@ -46,17 +46,19 @@ npm run typecheck
 npm test
 npm run test:sites
 npm run audit:cutouts
-npm run optimize:assets
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
 `npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 66 legacy v2 layers need regeneration rather than padding-only repair. The code, unit, build, and Sites checks remain independently green.
 
+`npm run optimize:assets` is a maintenance command that rewrites checked-in runtime images. Use it only for a deliberate asset-optimization batch and review the generated diff.
+
 The production build is emitted as a host-portable bundle:
 
-- `dist/client/index.html`
+- `dist/client/app-shell`
 - `dist/server/index.js`
 - `dist/.openai/hosting.json`
+- `dist/.openai/drizzle/0001_living_book_sharing.sql`
 
 ## Architecture map
 
@@ -65,6 +67,9 @@ The production build is emitted as a host-portable bundle:
 - `src/imageOptimizer.ts` — browser-local resize/compression with alpha-aware PNG/JPEG output and a 1.5 MB storage ceiling.
 - `src/assetStore.ts` — IndexedDB Blob persistence, optimization metadata, and safe object URL resolution.
 - `src/bookEngine.ts` — authoritative document/session state, persistence, revision checks, idempotency, and exact undo.
+- `src/pageTurn.ts` — shared editor/reader page-turn session lifecycle and physical-page geometry helpers.
+- `src/creationWorkshop.ts` — creation setup state, ordered local-asset restoration, and brief materialization.
+- `src/projectArtifact.ts` — location-aware traversal of every asset-bearing project field.
 - `src/webmcp.ts` — WebMCP registrations backed by the shared command engine.
 - `src/App.tsx` — accessible React editor, knowledge cards, themes, selection tools, outline, and responsive controls.
 - `src/sampleBook.ts` — independent Sample Book catalog and their initial spreads.
@@ -84,4 +89,4 @@ Checked against current primary sources on 2026-08-27:
 - Renderer: `three@0.185.1`
 - UI/runtime: `react@19.2.0`, `vite@6.4.3`
 
-Public hosting remains intentionally private until explicit republish approval and final judge-facing verification. No owner OpenAI API key is embedded.
+The public Site and anonymous share reader were live-verified on 2026-08-28. Treat any republish as an explicit release action. No owner OpenAI API key is embedded.

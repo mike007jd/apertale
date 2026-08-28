@@ -45,4 +45,4 @@ The Day and Night reference images under `docs/assets/` were supplied by the use
 
 ## User imports
 
-User-imported PNG, JPEG, and WebP source files up to 12 MB are decoded and optimized in the browser, then stored at no more than 1.5 MB in that user's IndexedDB. Transparent sources preserve PNG alpha; opaque sources may be stored as JPEG. Apertale does not upload or relicense them, and they are not part of the repository or production bundle.
+User-imported PNG, JPEG, and WebP source files up to 12 MB are decoded and optimized in the browser, then stored at no more than 1.5 MB in that user's IndexedDB. Transparent sources preserve PNG alpha; opaque sources may be stored as JPEG. Draft assets remain local. When the user explicitly publishes a book, Apertale uploads only the referenced assets to that book's R2 namespace and writes its manifest to D1; it does not relicense the files or add them to the repository or static production bundle.
