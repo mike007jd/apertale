@@ -156,7 +156,7 @@ describe("WebMCP registration", () => {
       signal: new AbortController().signal,
     })));
     expect(opened).toMatchObject({ ok: true, bookId: "apertale-atlas-of-wonders" });
-    expect(bookEngine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "ChatGPT opened Atlas of Living Wonders" });
+    expect(bookEngine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "Codex opened Atlas of Living Wonders" });
     const duplicateOpen = await tool("manage_book").execute({ requestId: "open-atlas", action: "open", bookId: "apertale-lantern-garden" }, {
       signal: new AbortController().signal,
     });

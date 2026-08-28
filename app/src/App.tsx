@@ -930,9 +930,9 @@ export function App() {
             <div className="library-intro">
               <p>Your living library</p>
               <h1 id="library-title">Open a world.<br />Then make one yours.</h1>
-              <span>Browse here in any browser. To create with your own plan usage, open this Site in the ChatGPT desktop built-in browser and use the conversation beside it; Safari does not include that composer.</span>
+              <span>Browse anywhere. Create in Codex (ChatGPT desktop) with your own plan.</span>
               <div className="library-actions">
-                <button className="create-codex-button" onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create with ChatGPT</button>
+                <button className="create-codex-button" onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create with Codex</button>
                 <button className="guide-book-button" onClick={() => openBookFromLibrary("apertale-field-guide")} onPointerEnter={() => prewarmReader("apertale-field-guide")} onFocus={() => prewarmReader("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={18} /> Read the Guide Book</button>
               </div>
               <p className="library-scroll-cue" aria-hidden="true">Swipe for all {library.books.length} books<ArrowRight size={14} weight="bold" /></p>
@@ -1183,7 +1183,7 @@ export function App() {
           </div>
           <button className="agent-prompt" onClick={openCodexGuide}>
             <Sparkle size={17} weight="fill" />
-            <span>Create with ChatGPT</span>
+            <span>Create with Codex</span>
           </button>
           <div className="page-progress"><strong>{snapshot.session.currentSpreadIndex + 1}</strong><span>/</span>{snapshot.document.spreads.length}</div>
         </footer>
@@ -1250,7 +1250,7 @@ export function App() {
               <div className={`workbench-status ${webMcpAvailable ? "is-connected" : ""}`}>
                 <i /><span><strong>{webMcpAvailable ? "WebMCP connected" : "WebMCP-ready page"}</strong><small>{webMcpAvailable ? "Your Agent can operate this open book." : "Open this page in a WebMCP-capable Agent browser."}</small></span>
               </div>
-              <p className="workshop-agent-boundary">This panel is a handoff, not an embedded AI chat. Continue in the ChatGPT desktop conversation beside this Site.</p>
+              <p className="workshop-agent-boundary">Continue in Codex (ChatGPT desktop) beside this Site.</p>
               <div className="workshop-handoff-copy">
                 <p>Continue in your Agent</p>
                 <h3>Bring the idea.<br />Bring the pictures.</h3>

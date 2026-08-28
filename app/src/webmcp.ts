@@ -127,7 +127,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: "get_project_context",
         title: "Get project context",
-        description: "Inspect the live Apertale shelf, open book, current spread, selected element, reusable browser-local assets, presentation theme, capabilities, and document revision before editing. Apertale is the shared canvas; planning and generation stay in the user's current Codex/ChatGPT conversation.",
+        description: "Inspect the live Apertale shelf, open book, current spread, selected element, reusable browser-local assets, presentation theme, capabilities, and document revision before editing. Apertale is the shared canvas; planning and generation stay in the user's Codex conversation in ChatGPT desktop.",
         inputSchema: {
           type: "object",
           properties: {

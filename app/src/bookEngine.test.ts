@@ -156,14 +156,14 @@ describe("BookEngine document contract", () => {
   it("keeps Agent book and Preview actions visibly attributed until their own timeout", () => {
     const engine = cityEngine();
     engine.openBook("apertale-atlas-of-wonders", "agent");
-    expect(engine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "ChatGPT opened Atlas of Living Wonders" });
+    expect(engine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "Codex opened Atlas of Living Wonders" });
 
     vi.advanceTimersByTime(1600);
     engine.setPreview(true, "agent");
-    expect(engine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "ChatGPT entered Preview" });
+    expect(engine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "Codex entered Preview" });
 
     vi.advanceTimersByTime(1600);
-    expect(engine.getSnapshot().lastAction).toMatchObject({ summary: "ChatGPT entered Preview" });
+    expect(engine.getSnapshot().lastAction).toMatchObject({ summary: "Codex entered Preview" });
     vi.advanceTimersByTime(1600);
     expect(engine.getSnapshot().lastAction).toBeNull();
   });

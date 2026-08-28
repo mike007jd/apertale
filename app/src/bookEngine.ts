@@ -396,7 +396,7 @@ export class BookEngine {
     this.requestResults.clear();
     this.undoRecords.clear();
     this.persist();
-    this.showAction(source, "success", `${source === "agent" ? "ChatGPT opened" : "Opened"} ${nextDocument.title}`);
+    this.showAction(source, "success", `${source === "agent" ? "Codex opened" : "Opened"} ${nextDocument.title}`);
     return true;
   }
 
@@ -413,7 +413,7 @@ export class BookEngine {
 
   setTheme(theme: ThemeId, source: CommandSource = "human") {
     this.sessionState = { ...this.sessionState, sceneThemeId: theme };
-    this.showAction(source, "success", `${source === "agent" ? "ChatGPT switched" : "Switched"} to ${theme === "paper-atelier" ? "Day" : "Night"}`);
+    this.showAction(source, "success", `${source === "agent" ? "Codex switched" : "Switched"} to ${theme === "paper-atelier" ? "Day" : "Night"}`);
     return { ok: true as const, theme, summary: `Scene theme is now ${theme}.` };
   }
 
@@ -425,7 +425,7 @@ export class BookEngine {
 
   setPreview(preview: boolean, source?: CommandSource) {
     this.sessionState = { ...this.sessionState, preview, selectionId: preview ? null : this.sessionState.selectionId };
-    if (source) this.showAction(source, "success", `${source === "agent" ? "ChatGPT " : ""}${preview ? "entered" : "exited"} Preview`);
+    if (source) this.showAction(source, "success", `${source === "agent" ? "Codex " : ""}${preview ? "entered" : "exited"} Preview`);
     else this.emit();
   }
 
@@ -449,7 +449,7 @@ export class BookEngine {
       return result;
     }
 
-    this.showAction(source, "pending", `${source === "agent" ? "ChatGPT is working" : "Applying change"}…`, "elementId" in command ? command.elementId : undefined);
+    this.showAction(source, "pending", `${source === "agent" ? "Codex is working" : "Applying change"}…`, "elementId" in command ? command.elementId : undefined);
 
     if (command.type === "undo") return this.applyUndo(command, source);
 
@@ -519,7 +519,7 @@ export class BookEngine {
       after: Object.fromEntries(fields.map((field) => [field, clone(nextElement[field])])) as Partial<BookElement>,
     });
 
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} ${verb} ${nextElement.label}`;
+    const summary = `${source === "agent" ? "Codex" : "You"} ${verb} ${nextElement.label}`;
     const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds: [nextElement.id], undoToken, summary };
     this.requestResults.set(command.requestId, result);
     this.persist();
@@ -576,7 +576,7 @@ export class BookEngine {
       previous: before,
       created: clone(nextDocument),
     });
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} created ${title}`;
+    const summary = `${source === "agent" ? "Codex" : "You"} created ${title}`;
     const result: MutationResult = {
       ok: true,
       revision: nextDocument.revision,
@@ -613,7 +613,7 @@ export class BookEngine {
       before,
       after: command.assetId,
     });
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} set the cover for ${nextDocument.title}`;
+    const summary = `${source === "agent" ? "Codex" : "You"} set the cover for ${nextDocument.title}`;
     const result: MutationResult = {
       ok: true,
       revision: nextDocument.revision,
@@ -664,7 +664,7 @@ export class BookEngine {
     const undoToken = crypto.randomUUID();
     const after = Object.fromEntries(fields.map((field) => [field, clone(spread[field])])) as Partial<Pick<Spread, SpreadField>>;
     this.undoRecords.set(undoToken, { operation: "compose", token: undoToken, spreadId: spread.id, fields, before, after });
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} composed ${spread.title}`;
+    const summary = `${source === "agent" ? "Codex" : "You"} composed ${spread.title}`;
     const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds: [spread.id], undoToken, summary };
     this.requestResults.set(command.requestId, result);
     this.persist();
@@ -884,7 +884,7 @@ export class BookEngine {
         : { before: clone(beforeArtwork), after: clone(afterArtwork) },
     });
     const uniqueChangedIds = [...new Set(changedIds)];
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} patched ${uniqueChangedIds.length} scene ${uniqueChangedIds.length === 1 ? "element" : "elements"}`;
+    const summary = `${source === "agent" ? "Codex" : "You"} patched ${uniqueChangedIds.length} scene ${uniqueChangedIds.length === 1 ? "element" : "elements"}`;
     const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds: uniqueChangedIds, undoToken, summary };
     this.requestResults.set(command.requestId, result);
     this.persist();
@@ -957,7 +957,7 @@ export class BookEngine {
       before: Object.fromEntries(record.fields.map((field) => [field, clone(current[field])])) as Partial<BookElement>,
       after: Object.fromEntries(record.fields.map((field) => [field, clone(restored[field])])) as Partial<BookElement>,
     });
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} undid a change to ${restored.label}`;
+    const summary = `${source === "agent" ? "Codex" : "You"} undid a change to ${restored.label}`;
     const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds: [restored.id], undoToken: token, summary };
     this.requestResults.set(command.requestId, result);
     this.persist();
@@ -1060,7 +1060,7 @@ export class BookEngine {
       ...record.elements.map((change) => change.elementId),
       ...(record.artwork ? [`${record.spreadId}:background`] : []),
     ];
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} undid a scene patch`;
+    const summary = `${source === "agent" ? "Codex" : "You"} undid a scene patch`;
     const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds, undoToken: token, summary };
     this.requestResults.set(command.requestId, result);
     this.persist();
@@ -1094,7 +1094,7 @@ export class BookEngine {
       before: record.after,
       after: record.before,
     });
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} restored the previous cover for ${nextDocument.title}`;
+    const summary = `${source === "agent" ? "Codex" : "You"} restored the previous cover for ${nextDocument.title}`;
     const result: MutationResult = {
       ok: true,
       revision: nextDocument.revision,
@@ -1153,7 +1153,7 @@ export class BookEngine {
       created: record.direction === "redo" ? clone(next) : clone(record.created),
     });
     const verb = record.direction === "undo" ? "removed the new book and restored" : "recreated";
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} ${verb} ${next.title}`;
+    const summary = `${source === "agent" ? "Codex" : "You"} ${verb} ${next.title}`;
     const result: MutationResult = {
       ok: true,
       revision: next.revision,
@@ -1200,7 +1200,7 @@ export class BookEngine {
       before: Object.fromEntries(record.fields.map((field) => [field, clone(currentSpread[field])])) as Partial<Pick<Spread, SpreadField>>,
       after: Object.fromEntries(record.fields.map((field) => [field, clone(restoredSpread[field])])) as Partial<Pick<Spread, SpreadField>>,
     });
-    const summary = `${source === "agent" ? "ChatGPT" : "You"} undid composition on ${restoredSpread.title}`;
+    const summary = `${source === "agent" ? "Codex" : "You"} undid composition on ${restoredSpread.title}`;
     const result: MutationResult = {
       ok: true,
       revision: nextDocument.revision,
