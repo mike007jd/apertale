@@ -1,6 +1,8 @@
 import React, { lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { exposeDiagnostics } from "./diagnostics";
+// Scales first, so styles.css can only consume them and never redefine them.
+import "./design/tokens.generated.css";
 import "./styles.css";
 
 exposeDiagnostics();

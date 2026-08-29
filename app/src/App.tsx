@@ -1218,7 +1218,12 @@ export function App() {
                       {openingBook?.id === book.id && <span className="library-opening-badge" aria-hidden="true"><SpinnerGap size={15} weight="bold" /> Opening</span>}
                     </span>
                     <span className="library-card-copy">
-                      <small>{book.id === "apertale-field-guide" ? "Start here" : book.sample ? "Curated demo" : "Your book"} · {book.spreadCount} {book.spreadCount === 1 ? "spread" : "spreads"}</small>
+                      {/* The shelf tab already says whether these are curated
+                          samples or the reader's own books, so repeating it on
+                          every card spent the label's width on nothing. Only
+                          the Field Guide earns a prefix, because "start here"
+                          is a call to action rather than a category. */}
+                      <small>{book.id === "apertale-field-guide" ? "Start here · " : ""}{book.spreadCount} {book.spreadCount === 1 ? "spread" : "spreads"}</small>
                       <strong>{book.title}</strong>
                     </span>
                   </button>
