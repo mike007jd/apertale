@@ -40,7 +40,7 @@ import {
   reduceCreationWorkshop,
   restoreCreationWorkshopAssets,
 } from "./creationWorkshop";
-import { AnimatePresence } from "motion/react";
+import { AnimatePresence, MotionConfig } from "motion/react";
 import { smootherstep } from "./design/curves";
 import { durationMs } from "./design/tokens.generated";
 import { announce, supportsWebGl2 } from "./readerShell";
@@ -1053,12 +1053,10 @@ export function App() {
    * had to be saved to disk and picked back up through a file dialog.
    */
   // The importer closes over state that changes on every render, so the handler
-  // is held in a ref. Without this the effect below needs no dependency array,
-  // which detaches and reattaches a window listener on every single render.
+  // is held in a ref. A layout effect refreshes it after a render commits but
+  // before the browser can dispatch a paste event; a passive effect leaves a
+  // stale-callback window, while a render-time write can leak discarded state.
   const pasteImporter = useRef<(files: FileList) => void>(() => undefined);
-  useEffect(() => {
-    pasteImporter.current = (files: FileList) => { void importWorkshopPhotos(files); };
-  });
 
   useEffect(() => {
     if (!showCreateGuide) return undefined;
@@ -1076,7 +1074,7 @@ export function App() {
   useEffect(() => subscribeToImageHandoff((request) => {
     setHandoffRequest(request);
     if (!request) return;
-    recordDiagnostic("handoff:requested", { requestId: request.requestId, expectedCount: request.expectedCount });
+    recordDiagnostic("handoff:requested", { requestId: request.requestId });
     setShowCreateGuide(true);
     // Photos live behind a mode the reader has to pick first, which makes no
     // sense when the Agent has just asked for one.
@@ -1123,6 +1121,9 @@ export function App() {
       setAssetImporting(false);
     }
   };
+  useLayoutEffect(() => {
+    pasteImporter.current = (files: FileList) => { void importWorkshopPhotos(files); };
+  });
 
   const moveWorkshopAsset = (index: number, direction: -1 | 1) => {
     dispatchCreationWorkshop({ type: "move-asset", index, direction });
@@ -1180,7 +1181,8 @@ export function App() {
   };
 
   return (
-    <main className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""}`}>
+    <MotionConfig reducedMotion={reducedMotion ? "always" : "never"}>
+      <main className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""}`}>
       <header className="topbar" hidden={showLibrary || showCreateGuide} aria-hidden={showElementAgentGuide || undefined}>
         {!snapshot.session.preview && <button className="library-button" onClick={openLibrary} aria-label="Open book library"><Books size={18} /> <span>Books</span></button>}
         <button className="wordmark" onClick={() => { bookEngine.setPreview(false); openLibrary(); }} aria-label="Open book library">Apertale</button>
@@ -1808,6 +1810,7 @@ export function App() {
             : []),
         )}
       </div>}
-    </main>
+      </main>
+    </MotionConfig>
   );
 }

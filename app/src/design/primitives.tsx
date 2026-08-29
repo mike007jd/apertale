@@ -26,7 +26,7 @@
  * would have unmounted it) and shared-element travel. Anything a `:hover` rule
  * can already say belongs in the stylesheet, not in a component here.
  */
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import type { HTMLMotionProps } from "motion/react";
 import type { ReactNode } from "react";
 import { durationMs, easePoints, motion as motionTokens } from "./tokens.generated";
@@ -66,7 +66,7 @@ export function Switch<T extends string>({
   groupLabel: string;
   disabled?: boolean;
 }) {
-  const reduced = useReducedMotion();
+  const reduced = useReducedMotionConfig();
   return (
     <div className={className} role="group" aria-label={groupLabel}>
       {options.map((option) => {
@@ -109,7 +109,7 @@ export function Panel({
   from,
   ...rest
 }: Omit<HTMLMotionProps<"div">, "ref"> & { from: "left" | "scale" }) {
-  const reduced = useReducedMotion();
+  const reduced = useReducedMotionConfig();
   const offset = from === "left" ? { x: -12 } : { scale: 0.96 };
   // Only the axis `from` introduced is animated back. Writing all four settled
   // values would emit `translate(0,0) scale(1)` into the inline transform and
@@ -146,7 +146,7 @@ export function Toast({
   className?: string;
   children: ReactNode;
 }) {
-  const reduced = useReducedMotion();
+  const reduced = useReducedMotionConfig();
   return (
     <AnimatePresence initial={false}>
       {open && (

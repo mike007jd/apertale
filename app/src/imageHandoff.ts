@@ -26,7 +26,6 @@ export type ImageHandoffRequest = {
   requestId: string;
   /** The Agent's own words, shown to the reader verbatim. */
   reason: string;
-  expectedCount: number;
 };
 
 export type ImageHandoffOutcome =

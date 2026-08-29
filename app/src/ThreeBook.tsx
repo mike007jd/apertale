@@ -20,9 +20,9 @@ type Props = {
    * code path and the pose stays duration-agnostic.
    *
    * A ref rather than a value on purpose. Driving this through React state
-   * re-rendered the whole app on every animation frame and stretched a 760ms
-   * open to over a second; the render loop already runs, so it reads the
-   * current value itself.
+   * re-rendered the whole app on every animation frame and stretched one
+   * navigation interval to over a second; the render loop reads the current
+   * value itself while the stage is visible.
    */
   openProgress?: { readonly current: number };
   /**
@@ -905,22 +905,10 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     const anchorPoint = new THREE.Vector3();
 
     /**
-     * Turns the shelf card's screen rect into the world pose that would put the
-     * closed case exactly there, against the CURRENT camera - which matters
-     * because the camera pans and dollies through the same transition, so a
-     * pose computed once would drift away from the card it is meant to sit in.
-     *
+     * Turns the shelf card's screen rect into the world pose that places the
+     * closed case there. The camera stays fixed, so the result is cached until
+     * either the slot object changes or resize() invalidates the host geometry.
      * Returns null when there is no slot, in which case the case opens in place.
-     */
-    /**
-     * Cached against the slot it was measured from. The doc comment above used
-     * to justify recomputing per frame with "the camera pans and dollies
-     * through the same transition" - it no longer does, and the only remaining
-     * variable input is the host box, which resize() already watches. The read
-     * was a getBoundingClientRect() issued in the same frame that had just
-     * written --selection-x onto an ancestor, i.e. a forced layout flush, and
-     * it kept running at rest on the shelf because openProgress 0 is not
-     * "settled".
      */
     let anchorCacheKey: ShelfSlot | null | undefined;
     let anchorCache: { x: number; y: number; scale: number } | null = null;
@@ -1203,6 +1191,14 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     let pagePairs = new Map<string, PagePair>();
     const loadingSpreadIds = new Set<string>();
     let readySent = false;
+    const reportReadyForCurrentSpread = () => {
+      if (readySent) return;
+      const current = propsRef.current.snapshot;
+      const spread = current.document.spreads[current.session.currentSpreadIndex];
+      if (!spread || !pagePairs.has(spread.id)) return;
+      readySent = true;
+      propsRef.current.onReady(loadingDocumentId);
+    };
     const ensureSpreadLoaded = (spread: Spread) => {
       if (pagePairs.has(spread.id) || loadingSpreadIds.has(spread.id)) return;
       loadingSpreadIds.add(spread.id);
@@ -1216,7 +1212,10 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
           return;
         }
         const pair = pairs.get(spread.id);
-        if (pair) pagePairs.set(spread.id, pair);
+        if (pair) {
+          pagePairs.set(spread.id, pair);
+          reportReadyForCurrentSpread();
+        }
       }).catch(() => {
         loadingSpreadIds.delete(spread.id);
         if (disposed) return;
@@ -1245,7 +1244,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
        * The camera does not move.
        *
        * It used to pan, dolly and pitch on sin(phi), which peaks mid-swing and
-       * returns to zero - an out-and-back round trip inside a single 760ms
+       * returns to zero - an out-and-back round trip inside one navigation
        * gesture, asking the eye to follow a direction reversal at 34% while the
        * book was also translating and scaling. Worse, keying the camera to the
        * same parameter that drove the cover turned it into a jerk amplifier:
@@ -1273,6 +1272,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
      * which is precisely when the observer below fires.
      */
     const sceneOffset = { x: 0, y: 0 };
+    let raf = 0;
 
     function resize() {
       // The anchor is measured against this box, so a new box retires it.
@@ -1302,6 +1302,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       const t = THREE.MathUtils.smoothstep(camera.aspect, 0.58, 0.72);
       framing.targetY = THREE.MathUtils.lerp(-1.75, -0.08, t);
       applyCamera();
+      scheduleAnimation();
     }
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(host);
@@ -1436,7 +1437,6 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     const anchorWorld = new THREE.Vector3();
     let lastFrameTime = performance.now();
     let frame = 0;
-    let raf = 0;
     let lastSpreadId = "";
     let renderedEvidenceKey = "";
     let renderedEvidenceCandidate = "";
@@ -1466,8 +1466,13 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     backwardBaseCaptureTarget.texture.repeat.x = -1;
     backwardBaseCaptureTarget.texture.offset.x = 1;
 
-    function animate() {
+    function scheduleAnimation() {
+      if (disposed || raf !== 0 || host.clientWidth < 2 || host.clientHeight < 2) return;
       raf = requestAnimationFrame(animate);
+    }
+
+    function animate() {
+      raf = 0;
       const { snapshot: current, turn: currentTurn } = propsRef.current;
       const spread = current.document.spreads[current.session.currentSpreadIndex];
       const pagePair = pagePairs.get(spread.id);
@@ -1482,10 +1487,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       // on it to know the book can be opened at all. It has to be reported from
       // behind the curtain, which is why it is answered before the curtain is
       // checked.
-      if (pagePair && !readySent) {
-        readySent = true;
-        propsRef.current.onReady(loadingDocumentId);
-      }
+      reportReadyForCurrentSpread();
 
       /**
        * Nothing below this line can be seen while the shelf sits settled over
@@ -1493,11 +1495,11 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
        * measures 0x0 - the same condition resize() already refuses to fit to.
        *
        * The scene deliberately stays mounted through that, so the book is warm
-       * the moment a reader picks one. Mounted is not the same as running. Left
-       * unguarded this frame issues four render passes - three of them into a
-       * fixed 1536x947 target with 2x MSAA, plus a 1024-square shadow map - and
-       * it issued them from first paint onwards, for a canvas nobody could see,
-       * on the app's own landing screen.
+       * the moment a reader picks one. The resize observer restarts the loop
+       * when the stage becomes visible; while hidden there is no recurring rAF.
+       * Otherwise each frame would issue four render passes - three into a fixed
+       * 1536x947 target with 2x MSAA, plus a 1024-square shadow map - for a canvas
+       * nobody can see on the app's own landing screen.
        */
       if (host.clientWidth < 2 || host.clientHeight < 2) return;
 
@@ -1789,8 +1791,9 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         renderedEvidenceCandidate = "";
         renderedEvidenceFrames = 0;
       }
+      scheduleAnimation();
     }
-    animate();
+    scheduleAnimation();
 
     return () => {
       disposed = true;

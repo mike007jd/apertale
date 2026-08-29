@@ -9,7 +9,7 @@ import {
 } from "./imageHandoff";
 
 const ask = (requestId: string, reason = "Spread five needs a photo of your grandmother.") =>
-  requestImageHandoff({ requestId, reason, expectedCount: 1 });
+  requestImageHandoff({ requestId, reason });
 
 describe("image handoff", () => {
   it("stays pending until the reader chooses, then returns the ids to the caller", async () => {

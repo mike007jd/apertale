@@ -32,7 +32,7 @@ The website opens as a polished editorial library of curated books that anyone c
 
 ## WebMCP implementation
 
-Apertale exposes exactly six semantic tools:
+Apertale exposes exactly seven semantic tools:
 
 1. `get_project_context`
 2. `manage_book`
@@ -40,8 +40,9 @@ Apertale exposes exactly six semantic tools:
 4. `apply_scene_patch`
 5. `set_presentation`
 6. `undo_project_change`
+7. `request_image_handoff`
 
-All mutations use validated JSON schemas, stable IDs, `requestId`, expected revision checks, atomic commits, compact results, and exact undo tokens. `get_project_context` supplies compact, selected-reveal, and local-asset detail modes; local asset IDs are revalidated against IndexedDB before a patch commits. Agent-authored content is declarative data. Arbitrary JavaScript, HTML, GLSL, event expressions, and remote asset URLs are rejected. The six tools register as one fail-closed lifecycle group, handle registration and execution cancellation, and declare explicit read-only and untrusted-content hints. The host sends an origin-keyed agent-cluster policy and keeps `tools` limited to the same origin.
+All mutations use validated JSON schemas, stable IDs, and `requestId`. Document mutations add expected revision checks, atomic commits, compact results, and exact undo tokens; `request_image_handoff` instead resolves after the reader provides browser-local assets or dismisses the request. `get_project_context` supplies compact, selected-reveal, and local-asset detail modes; local asset IDs are revalidated against IndexedDB before a patch commits. Agent-authored content is declarative data. Arbitrary JavaScript, HTML, GLSL, event expressions, and remote asset URLs are rejected. The seven tools register as one fail-closed lifecycle group, handle registration and execution cancellation, and declare explicit read-only and untrusted-content hints. The host sends an origin-keyed agent-cluster policy and keeps `tools` limited to the same origin.
 
 The browser owns the revisioned project and renders it through React, TypeScript, Three.js, Canvas, IndexedDB, and a 2D/reduced-motion fallback. Apertale contains no owner-funded OpenAI API key; the supporting ChatGPT host supplies the user's Agent session.
 

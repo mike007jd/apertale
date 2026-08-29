@@ -4,12 +4,12 @@
 >
 > Version: 1.1 consolidated
 >
-> Checked: 2026-08-29 NZST
+> Checked: 2026-08-30 NZST
 > Working brand: **Apertale — Open a page. Enter a world.**
 
 This document consolidates the user-approved Challenge build and later multi-book scope. Earlier LivingBook-branded documents remain historical delivery evidence and do not override this specification.
 
-Create Your Own is a required host-side product path: the user's Codex/ChatGPT conversation turns a prompt, photos, or both into a complete book through the six Site Tools. In-page owner-funded generation remains out of scope. Apertale never proxies visitors through a site-owner API key and never treats uploaded source photos as finished right-page artwork unless the user explicitly chose a literal photo-album treatment.
+Create Your Own is a required host-side product path: the user's Codex/ChatGPT conversation turns a prompt, photos, or both into a complete book through the seven Site Tools. In-page owner-funded generation remains out of scope. Apertale never proxies visitors through a site-owner API key and never treats uploaded source photos as finished right-page artwork unless the user explicitly chose a literal photo-album treatment.
 
 ## 1. Product
 
@@ -26,7 +26,7 @@ The user's ChatGPT/Codex supplies the intelligence. Apertale does not proxy ever
 
 ### Implementation snapshot
 
-Implemented in the current build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the six-tool project surface; a repository-level Codex authoring skill; a versioned creation-brief readiness gate shared by context and create; distinct illustrated-story, photo-led keepsake, and preserved-photo album contracts; IndexedDB-backed local image import; a versioned deterministic plus AI-visual quality rubric with current-render evidence and a two-round repair ceiling; fail-closed client/Worker publication; durable D1/R2 publication; and an anonymous read-only share reader.
+Implemented in the current build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the seven-tool project surface; a repository-level Codex authoring skill; a versioned creation-brief readiness gate shared by context and create; distinct illustrated-story, photo-led keepsake, and preserved-photo album contracts; IndexedDB-backed local image import; a versioned deterministic plus AI-visual quality rubric with current-render evidence and a two-round repair ceiling; fail-closed client/Worker publication; durable D1/R2 publication; and an anonymous read-only share reader.
 
 The supporting-host tool run, public Site, and anonymous share lifecycle passed with the disclosures recorded in [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md). External delivery still open is the explicitly approved public repository, demo video, and Devpost submission. Direct host attachment transfer remains a post-v1.1 expansion rather than a hidden release dependency.
 
@@ -190,12 +190,13 @@ Keep tools semantic and small enough for an Agent to select reliably. The target
 4. `apply_scene_patch` — Lift, animate, add, update, remove, or reorder a bounded list of scene elements and interactions.
 5. `set_presentation` — Day/Night and Preview state without corrupting content history.
 6. `undo_project_change` — undo an exact returned token while preserving non-overlapping later edits.
+7. `request_image_handoff` — open the workshop import drawer with the Agent's reason and resolve after the reader provides browser-local assets or dismisses the request.
 
 `get_project_context` is compact by default. Focused details expose the selected reveal, reusable local assets, the authoring guide, `creation-readiness`, or `quality-review`. Readiness produces `ready`, blocking fields, recommendations, direct questions, asset needs, and photo boundaries. Create reuses the same brief and fails closed under the same assessment. A legacy personal book without lifecycle metadata can adopt that brief once at the inspected revision; curated samples and books with an existing brief cannot be reclassified. Quality review returns the single-source rubric, deterministic checks, current-revision render events, and locators/URL for real browser inspection; it does not pretend schema can judge aesthetics. Critique begins through an explicit mutating action and is recorded with evidence and suggested patches. A blocker/patch cycle stops after two rounds; an edit made after an approved report invalidates that report and starts a fresh bounded cycle for the new revision, so no action can advertise a round three. Fine-grained commands remain internal engine adapters for the human UI and do not register as Agent-discoverable tools.
 
-Every mutation accepts `requestId` and `expectedRevision`, commits atomically, returns a compact summary plus `undoToken`, and preserves idempotency.
+Every mutation accepts `requestId`. Document mutations also accept `expectedRevision`, commit atomically, return a compact summary plus `undoToken`, and preserve idempotency. Image handoff changes no document revision and returns only provided asset ids or the reader's dismissal.
 
-The runtime exposes exactly these six tools. The scene patch applies up to 24 operations atomically, provides field-aware composite undo, and rejects arbitrary URLs or executable content. Fine-grained element commands remain internal adapters shared with the human UI; they do not consume host tool-discovery budget.
+The runtime exposes exactly these seven tools. The scene patch applies up to 24 operations atomically, provides field-aware composite undo, and rejects arbitrary URLs or executable content. Fine-grained element commands remain internal adapters shared with the human UI; they do not consume host tool-discovery budget.
 
 ## 8. Asset pipeline
 
@@ -219,7 +220,7 @@ The runtime exposes exactly these six tools. The scene patch applies up to 24 op
 
 ### Host-side complete-book authoring
 
-Host-side prompt/photo-to-complete-book authoring is a required product path, not a deferred extra. The user asks ChatGPT/Codex in the current conversation to assess readiness, inspect sources, and plan a coherent story or album. Illustrated/photo-led work generates a dedicated portrait cover plus original full-spread artwork; an explicitly selected preserved-photo album keeps one source-true layout per spread and generates no interior replacement. Only after the applicable asset set exists does the Agent lay the book out through the six Site Tools, render every surface, and complete the bounded critique loop. Until direct attachment transfer is verified, Apertale presents a clear Image handoff step and resumes Agent composition immediately after import. In-page owner-funded generation remains out of scope and must not silently fall back to the product owner's model key.
+Host-side prompt/photo-to-complete-book authoring is a required product path, not a deferred extra. The user asks ChatGPT/Codex in the current conversation to assess readiness, inspect sources, and plan a coherent story or album. Illustrated/photo-led work generates a dedicated portrait cover plus original full-spread artwork; an explicitly selected preserved-photo album keeps one source-true layout per spread and generates no interior replacement. Only after the applicable asset set exists does the Agent lay the book out through the seven Site Tools, render every surface, and complete the bounded critique loop. Until direct attachment transfer is verified, `request_image_handoff` opens the reader-mediated import step and resumes Agent composition after it returns browser-local asset ids. In-page owner-funded generation remains out of scope and must not silently fall back to the product owner's model key.
 
 ### Later adapters
 

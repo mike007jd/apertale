@@ -87,7 +87,7 @@ export async function verifyDeployment(value, fetchImpl = fetch) {
   const manifest = await manifestResponse.json();
   if (manifest?.name !== "Apertale") fail("the deployment manifest has the wrong product name.");
   if (manifest?.webMcp?.registration !== "document.modelContext.registerTool") fail("the deployment manifest has the wrong WebMCP registration API.");
-  if (JSON.stringify(manifest?.webMcp?.tools) !== JSON.stringify(SITE_TOOL_NAMES)) fail("the deployment manifest does not declare exactly the six expected tools.");
+  if (JSON.stringify(manifest?.webMcp?.tools) !== JSON.stringify(SITE_TOOL_NAMES)) fail("the deployment manifest does not match the expected tool catalog.");
 
   const entryUrl = new URL(modulePath, response.url || baseUrl);
   const entryResponse = await fetchImpl(entryUrl, { redirect: "follow" });

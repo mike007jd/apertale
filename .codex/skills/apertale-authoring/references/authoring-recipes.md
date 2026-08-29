@@ -21,7 +21,7 @@ Hard rejection: placing an uploaded source photo on the right page, or using a r
 3. Plan title, dedicated generated portrait cover, every spread, and ordered provenance. Required generated-art counts: 1 cover + one original full-spread artwork per spread. Provenance entries: 1 cover + one per spread.
 4. Use host ImageGen/image editing to make those assets. Crop, isolate, or extend source photos only as references into new compositions.
 5. Keep the selected source-asset ids in the user's given order. Map each id as a reference, not as a lazy right-page placement.
-6. Only after the complete art set exists, create the book through Site Tools. Ask the user to import generated finals through supported host transfer or the workshop's **Image handoff** when direct transfer is unavailable.
+6. Only after the complete art set exists, create the book through Site Tools. Use supported host transfer for generated finals; when direct transfer is unavailable, call `request_image_handoff` and wait for the reader's result.
 7. Refresh the asset list and bind exact asset ids to cover and spreads. Preserve the person's identity and source truth in provenance.
 8. Use interaction to reveal captions, memories, dates, places, or facts—not to obscure the original photograph when a photo is cited as story truth.
 

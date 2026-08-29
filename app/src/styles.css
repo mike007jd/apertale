@@ -1786,6 +1786,21 @@ summary:focus-visible,
   .book-loading-feedback { animation-delay: 0ms !important; }
 }
 
+/* `?reducedMotion=1` is the authoring-route browser-QA override for the same
+   semantic path as the platform preference. Keep this selector paired with the
+   media query so QA can exercise the CSS path when it cannot control the OS. */
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  transition: none !important;
+}
+:root[data-motion="reduced"] .library-opening-badge svg,
+:root[data-motion="reduced"] .book-loading-icon svg { animation: none !important; }
+:root[data-motion="reduced"] .book-loading-feedback { animation-delay: 0ms !important; }
+
 /* Structured interaction surfaces: element rail, hover affordance, reveal card. */
 
 .element-rail {

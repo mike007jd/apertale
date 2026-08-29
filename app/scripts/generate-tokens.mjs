@@ -3,7 +3,7 @@
  * Emits the two token artifacts from src/design/tokens.source.ts.
  *
  *   src/design/tokens.generated.css  custom properties for styles.css
- *   src/design/tokens.generated.ts   the same numbers for Motion's inline style
+ *   src/design/tokens.generated.ts   runtime motion constants for React
  *
  * Both are checked in so the build never depends on this script running, and
  * `npm run tokens:check` fails when they have drifted from the source.
@@ -79,38 +79,15 @@ ${cssBlock(dayVars)}
 :root[data-theme="night"] {
 ${cssBlock(nightVars)}
 }
-
-/* Every type step is one declaration, so a call site cannot take the size and
-   silently leave the line-height, tracking, weight and family behind. */
-${Object.entries(tokens.type)
-  .map(([name, step]) => `.text-${name} {
-  font-family: var(--font-${step.family});
-  font-size: var(--text-${name});
-  font-weight: var(--weight-${step.weight});
-  line-height: var(--leading-${name});
-  letter-spacing: var(--${step.track});
-}`)
-  .join("\n\n")}
 `;
 }
 
 function buildTs() {
-  const { radius, space, elevation, motion, accentElevation } = tokens;
+  const { motion } = tokens;
   const literal = (value) => JSON.stringify(value, null, 2);
 
   return `${BANNER}
 /* eslint-disable */
-
-/** Numeric radii, for Motion's layout scale correction. */
-export const radius = ${literal(radius)} as const;
-
-/** Spacing as numbers, for animated offsets that cannot read a CSS variable. */
-export const space = ${literal(
-    Object.fromEntries(Object.entries(space).map(([k, v]) => [k, Number.parseFloat(String(v)) || 0])),
-  )} as const;
-
-export const elevation = ${literal(elevation)} as const;
-export const accentElevation = ${literal(accentElevation)} as const;
 
 /**
  * The two motion families. Every animation declares which one it belongs to:
@@ -139,9 +116,6 @@ export const easePoints = ${literal(
       ]),
     ),
   )} as const;
-
-export type SpaceStep = keyof typeof space;
-export type RadiusStep = keyof typeof radius;
 `;
 }
 

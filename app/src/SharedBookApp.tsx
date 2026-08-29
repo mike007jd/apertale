@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, X } from "@phosphor-icons/react";
+import { MotionConfig } from "motion/react";
 import { ThemeSwitch } from "./design/ThemeSwitch";
 import { hasReveal, resolveInteraction } from "./interaction";
 import { announce, supportsWebGl2 } from "./readerShell";
@@ -163,7 +164,8 @@ export function SharedBookApp() {
   const nav = pageTurnNavDisabled(turn, spreadIndex, snapshot.document.spreads.length, waitingForRenderer);
 
   return (
-    <main className="app-shell is-preview is-shared-reader">
+    <MotionConfig reducedMotion={reducedMotion ? "always" : "never"}>
+      <main className="app-shell is-preview is-shared-reader">
       <header className="topbar">
         <span className="wordmark" aria-label="Apertale shared book">Apertale</span>
         <div className="topbar-actions">
@@ -233,7 +235,8 @@ export function SharedBookApp() {
         )}
       </section>
 
-      <div className="sr-only" aria-live="polite">{announce(snapshot.document.title, spread.title, spread.body)}</div>
-    </main>
+        <div className="sr-only" aria-live="polite">{announce(snapshot.document.title, spread.title, spread.body)}</div>
+      </main>
+    </MotionConfig>
   );
 }

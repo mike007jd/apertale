@@ -5,15 +5,12 @@
  * must never be edited by hand:
  *
  *   src/design/tokens.generated.css  — custom properties consumed by styles.css
- *   src/design/tokens.generated.ts   — the same numbers as JS, for Motion
+ *   src/design/tokens.generated.ts   — runtime motion constants consumed by React
  *
- * Motion's `layout` animation performs scale correction by writing
- * `borderRadius` and `boxShadow` onto the element every frame, and it can only
- * invert a value it can parse as a number. `var(--radius-m)` resolves to a used
- * value it cannot decompose per axis, so any surface that animates its layout
- * must receive a numeric radius through the React `style` prop. Emitting both
- * forms from one source is what keeps the stylesheet and the animated
- * components from drifting apart.
+ * Motion needs numeric spring settings, durations, and easing points at
+ * runtime. Emitting those values here keeps React animation code aligned with
+ * the CSS motion custom properties without exposing unused JS copies of every
+ * visual scale.
  *
  * Scales are closed sets. Adding a step is a design decision made here, not an
  * ad-hoc value added at a call site; `scripts/check-tokens.mjs` fails the build

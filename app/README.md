@@ -4,7 +4,7 @@ Apertale is a WebMCP-native creative canvas for living illustrated books. A pers
 
 The page is explicitly WebMCP-enabled. In a browser without the injected runtime, the Story panel reports `WebMCP ready`; in a supported ChatGPT desktop built-in browser it reports `WebMCP connected` after the tools register.
 
-WebMCP is agent-neutral, not universally callable. Any Agent whose browser or host implements WebMCP discovery, permission mediation, and execution can use this six-tool surface; an arbitrary standalone Agent cannot call it merely because the page registers tools. As of 2026-08-27, OpenAI Site Tools require account/model access and the ChatGPT desktop built-in browser, with the providing page kept open.
+WebMCP is agent-neutral, not universally callable. Any Agent whose browser or host implements WebMCP discovery, permission mediation, and execution can use this seven-tool surface; an arbitrary standalone Agent cannot call it merely because the page registers tools. As of 2026-08-27, OpenAI Site Tools require account/model access and the ChatGPT desktop built-in browser, with the providing page kept open.
 
 ## Current product slice
 
@@ -24,7 +24,7 @@ WebMCP is agent-neutral, not universally callable. Any Agent whose browser or ho
 
 ## WebMCP tool surface
 
-The page registers exactly six project-level tools through `document.modelContext.registerTool()`:
+The page registers exactly seven project-level tools through `document.modelContext.registerTool()`:
 
 1. `get_project_context`
 2. `manage_book`
@@ -32,14 +32,15 @@ The page registers exactly six project-level tools through `document.modelContex
 4. `apply_scene_patch`
 5. `set_presentation`
 6. `undo_project_change`
+7. `request_image_handoff`
 
-Mutating tools require a `requestId` and the current `expectedRevision`. Tool callbacks return compact JSON strings, and successful document mutations include an exact `undoToken`.
+Every mutating tool requires a `requestId`. Document mutations also require the current `expectedRevision`; successful document mutations include an exact `undoToken`. `request_image_handoff` opens a reader-mediated browser-local import without changing the document revision.
 
 `get_project_context` defaults to a compact response. Focused details add `authoring-guide`, structured `creation-readiness`, local `assets`, a selected reveal, or the versioned `quality-review` rubric/render manifest. Create reads the guide, checks readiness, asks every blocking question, and reuses the same brief; the command runs that gate again and fails closed. A legacy personal book can use the one-time, revision-bound `adopt-creation-brief` action with the same gate; samples and books that already own a brief cannot be reclassified. After real rendering, `manage_book` explicitly begins and records at most two critique rounds. `manage_book` also opens books and assigns a validated browser-local portrait cover. `apply_scene_patch` covers Lift, transform, structured reveal, motion, interaction, add/remove, and ordering through one bounded atomic contract. A local `asset:` ID is accepted only after the IndexedDB adapter proves that it exists. Internal fine-grained commands remain shared with the human UI but are not exposed as additional WebMCP tools.
 
 Deterministic checks prove structural facts such as cover/final-base presence, an original-composite reference, separate personal-photo provenance, 2–4 foreground layers, meaningful interaction, text bounds, and current-revision render events. WebGL waits for the exact spread asset/texture set; the 2D fallback composes the same final base and non-procedural foregrounds, and neither path records evidence after a load failure. These checks do not claim aesthetic quality. The Agent must inspect real cover/spread frames for composition, readability, consistency, photo fidelity, alpha edges, and promotional value, then submit evidence-backed blocker/warn/note results. Blockers close Share; recorded warnings may proceed only in a sample-ready report. The Worker accepts checked-in `/assets/...` references only from the generated bundled-asset catalog and revalidates the same brief/provenance policy.
 
-The six registration promises are treated as one fail-closed set. One registration failure aborts the shared lifecycle signal and removes any partial registration. Both Vite and the deployment Worker send `Origin-Agent-Cluster: ?1` and `Permissions-Policy: tools=(self)`.
+The seven registration promises are treated as one fail-closed set. One registration failure aborts the shared lifecycle signal and removes any partial registration. Both Vite and the deployment Worker send `Origin-Agent-Cluster: ?1` and `Permissions-Policy: tools=(self)`.
 
 ## Run and verify
 
@@ -84,7 +85,7 @@ The production build is emitted as a host-portable bundle:
 
 Three.js is loaded as a lazy production chunk so the editor shell can render before the WebGL engine finishes loading.
 
-The repository-level [Apertale Authoring skill](../.codex/skills/apertale-authoring/SKILL.md) teaches Agents the text-led, photo-led, and illustration-led workflows, exact six-tool sequence, host-first media transfer with a minimal fallback, revision discipline, and final quality gate.
+The repository-level [Apertale Authoring skill](../.codex/skills/apertale-authoring/SKILL.md) teaches Agents the text-led, photo-led, and illustration-led workflows, the seven-tool sequence, host-first media transfer with an explicit handoff fallback, revision discipline, and final quality gate.
 
 ## Current technical baseline
 
