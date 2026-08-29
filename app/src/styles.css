@@ -201,11 +201,11 @@ summary:focus-visible,
    watches; on the way back it arrives late, after the case has shut. */
 @keyframes library-to-open-book {
   0% { opacity: 1; }
-  46%, 100% { opacity: 0; }
+  12%, 100% { opacity: 0; }
 }
 
 @keyframes library-from-open-book {
-  0%, 54% { opacity: 0; }
+  0%, 82% { opacity: 0; }
   100% { opacity: 1; }
 }
 
@@ -1123,40 +1123,43 @@ summary:focus-visible,
 
 .is-spinning { animation: book-loading-spin 850ms linear infinite; }
 
+/* Status is a line of type with a dot, not a bordered pill around a line of
+   type with a dot. */
 .workshop-signal {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   justify-self: start;
   margin: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  padding: 7px 12px;
-  color: var(--muted);
+  padding: 0;
+  color: var(--ink-3);
   font-size: var(--text-caption);
   line-height: 1.35;
 }
 
 .workshop-signal i { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--shape-circle); background: #aaa59a; box-shadow: var(--ring-neutral); }
-.workshop-signal.is-connected { color: var(--ink); border-color: rgba(71, 168, 121, .4); }
+.workshop-signal.is-connected { color: var(--ink-2); }
 .workshop-signal.is-connected i { background: #47a879; box-shadow: var(--ring-ok); }
 
+/* A hanging note against a rule, the way a printed sidenote works - not a
+   second card nested inside the panel's card. */
 .workshop-readiness {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  gap: 9px;
-  border: 1px solid color-mix(in srgb, #b47a24 32%, var(--line));
-  border-radius: var(--radius-m);
-  padding: 10px 12px;
-  color: color-mix(in srgb, #8f5e18 76%, var(--ink));
-  background: color-mix(in srgb, #f2c879 12%, var(--surface));
+  gap: var(--space-3);
+  border: 0;
+  border-left: 2px solid var(--accent);
+  border-radius: 0;
+  padding: var(--space-1) 0 var(--space-1) var(--space-4);
+  color: var(--ink);
+  background: none;
 }
 
-.workshop-readiness > svg { margin-top: 1px; }
+.workshop-readiness > svg { margin-top: 4px; color: var(--accent); }
 .workshop-readiness div { display: grid; gap: 3px; min-width: 0; }
-.workshop-readiness strong { font-size: var(--text-caption); }
-.workshop-readiness span { color: var(--muted); font-size: var(--text-caption); line-height: 1.4; }
+.workshop-readiness strong { font-size: var(--text-body); font-weight: var(--weight-strong); }
+.workshop-readiness span { max-width: 44ch; color: var(--ink-3); font-size: var(--text-body); line-height: 1.55; }
 
 /* Creation is a full workspace, not a form modal. The live Three.js stage
    supplies the blank physical book while this layer supplies only controls. */
@@ -1314,45 +1317,65 @@ summary:focus-visible,
   letter-spacing: -.035em;
 }
 
-.workshop-field { display: grid; gap: 8px; margin: 0; border: 0; padding: 0; min-width: 0; }
+.workshop-field { display: grid; gap: var(--space-2); margin: 0; border: 0; padding: 0; min-width: 0; }
+.workshop-field + .workshop-field { margin-top: var(--space-3); }
 .workshop-field legend {
   padding: 0;
   color: var(--muted);
   font-size: var(--text-caption);
-  font-weight: 750;
-  letter-spacing: .13em;
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
 }
 
-.workshop-segment { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.workshop-photo-use { grid-template-columns: 1fr 1fr; }
-.workshop-lengths { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
-.workshop-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.workshop-segment { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-5); }
 
+.workshop-lengths { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-5); }
+.workshop-chips { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-5); }
+
+/* No box. A small closed vocabulary reads as a set of words when they are
+   spaced as one, and the choice shows in ink weight and a rule under the
+   selected word - which is how print marks a selection. Fourteen outlines
+   were doing the grouping that the legend and the spacing already do. */
 .workshop-option {
+  position: relative;
   min-width: 0;
-  min-height: 44px;
-  border: 1px solid var(--line);
+  min-height: 40px;
+  border: 0;
   border-radius: var(--radius-s);
-  padding: 0 8px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  padding: 0 var(--space-1);
+  color: var(--ink-4);
+  background: none;
   cursor: pointer;
-  font-size: var(--text-caption);
-  font-weight: 650;
-  line-height: 1.15;
-  transition: border-color var(--motion-feedback) ease, background-color var(--motion-feedback) ease, color var(--motion-feedback) ease;
+  font-size: var(--text-body);
+  font-weight: var(--weight-text);
+  line-height: 1.2;
+  text-align: left;
 }
 
-.workshop-option:hover { border-color: color-mix(in srgb, var(--accent) 42%, transparent); }
+.workshop-option::after {
+  position: absolute;
+  left: var(--space-1);
+  right: var(--space-1);
+  bottom: 6px;
+  height: 2px;
+  background: var(--accent);
+  content: "";
+  opacity: 0;
+  scale: 0.4 1;
+  transition: opacity var(--motion-feedback) var(--ease-info), scale var(--motion-state) var(--ease-object);
+}
+
+.workshop-option:hover:not(:disabled) { color: var(--ink-2); }
+
 .workshop-option.is-selected {
-  border-color: var(--accent);
-  color: color-mix(in srgb, var(--accent) 78%, var(--ink));
-  background: var(--accent-soft);
-  box-shadow: var(--ring-inset-accent);
+  color: var(--ink);
+  font-weight: var(--weight-strong);
 }
 
-.workshop-lengths .workshop-option { font-family: "Iowan Old Style", Baskerville, Georgia, serif; font-size: var(--text-body); }
+.workshop-option.is-selected::after { opacity: 1; scale: 1 1; }
+
+.workshop-lengths .workshop-option { font-family: var(--font-display); font-size: var(--text-lead); }
 
 /* The Agent's request, set where the reader acts on it rather than left in
    the conversation pane. */

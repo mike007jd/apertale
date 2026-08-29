@@ -785,8 +785,18 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     spineShell.castShadow = true;
     book.add(spineShell);
 
+    const endpaperMaterial = new THREE.MeshStandardMaterial({ color: 0xe3d6bb, roughness: 0.94, metalness: 0 });
+    /**
+     * Box faces run [+x, -x, +y, -y, +z, -z]. The cover cloth wraps everything
+     * except the inner face, which is the pastedown - and that is the face the
+     * reader looks at for most of the swing. Leaving it the same solid cover
+     * colour made an opening cover read as a featureless slab.
+     */
     const makeBoard = () => {
-      const board = new THREE.Mesh(new THREE.BoxGeometry(BOARD_W, BOARD_H, BOARD_T, 1, 1, 1), coverMaterial);
+      const board = new THREE.Mesh(
+        new THREE.BoxGeometry(BOARD_W, BOARD_H, BOARD_T, 1, 1, 1),
+        [coverMaterial, coverMaterial, coverMaterial, coverMaterial, coverMaterial, endpaperMaterial],
+      );
       board.castShadow = false;
       board.receiveShadow = true;
       return board;
@@ -1150,9 +1160,12 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       // to the framing the rest of the scene was built against.
       const u = (1 - Math.cos(coverPhi)) / 2;
       const s = Math.sin(coverPhi);
-      const dolly = 1.7 * u + Math.max(0, 14.05 - framing.z) * s;
-      camera.position.set(-0.95 * u, framing.y, framing.z + dolly);
-      camera.lookAt(2.39 * u, framing.targetY + 0.23 * u + 1.45 * s, 0);
+      // The aim-up term was derived against a taller board and pushed the case
+      // off the bottom of the frame at mid-swing; the dolly carries that work
+      // instead, which keeps the whole book in view without tilting the desk.
+      const dolly = 1.7 * u + 4.2 * s;
+      camera.position.set(-3.2 * u, framing.y, framing.z + dolly);
+      camera.lookAt(2.05 * u, framing.targetY + 0.23 * u + 0.42 * s, 0);
       camera.updateProjectionMatrix();
     }
 
@@ -1550,7 +1563,11 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
           lastTurnCaptureKey = "";
         }
       }
-      leftPage.visible = rightPage.visible = true;
+      // The turn machinery hides these mid-turn and has to put them back, but
+      // it must not overrule the case: an open spread drawn through a closing
+      // cover is the exact tell that gave the old fake transition away.
+      const caseOpen = (1 - Math.cos(coverPhi)) / 2 <= 0.02;
+      leftPage.visible = rightPage.visible = caseOpen;
 
       frame += 1;
       if (frame % 60 === 0) renderer.info.reset();
@@ -1560,7 +1577,9 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       // The workshop shows a blank book that is never closed, so it ignores the
       // caller's progress rather than inheriting the library's closed state.
       if (coverArtFadeIn && coverArtMaterial.opacity < 1) {
-        coverArtMaterial.opacity = Math.min(1, coverArtMaterial.opacity + delta * 1.4);
+        // Fast enough that a reader who opens a book the moment it loads never
+        // catches the board bare, slow enough that a late cover does not pop.
+        coverArtMaterial.opacity = Math.min(1, coverArtMaterial.opacity + delta * 4);
       }
       const requestedOpen = propsRef.current.mode === "workshop" ? 1 : propsRef.current.openProgress.current;
       const requestedPhi = (1 - THREE.MathUtils.clamp(requestedOpen, 0, 1)) * Math.PI;

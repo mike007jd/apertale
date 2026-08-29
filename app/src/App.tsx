@@ -448,7 +448,38 @@ export function App() {
     // being opened is a hand, a board falling shut is gravity.
     const duration = to === 1 ? 760 : 532;
     const started = performance.now();
-    const from = to === 1 ? 0 : 1;
+
+    /**
+     * Phased, not a single curve.
+     *
+     * A plain ease-out front-loads the motion, and the shelf fade sat on top of
+     * exactly that part: by the time the shelf had cleared, the cover was
+     * already 84% open, so the swing was over before anyone could see it. The
+     * case now holds almost shut while the shelf clears, swings in full view,
+     * and settles.
+     *
+     * Returns openness: 0 is a closed case facing the reader, 1 is open.
+     */
+    const openness = to === 1
+      ? (t: number) => {
+          if (t < 0.16) return 0.033 * (t / 0.16);
+          if (t < 0.79) {
+            const u = (t - 0.16) / 0.63;
+            return 0.033 + (0.922 - 0.033) * (1 - Math.pow(1 - u, 2.2));
+          }
+          const u = (t - 0.79) / 0.21;
+          return 0.922 + (1 - 0.922) * (1 - Math.pow(1 - u, 2));
+        }
+      // Closing is gravity, not a hand: it accelerates where opening decelerated.
+      : (t: number) => {
+          if (t < 0.12) return 1 - 0.056 * (t / 0.12);
+          if (t < 0.865) {
+            const u = (t - 0.12) / 0.745;
+            return 0.944 - (0.944 - 0.044) * Math.pow(u, 1.9);
+          }
+          const u = (t - 0.865) / 0.135;
+          return 0.044 * (1 - u);
+        };
 
     /**
      * requestAnimationFrame stops on a hidden page, so a reader who switches
@@ -475,10 +506,7 @@ export function App() {
 
     const step = (now: number) => {
       const linear = Math.min(1, (now - started) / duration);
-      const eased = to === 1
-        ? 1 - Math.pow(1 - linear, 3)
-        : linear * linear * linear;
-      setOpenProgress(from + (to - from) * eased);
+      setOpenProgress(openness(linear));
       if (linear < 1) {
         openFrame.current = requestAnimationFrame(step);
         return;

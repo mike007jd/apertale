@@ -37,6 +37,7 @@ const EXEMPT = {
     "50%", // circles — a shape primitive, not a scale step
     "inherit",
     "999px", // the pill token's own definition
+    "0", // resetting a radius is not choosing one
   ]),
   fontSize: new Set([
     "inherit",
