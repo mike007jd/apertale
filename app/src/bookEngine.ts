@@ -12,7 +12,7 @@ import {
   qualityGateState,
   validateVisualReview,
 } from "./qualityContract";
-import { MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralElement, spreadBaseAssetId } from "./types";
+import { DIRECT_MANIPULATION, MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralElement, spreadBaseAssetId } from "./types";
 import type {
   AuthoringQualityLifecycle,
   QualityGateState,
@@ -786,9 +786,33 @@ export class BookEngine {
     this.showAction("human", "success", "Sample book restored");
   }
 
+  /**
+   * Preview is the reader's view of a finished book, so direct manipulation
+   * has to stop at the model and not merely at the controls. The panels and
+   * the element rail already hide themselves, but the canvas keeps its
+   * pointer handlers, and a drag there used to write a real transform into a
+   * document the reader believed they were only looking at.
+   *
+   * Only direct manipulation is refused, and only when a person issues it.
+   * `DIRECT_MANIPULATION` in types.ts is what decides that, so the set cannot
+   * fall out of date with the command union.
+   */
+  private refusedByPreview(command: DocumentCommand, source: CommandSource) {
+    if (source !== "human" || !this.sessionState.preview) return null;
+    if (!DIRECT_MANIPULATION[command.type]) return null;
+    return this.conflict("invalid", "Preview is read-only. Exit Preview to change this book.");
+  }
+
   dispatch(command: DocumentCommand, source: CommandSource): DocumentResult {
     const prior = this.requestResults.get(command.requestId);
     if (prior) return prior;
+
+    const refused = this.refusedByPreview(command, source);
+    if (refused) {
+      this.requestResults.set(command.requestId, refused);
+      this.showAction(source, "error", refused.summary, "elementId" in command ? command.elementId : undefined);
+      return refused;
+    }
 
     if (command.expectedRevision !== this.documentState.revision) {
       const result = this.conflict("revision_conflict", `Expected revision ${command.expectedRevision}; current revision is ${this.documentState.revision}.`);

@@ -295,6 +295,33 @@ type UndoCommand = {
   undoToken: string;
 };
 
+/**
+ * Which commands are a person's hands on the open book.
+ *
+ * Preview refuses these and only these. Written as a total record rather than
+ * a chain of `type === ...` tests so the classification is exhaustive by
+ * construction: a tenth command variant fails to compile until it declares
+ * which side it is on. The enumeration it replaces excluded the other five by
+ * omission, so a future "change cover" button dispatched as `human` would have
+ * written into a document the reader was told is read-only, with nothing
+ * failing.
+ */
+export const DIRECT_MANIPULATION: Record<DocumentCommand["type"], boolean> = {
+  lift: true,
+  edit: true,
+  animate: true,
+  interact: true,
+  // Authoring and meta commands. Codex keeps working during a preview - the
+  // reader watching their book change is the point of that mode - and Undo
+  // stays available so a change they dislike can be taken back without first
+  // leaving preview.
+  "create-book": false,
+  "set-book-cover": false,
+  "compose-spread": false,
+  "scene-patch": false,
+  undo: false,
+};
+
 export type DocumentCommand =
   | CreateBookCommand
   | SetBookCoverCommand

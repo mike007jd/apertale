@@ -1,5 +1,6 @@
 import { bookEngine } from "./bookEngine";
 import { getAssetMetadata, listAssetMetadata } from "./assetStore";
+import { abortImageHandoff, requestImageHandoff } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MOTION_PRESETS, MAX_BOOK_SPREADS } from "./types";
@@ -223,6 +224,11 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     registeredCount += 1;
   });
   const sessionResults = new Map<string, unknown>();
+  const activeImageHandoffs = new Map<string, ReturnType<typeof requestImageHandoff>>();
+  const cancelActiveImageHandoffs = () => {
+    activeImageHandoffs.forEach((_, requestId) => abortImageHandoff(requestId));
+    activeImageHandoffs.clear();
+  };
   let authoringGuideRead = false;
 
   const registrations = [
@@ -749,6 +755,56 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       },
       { signal: controller.signal },
     ),
+    register(
+      {
+        name: SITE_TOOL.requestImageHandoff,
+        title: "Request an image handoff",
+        description:
+          "Ask the reader for one or more photos. Opens the photo drawer in the page with your reason shown to them, and resolves with the browser-local asset ids once they have chosen — so you can reference the ids immediately instead of waiting to be told the upload finished. You cannot send image bytes through a tool call and the browser requires the reader's own click to open a file picker, so this asks rather than uploads.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            requestId: { type: "string", description: "Caller-supplied id for this request." },
+            reason: { type: "string", description: "Plain-language reason shown to the reader, in your own words. For example: the fifth spread needs a photo of your grandmother.", maxLength: 220 },
+          },
+          required: ["requestId", "reason"],
+          additionalProperties: false,
+        },
+        // Mutating, and its result carries ids derived from a file the reader
+        // chose, so it takes the same hint every other mutating tool carries.
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: (input, options) => runTool(SITE_TOOL.requestImageHandoff, options?.signal ?? uncancelledToolSignal, async () => {
+          assertOnly(input, ["requestId", "reason"]);
+          const requestId = requiredString(input, "requestId");
+          const prior = sessionResults.get(requestId);
+          if (prior) return prior;
+          const reason = boundedString(input, "reason", 220);
+          const signal = options?.signal ?? uncancelledToolSignal;
+          let pendingOutcome = activeImageHandoffs.get(requestId);
+          if (!pendingOutcome) {
+            pendingOutcome = requestImageHandoff({ requestId, reason });
+            activeImageHandoffs.set(requestId, pendingOutcome);
+          }
+          // Agent-side cancellation has to reach the drawer, or a cancelled
+          // request would leave it open with nothing listening.
+          const onAbort = () => abortImageHandoff(requestId);
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+          try {
+            const outcome = await pendingOutcome;
+            const result = outcome.status === "provided"
+              ? { status: "provided", assetIds: outcome.assetIds, note: "Refresh get_project_context(detail: \"assets\") before referencing these ids." }
+              : { status: "dismissed", reason: outcome.reason };
+            sessionResults.set(requestId, result);
+            return result;
+          } finally {
+            signal.removeEventListener("abort", onAbort);
+            if (activeImageHandoffs.get(requestId) === pendingOutcome) activeImageHandoffs.delete(requestId);
+          }
+        }),
+      },
+      { signal: controller.signal },
+    ),
   ];
 
   void Promise.all(registrations).then(() => {
@@ -757,6 +813,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     onStatus(true);
   }).catch((error) => {
     if (controller.signal.aborted) return;
+    cancelActiveImageHandoffs();
     controller.abort();
     sessionResults.clear();
     recordDiagnostic("webmcp:registration-failed", {
@@ -767,6 +824,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
   });
   return () => {
     if (controller.signal.aborted) return;
+    cancelActiveImageHandoffs();
     controller.abort();
     sessionResults.clear();
     recordDiagnostic("webmcp:removed", { count: registeredCount });

@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node scripts/sync-site-manifest.mjs && vite",
     "typecheck": "tsc --noEmit",
+    "tokens": "node scripts/generate-tokens.mjs",
+    "tokens:check": "node scripts/generate-tokens.mjs --check && node scripts/check-tokens.mjs",
     "test": "vitest run",
     "catalog:assets": "node scripts/sync-bundled-asset-catalog.mjs --write",
     "build": "node scripts/sync-site-manifest.mjs && node scripts/sync-bundled-asset-catalog.mjs && vite build && node scripts/prepare-sites-build.mjs && node scripts/sync-sites-migrations.mjs",
@@ -14,12 +16,13 @@
     "test:sites:built": "node --test tests/*.test.mjs",
     "optimize:assets": "node scripts/optimize-runtime-images.mjs --write",
     "audit:cutouts": "node scripts/audit-cutout-alpha.mjs",
-    "verify:release": "npm run typecheck && npm test && npm run test:sites && npm run audit:cutouts",
+    "verify:release": "npm run tokens:check && npm run typecheck && npm test && npm run test:sites && npm run audit:cutouts",
     "verify:deployment": "node scripts/verify-deployment.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",
     "@vitejs/plugin-react": "5.0.4",
+    "motion": "13.1.1",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "three": "0.185.1",

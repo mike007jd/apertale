@@ -117,7 +117,7 @@ describe("creation workshop session", () => {
     expect(restored.assets.map((asset) => asset.id)).toEqual([id(1), id(2), id(3)]);
   });
 
-  it("treats stored workshop photos as verified sources instead of asking for Image handoff", () => {
+  it("treats stored workshop photos as verified sources instead of asking for a photo handoff", () => {
     const withPhotos = reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
       type: "append-assets",
       assets: [workshopAsset(1), workshopAsset(2)],
@@ -129,7 +129,7 @@ describe("creation workshop session", () => {
 
     expect(brief.readiness.blockingMissingFields.some((blocker) => blocker.reason.includes("has not verified"))).toBe(false);
     expect(brief.readiness.questions).not.toContain(
-      "Please use Image handoff for the missing photos, then ask me to check readiness again.",
+      "Call request_image_handoff for the missing photos, then check readiness again.",
     );
     // Premise and audience still belong to the Agent conversation.
     expect(brief.readiness.questions).toEqual(expect.arrayContaining([

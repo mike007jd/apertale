@@ -190,6 +190,52 @@ describe("BookEngine document contract", () => {
     expect(JSON.stringify(context).length).toBeLessThanOrEqual(2150);
   });
 
+  /**
+   * Preview is the reader's view of a finished book. Every authoring control
+   * hides itself there, but the canvas keeps its pointer handlers, so a drag
+   * used to write a real transform into a document the reader believed they
+   * were only looking at. The refusal belongs in the model, not only in the
+   * chrome that happens to be hidden at the time.
+   */
+  it("refuses a person's direct edits while Preview is on, and keeps working for Codex", () => {
+    const engine = cityEngine();
+    engine.setPreview(true);
+
+    for (const command of [
+      { type: "edit" as const, requestId: "p-edit", expectedRevision: 1, elementId: "bird", transform: { x: 0.9 } },
+      { type: "lift" as const, requestId: "p-lift", expectedRevision: 1, elementId: "bird" },
+      { type: "animate" as const, requestId: "p-animate", expectedRevision: 1, elementId: "bird", motion: null },
+      { type: "interact" as const, requestId: "p-interact", expectedRevision: 1, elementId: "bird", interaction: { focus: "spotlight" as const } },
+    ]) {
+      expect(engine.dispatch(command, "human")).toMatchObject({
+        ok: false,
+        code: "invalid",
+        summary: "Preview is read-only. Exit Preview to change this book.",
+      });
+    }
+    expect(engine.getSnapshot().document.revision).toBe(1);
+
+    // Watching Codex work is the point of previewing, so the agent is not
+    // refused - and leaving Preview restores direct manipulation.
+    expect(engine.dispatch({ type: "lift", requestId: "a-lift", expectedRevision: 1, elementId: "bird" }, "agent").ok).toBe(true);
+    engine.setPreview(false);
+    expect(engine.dispatch({ type: "lift", requestId: "h-lift", expectedRevision: 2, elementId: "bird" }, "human").ok).toBe(true);
+  });
+
+  it("still lets a person undo while Preview is on", () => {
+    const engine = cityEngine();
+    const edited = engine.dispatch({ type: "edit", requestId: "pre-edit", expectedRevision: 1, elementId: "bird", transform: { x: 0.8 } }, "human");
+    expect(edited.ok && edited.undoToken).toBeTruthy();
+    engine.setPreview(true);
+    const undone = engine.dispatch({
+      type: "undo",
+      requestId: "preview-undo",
+      expectedRevision: 2,
+      undoToken: edited.ok ? edited.undoToken! : "",
+    }, "human");
+    expect(undone.ok).toBe(true);
+  });
+
   it("rejects stale revisions without mutating state", () => {
     const engine = cityEngine();
     const result = engine.dispatch({ type: "lift", requestId: "stale", expectedRevision: 99, elementId: "bird" }, "agent");

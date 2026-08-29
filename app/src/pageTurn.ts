@@ -1,4 +1,5 @@
 import { recordDiagnostic } from "./diagnostics";
+import { durationMs } from "./design/tokens.generated";
 import type { TurnState } from "./types";
 
 export type TurnDirection = "forward" | "backward";
@@ -121,7 +122,7 @@ export function createPageTurnSession(deps: PageTurnSessionDeps) {
     active = turn;
     deps.setTurn(turn);
     const started = deps.now();
-    const duration = Math.max(240, 760 * Math.abs(to - from));
+    const duration = Math.max(240, durationMs.navigation * Math.abs(to - from));
     const animationGeneration = generation;
     let frameCount = 0;
 

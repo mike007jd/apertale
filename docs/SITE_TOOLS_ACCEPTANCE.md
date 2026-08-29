@@ -10,7 +10,7 @@ Run from `app/` against the exact judge-facing URL:
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
-The command must return `ok: true`, the exact six tool names, `Origin-Agent-Cluster: ?1`, `Permissions-Policy: tools=(self)`, and `hostLoop: required`. A 401, redirect to private sign-in, missing header, wrong product manifest, or missing tool identifier fails this gate.
+The command must return `ok: true`, the exact seven tool names, `Origin-Agent-Cluster: ?1`, `Permissions-Policy: tools=(self)`, and `hostLoop: required`. A 401, redirect to private sign-in, missing header, wrong product manifest, or missing tool identifier fails this gate.
 
 This check proves the deployed artifact and document policy. It does not claim that ChatGPT injected `document.modelContext` or discovered the tools.
 
@@ -20,15 +20,16 @@ This check proves the deployed artifact and document policy. It does not claim t
 2. Open the exact public URL from step 1. Do not use an embedded iframe; Site Tools from embedded content are not supported.
 3. Confirm the address-bar Site Tools arrow appears.
 4. Open the Story panel and confirm the status changes from **WebMCP ready** to **WebMCP connected**.
-5. Open the address-bar tool list and record exactly these six names:
+5. Open the address-bar tool list and record exactly these seven names:
    - `get_project_context`
    - `manage_book`
    - `compose_spread`
    - `apply_scene_patch`
    - `set_presentation`
    - `undo_project_change`
+   - `request_image_handoff`
 
-Create flows must call `get_project_context` with `detail: "authoring-guide"`, then `detail: "creation-readiness"`. Blocking results are user questions, not permission to generate; create must reuse the same ready brief and reruns the same gate. After actual rendering, the Agent reads `detail: "quality-review"`, explicitly calls `manage_book(action: "begin-critique")`, inspects real frames, and records the critique. Those details and actions remain inside the existing six-tool catalog. Share stays closed until the current revision's report allows publication.
+Create flows must call `get_project_context` with `detail: "authoring-guide"`, then `detail: "creation-readiness"`. Blocking results are user questions, not permission to generate; create must reuse the same ready brief and reruns the same gate. When direct host media transfer is unavailable, `request_image_handoff` opens the reader-mediated import drawer and returns browser-local asset ids without changing the document revision. After actual rendering, the Agent reads `detail: "quality-review"`, explicitly calls `manage_book(action: "begin-critique")`, inspects real frames, and records the critique. Share stays closed until the current revision's report allows publication.
 
 If the arrow is absent, first verify that the selected account and model have Site Tools access; then refresh the page after enabling the permission. Do not reinterpret ordinary browser automation as a passing WebMCP run.
 
@@ -68,6 +69,19 @@ Then answer with a complete brief. For the illustrated path, explicitly choose g
 - every finished spread retains an original composite in `sourceAssetId`, while declared user-photo provenance uses the separate `personalSourceAssetId` identity gate.
 
 For a personal draft created before lifecycle metadata existed, run the same readiness check and call `manage_book(action: "adopt-creation-brief")` at the current revision. The action must pass once, reject a second adoption, reject curated samples, and allow the normal render → critique → publish-ready path without guessing photo policy.
+
+### Request an image handoff
+
+Prompt:
+
+> I need two browser-local images for this book: a portrait cover and one full-spread illustration. Ask me to provide them and wait for the result.
+
+Required evidence:
+
+- `request_image_handoff` receives a unique `requestId` and a plain-language reason that names the two needed images.
+- The workshop drawer opens with that reason, and the tool call remains pending until the reader chooses files or dismisses it.
+- A provided result returns one or more real `asset:` ids; the Agent refreshes `get_project_context(detail: "assets")` before referencing them.
+- The handoff does not change the document revision. A dismissed request returns a structured dismissal rather than a false success.
 
 ### Compose and patch
 
@@ -133,11 +147,11 @@ Record all of the following before declaring the host gate passed:
 
 - Public URL and UTC timestamp.
 - ChatGPT desktop app version, account/workspace class, and selected model.
-- Screenshot of the address-bar list with exactly six tools.
+- Screenshot of the address-bar list with exactly seven tools.
 - Screen recording containing the prompts, visible tool activity, resulting book changes, human drag, exact undo, and presentation switch.
 - Screenshots of the incomplete readiness questions, checking/blocked state, every visually inspected cover/spread, and final publish-ready or needs-material state.
 - Structured readiness response, quality render manifest, both critique round results when a repair was needed, and final quality report.
-- JSON from `window.apertaleDiagnostics()` showing `webmcp:registered` with `registered: 6` plus tool start/success events.
+- JSON from `window.apertaleDiagnostics()` showing `webmcp:registered` with `registered: 7` plus tool start/success events.
 - Console warning/error count after a fresh reload.
 
 The gate fails if any required mutation is performed only through clicks, if the page and Agent operate different state, if the tool list is incomplete, or if the judge-facing URL is not anonymously reachable.

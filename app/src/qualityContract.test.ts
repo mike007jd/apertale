@@ -6,6 +6,7 @@ import {
   QUALITY_VISUAL_CRITERION_IDS,
   assertPublishableQuality,
   buildQualityReport,
+  groupQualityBlockers,
   buildQualityRenderManifest,
   creationAssetPolicyIssues,
   evaluateDeterministicQuality,
@@ -235,5 +236,33 @@ describe("quality contract", () => {
         expect.objectContaining({ id: "cloud", interaction: false }),
       ],
     });
+  });
+});
+
+describe("quality blocker grouping", () => {
+  const check = (message: string, suggestedPatch?: string) => ({
+    criterionId: "cover-appeal",
+    outcome: "blocker" as const,
+    message,
+    evidence: [],
+    ...(suggestedPatch ? { suggestedPatch } : {}),
+  });
+
+  it("shows one line per distinct fault and carries the repeat count", () => {
+    const grouped = groupQualityBlockers([
+      check("The cover title is illegible at shelf size."),
+      check("The cover title is illegible at shelf size."),
+      check("The cover title is illegible at shelf size.", "Increase the title weight."),
+      check("Two spreads reuse the same illustration.", "Generate a second plate."),
+      { ...check("A warning, not a blocker."), outcome: "warn" as const },
+    ]);
+    expect(grouped).toEqual([
+      { message: "The cover title is illegible at shelf size.", suggestedPatch: "Increase the title weight.", count: 3 },
+      { message: "Two spreads reuse the same illustration.", suggestedPatch: "Generate a second plate.", count: 1 },
+    ]);
+  });
+
+  it("survives a report that never arrived", () => {
+    expect(groupQualityBlockers(undefined)).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 ---
 name: apertale-authoring
-description: Create or revise polished interactive Apertale books through the site's six WebMCP tools. Use when a user asks Codex to turn an idea, manuscript, or personal images into an illustrated story, guide, comic, photo book, or educational book in the Apertale browser.
+description: Create or revise polished interactive Apertale books through the site's WebMCP tool surface. Use when a user asks Codex to turn an idea, manuscript, or personal images into an illustrated story, guide, comic, photo book, or educational book in the Apertale browser.
 ---
 
 # Apertale Authoring
@@ -54,7 +54,7 @@ Only after the complete asset plan and generated art set exist:
 
 1. Re-check `creation-readiness`, then create the book with the same completed brief.
    For an existing personal book that predates the lifecycle metadata, use the one-time `adopt-creation-brief` action at the inspected revision instead of recreating or guessing its brief.
-2. Import exact assets through supported host transfer or the workshop **Image handoff**, then refresh `get_project_context(detail: "assets")`.
+2. Import exact assets through supported host transfer. When direct transfer is unavailable, call `request_image_handoff` with a unique `requestId` and a plain-language reason, wait for the reader to choose or dismiss, then refresh `get_project_context(detail: "assets")`.
 3. Set the dedicated portrait cover.
 4. Apply full-spread backgrounds and meaningful interactions.
 5. Visit the shelf cover and every spread so Apertale records the current revision's real render evidence. Use `set_presentation(spreadId)` to navigate without changing the document revision.
@@ -66,7 +66,7 @@ Never claim generation or import succeeded without evidence: returned asset ids,
 
 ## Authoring contract
 
-- Create a dedicated portrait cover. Never reuse an interior crop, flat color, or CSS stand-in. Prefer direct host media transfer from the Agent conversation. If the current host cannot transfer image bytes through WebMCP, ask the user to use the workshop's small **Image handoff** fallback once, refresh assets, then use `manage_book` with `action: "set-cover"`.
+- Create a dedicated portrait cover. Never reuse an interior crop, flat color, or CSS stand-in. Prefer direct host media transfer from the Agent conversation. If the current host cannot transfer image bytes through WebMCP, call `request_image_handoff`, wait for the returned asset ids, refresh assets, then use `manage_book` with `action: "set-cover"`.
 - Make every showcase spread intentional. Use the page as a composition, not a template slot. A preserved-photo album keeps its approved source-true layout rather than reillustrating the people in it.
 - Treat each spread as one full-width illustration shared by both paper pages. Design across the gutter; keep important copy and faces clear of the fold. Use foreground, midground, and background layers to create depth without shipping runtime models.
 - Give every non-guide spread at least one meaningful hover/focus/click response. Vary the interaction according to the content.
@@ -76,7 +76,7 @@ Never claim generation or import succeeded without evidence: returned asset ids,
 - For GPT-Image-2 cutouts, explicitly request a transparent background and preserve the generated alpha. Make one separate ImageGen request for every final semantic subject; one request must produce exactly one asset. Never generate an atlas, contact sheet, sprite sheet, multi-object grid, or grouped cutout and crop it into finals. Reject an opaque canvas, baked checkerboard, empty subject, backing rectangle, chroma spill, detached crop fragments, or baked glow; verify the file has a real alpha channel and regenerate instead of color-keying it.
 - Use only image asset ids returned by `get_project_context(detail: "assets")`. Never pass arbitrary URLs, executable content, HTML, JavaScript, shader code, or model references. WebMCP does not yet standardize binary attachment transfer across every host; report this boundary and request the smallest explicit handoff instead of pretending an attachment was imported. The fallback accepts PNG/JPEG/WebP sources up to 12 MB and optimizes them locally to at most 1.5 MB before the asset id is exposed.
 - Negotiate capabilities from `get_project_context`; never assume a site-owner credential or an external generation backend. Image generation and analysis happen in the user's active Codex/ChatGPT conversation.
-- Preserve `requestId`, `expectedRevision`, stable spread ids, and returned undo tokens. Refresh context after every mutation. On a revision conflict, refresh and re-plan; do not brute-force retries.
+- Preserve `requestId` on every mutating call. For document mutations, also preserve `expectedRevision`, stable spread ids, and returned undo tokens. Refresh context after every document mutation. On a revision conflict, refresh and re-plan; do not brute-force retries.
 - Request explicit user approval before publication or deployment. Once approved, keep Share fail-closed until the current revision's quality report allows publication.
 
 ## Finish

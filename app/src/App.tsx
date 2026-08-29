@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ArrowCounterClockwise,
@@ -15,14 +15,12 @@ import {
   EyeSlash,
   Lock,
   LockOpen,
-  Moon,
   Minus,
   Plus,
   ImageSquare,
   LinkSimple,
   Sparkle,
   SpinnerGap,
-  Sun,
   UploadSimple,
   WarningCircle,
   X,
@@ -42,6 +40,14 @@ import {
   reduceCreationWorkshop,
   restoreCreationWorkshopAssets,
 } from "./creationWorkshop";
+import { AnimatePresence, MotionConfig } from "motion/react";
+import { smootherstep } from "./design/curves";
+import { durationMs } from "./design/tokens.generated";
+import { announce, supportsWebGl2 } from "./readerShell";
+import { spreadFraction } from "./stageGeometry";
+import { Panel, Toast } from "./design/primitives";
+import { ThemeSwitch } from "./design/ThemeSwitch";
+import { completeImageHandoff, currentImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
 import { useFocusTrap } from "./focusTrap";
 import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete } from "./renderEvidence";
@@ -64,16 +70,34 @@ const runtimeParams = new URLSearchParams(window.location.search);
 const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
 const forceReducedMotion = runtimeParams.get("reducedMotion") === "1";
 const forceFallback = runtimeParams.get("fallback") === "1";
+const motionAuditSeconds = (() => {
+  if (!import.meta.env.DEV) return null;
+  const value = Number(runtimeParams.get("motionAudit"));
+  return Number.isFinite(value) && value >= 0.5 && value <= 30 ? value : null;
+})();
+const navigationDurationMs = motionAuditSeconds === null ? durationMs.navigation : motionAuditSeconds * 1000;
+/**
+ * Freezes the case at a fixed openness so a mid-swing pose can be captured for
+ * the visual QA record in app/qa. 0 is closed, 1 is open; anything outside that
+ * range is ignored.
+ */
+const forcedOpenProgress = (() => {
+  // URLSearchParams.get returns null when the parameter is absent, and
+  // Number(null) is 0 - not NaN - so a missing parameter used to read as a
+  // valid "freeze the book shut", which froze it for every visitor.
+  const raw = runtimeParams.get("openProgress");
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+})();
 const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: module.ThreeBook })));
 
 type OpeningBook = {
   id: string;
   title: string;
   coverUrl: string;
-  sourceRect: MotionRect | null;
 };
 
-type MotionRect = { left: number; top: number; width: number; height: number };
 type LibraryMotion = "idle" | "opening-book" | "closing-book";
 type LibraryTab = "yours" | "explore";
 
@@ -87,17 +111,6 @@ export function partitionLibraryBooks<Book extends { sample?: boolean }>(books: 
   const curated = books.filter((book) => Boolean(book.sample));
   return { personal, curated, tabbed: personal.length > 0 };
 }
-
-type BookTransition = {
-  id: string;
-  title: string;
-  coverUrl: string;
-  spreadTextureUrl: string;
-  spreadTitle: string;
-  spreadBody: string;
-  direction: "open" | "close";
-  cardRect: MotionRect;
-};
 
 async function copyPlainText(text: string): Promise<boolean> {
   try {
@@ -130,76 +143,6 @@ async function copyPlainText(text: string): Promise<boolean> {
   }
 }
 
-function readRect(element: Element | null): MotionRect | null {
-  if (!(element instanceof HTMLElement)) return null;
-  const rect = element.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return null;
-  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-}
-
-function transitionStyle(cardRect: MotionRect): CSSProperties {
-  const openHeight = Math.min(window.innerHeight * 0.68, 620);
-  const openWidth = openHeight * (2 / 3);
-  const openLeft = (window.innerWidth - openWidth) / 2;
-  const openTop = (window.innerHeight - openHeight) / 2;
-  const spreadWidth = Math.min(openWidth * 2.08, window.innerWidth * 0.82);
-  return {
-    "--book-card-x": `${cardRect.left}px`,
-    "--book-card-y": `${cardRect.top}px`,
-    "--book-card-w": `${cardRect.width}px`,
-    "--book-card-h": `${cardRect.height}px`,
-    "--book-open-dx": `${openLeft - cardRect.left}px`,
-    "--book-open-dy": `${openTop - cardRect.top}px`,
-    "--book-open-sx": `${openWidth / cardRect.width}`,
-    "--book-open-sy": `${openHeight / cardRect.height}`,
-    "--book-spread-x": `${(window.innerWidth - spreadWidth) / 2}px`,
-    "--book-spread-y": `${openTop}px`,
-    "--book-spread-w": `${spreadWidth}px`,
-    "--book-spread-h": `${openHeight}px`,
-  } as CSSProperties;
-}
-
-function BookTransitionOverlay({ transition, onDone }: { transition: BookTransition; onDone: () => void }) {
-  // `animationend` is the normal settle signal, but a browser that skips or
-  // interrupts the animation must never leave the shelf and reader both locked.
-  useEffect(() => {
-    const timer = window.setTimeout(onDone, 1600);
-    return () => window.clearTimeout(timer);
-  }, [onDone]);
-  return (
-    <div
-      className={`book-nav-transition is-${transition.direction}`}
-      style={transitionStyle(transition.cardRect)}
-      aria-hidden="true"
-      onAnimationEnd={(event) => {
-        if (event.target === event.currentTarget) onDone();
-      }}
-    >
-      <div className={`book-nav-spread ${transition.spreadTextureUrl ? "has-art" : "has-copy"}`}>
-        {transition.spreadTextureUrl ? (
-          <img className="book-nav-spread-art" src={transition.spreadTextureUrl} alt="" />
-        ) : (
-          <article className="book-nav-spread-copy">
-            <p>{transition.title}</p>
-            <h2>{transition.spreadTitle}</h2>
-            <span>{transition.spreadBody}</span>
-          </article>
-        )}
-      </div>
-      <div className="book-nav-cover">
-        <img src={transition.coverUrl} alt="" />
-      </div>
-    </div>
-  );
-}
-
-/**
- * Honest staged feedback for the one operation a reader is waiting on.
- *
- * The three stages map to real events: intent/prewarm, the renderer reporting
- * that it started loading this spread, and the long composition tail. Reduced
- * motion keeps the same status text and step marks without a sustained spin.
- */
 const LOAD_STAGES = ["warming", "loading", "composing"] as const;
 type LoadStage = (typeof LOAD_STAGES)[number];
 
@@ -237,24 +180,6 @@ function BookLoadingFeedback({ title, placement, stage, reducedMotion }: {
 }
 
 /** Joins announcement fragments without producing the doubled `..` of naive concatenation. */
-function announce(...parts: Array<string | undefined | null>) {
-  return parts
-    .map((part) => (part ?? "").trim())
-    .filter(Boolean)
-    .map((part) => (/[.!?…:;]$/u.test(part) ? part : `${part}.`))
-    .join(" ");
-}
-
-function supportsWebGl2() {
-  if (forceFallback) return false;
-  try {
-    const canvas = document.createElement("canvas");
-    return Boolean(canvas.getContext("webgl2"));
-  } catch {
-    return false;
-  }
-}
-
 type FallbackLayer = {
   id: string;
   url: string;
@@ -379,7 +304,7 @@ function FallbackBook({ snapshot, spread, onReady, onUnavailable, onRendered }: 
         onError={() => markFailed(loadKeys[0])}
       />
       {resolved.layers.map(({ id, url, element }, index) => {
-        const x = ((element.page === "right" ? 0.5 : 0) + element.transform.x * 0.5) * 100;
+        const x = spreadFraction(element) * 100;
         const style = {
           left: `${x}%`,
           top: `${element.transform.y * 100}%`,
@@ -423,7 +348,6 @@ export function App() {
   const [showLibrary, setShowLibrary] = useState(true);
   const [libraryMotion, setLibraryMotion] = useState<LibraryMotion>("idle");
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("yours");
-  const [bookTransition, setBookTransition] = useState<BookTransition | null>(null);
   const [showCreateGuide, setShowCreateGuide] = useState(false);
   const [showElementAgentGuide, setShowElementAgentGuide] = useState(false);
   const [elementPromptCopied, setElementPromptCopied] = useState(false);
@@ -454,6 +378,7 @@ export function App() {
   const reducedMotionRef = useRef(reducedMotion);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const addPhotoButton = useRef<HTMLButtonElement | null>(null);
+  const stage = useRef<HTMLElement | null>(null);
   const librarySheet = useRef<HTMLDivElement | null>(null);
   const libraryOpener = useRef<HTMLElement | null>(null);
   const createGuideCard = useRef<HTMLDivElement | null>(null);
@@ -490,8 +415,91 @@ export function App() {
 
   const turnPage = turnController.turnPage;
   const onPageGesture = turnController.onPageGesture;
-  const webGlAvailable = useMemo(supportsWebGl2, []);
-  const renderWebGl = !showLibrary && webGlAvailable && !sceneFailed;
+  const webGlAvailable = useMemo(() => supportsWebGl2(forceFallback), []);
+  const renderWebGl = webGlAvailable && !sceneFailed;
+
+  /**
+   * 1 is a fully open book, 0 is the closed case facing the reader. The library
+   * shows a closed book behind it; opening animates this to 1 while the shelf
+   * fades, so the cover the reader clicked is the cover that swings.
+   */
+  const openProgress = useRef(forcedOpenProgress ?? (showLibrary ? 0 : 1));
+  const openFrame = useRef<number | null>(null);
+  const openCleanup = useRef<(() => void) | null>(null);
+  const setOpenProgress = (value: number) => { openProgress.current = forcedOpenProgress ?? value; };
+
+  const animateCase = useCallback((to: 0 | 1, done?: () => void) => {
+    openCleanup.current?.();
+    // A frozen case is a capture aid, not an animation: settle immediately so
+    // the surrounding state machine still completes.
+    if (reducedMotion || forcedOpenProgress !== null) {
+      setOpenProgress(to);
+      done?.();
+      return;
+    }
+    // Equal durations. The shelf's own fade is what differentiates the two
+    // directions now, rather than a compressed curve that has to land harder
+    // to cover the same distance in less time. This IS `--motion-navigation`;
+    // retyping the number is how the CSS and the case fall out of step.
+    const duration = navigationDurationMs;
+
+    /*
+     * One curve, end to end. This was three self-terminating power segments
+     * glued together, and the joins WERE the jank: measured, velocity stepped
+     * 15x at t=0.16, the cover came to a literal dead stop and restarted at
+     * t=0.79, and the close landed with speed still in it.
+     *
+     * The hold that used to be segment one existed because the shelf fade was
+     * covering the swing - but that was the wrong curve to deform. The shelf
+     * clears on its own compressed sub-timeline instead, which is how the
+     * reference implementations solve the same problem.
+     */
+    /**
+     * The clock starts on the first frame, not at the click. A measured ~217ms
+     * of main-thread stall follows the click while the scene settles, and
+     * starting the clock before it meant the gesture was already a fifth over
+     * before anything could be drawn.
+     */
+    let started: number | null = null;
+
+    /**
+     * requestAnimationFrame stops on a hidden page, so a reader who switches
+     * tabs mid-open would come back to a shelf that never went away and a book
+     * that never opened. Settling on the way out is what a returning reader
+     * expects to find anyway.
+     */
+    const stop = () => {
+      if (openFrame.current !== null) cancelAnimationFrame(openFrame.current);
+      openFrame.current = null;
+      document.removeEventListener("visibilitychange", onHidden);
+      openCleanup.current = null;
+    };
+    const settle = () => {
+      stop();
+      setOpenProgress(to);
+      done?.();
+    };
+    function onHidden() {
+      if (document.hidden) settle();
+    }
+    document.addEventListener("visibilitychange", onHidden);
+    openCleanup.current = stop;
+
+    const step = (now: number) => {
+      started ??= now;
+      const linear = Math.min(1, (now - started) / duration);
+      const eased = smootherstep(linear);
+      setOpenProgress(to === 1 ? eased : 1 - eased);
+      if (linear < 1) {
+        openFrame.current = requestAnimationFrame(step);
+        return;
+      }
+      settle();
+    };
+    openFrame.current = requestAnimationFrame(step);
+  }, [reducedMotion]);
+
+  useEffect(() => () => openCleanup.current?.(), []);
   const library = useMemo(() => bookEngine.getLibrary(), [snapshot.document.id, snapshot.document.revision]);
   const activeLibraryBook = library.books.find((book) => book.id === library.activeBookId);
   const { personal: personalBooks, curated: curatedBooks, tabbed: libraryTabbed } = useMemo(
@@ -541,10 +549,8 @@ export function App() {
   }, [workshopAssets, workshopHydrated]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return undefined;
-    const requestedSeconds = Number(runtimeParams.get("motionAudit"));
-    if (!Number.isFinite(requestedSeconds) || requestedSeconds < 0.5 || requestedSeconds > 30) return undefined;
-    document.documentElement.style.setProperty("--motion-navigation", `${requestedSeconds}s`);
+    if (motionAuditSeconds === null) return undefined;
+    document.documentElement.style.setProperty("--motion-navigation", `${motionAuditSeconds}s`);
     return () => { document.documentElement.style.removeProperty("--motion-navigation"); };
   }, []);
 
@@ -575,6 +581,46 @@ export function App() {
     : null;
   const selectedInteraction = selected ? resolveInteraction(selected) : null;
   const hovered = hoveredId ? spread.elements.find((element) => element.id === hoveredId) ?? null : null;
+
+  /**
+   * Anchor the selection ring when there is no renderer to anchor it.
+   *
+   * The WebGL scene projects the focused element every frame into
+   * --selection-x/y. On the flat fallback nobody writes them, so a selection
+   * made from the element rail left the ring parked at its CSS default,
+   * circling whatever happened to sit near the middle of the stage.
+   *
+   * The composited fallback places its own layers at a percentage of the
+   * book's padding box, so reusing that arithmetic puts the ring exactly on
+   * the layer it belongs to rather than approximately near it.
+   */
+  useLayoutEffect(() => {
+    const host = stage.current;
+    // Left untouched while the renderer owns these properties: it writes them
+    // every frame, and clearing them here would blank the ring for one frame
+    // on every selection change.
+    if (!host || renderWebGl || !selected) return undefined;
+    const place = () => {
+      const book = host.querySelector<HTMLElement>(".fallback-book.is-composited");
+      if (!book) return;
+      const hostBox = host.getBoundingClientRect();
+      const bookBox = book.getBoundingClientRect();
+      // clientLeft/clientTop are the border widths, and the layers are
+      // positioned against the padding box the border encloses.
+      const left = bookBox.left - hostBox.left + book.clientLeft;
+      const top = bookBox.top - hostBox.top + book.clientTop;
+      host.style.setProperty("--selection-x", `${left + spreadFraction(selected) * book.clientWidth}px`);
+      host.style.setProperty("--selection-y", `${top + selected.transform.y * book.clientHeight}px`);
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(host);
+    return () => {
+      observer.disconnect();
+      host.style.removeProperty("--selection-x");
+      host.style.removeProperty("--selection-y");
+    };
+  }, [renderWebGl, selected]);
   const isNight = snapshot.session.sceneThemeId === "midnight-desk";
   const pageTurnNav = pageTurnNavDisabled(
     turn,
@@ -582,7 +628,7 @@ export function App() {
     snapshot.document.spreads.length,
   );
   const stageIsLoading = readyBookId !== snapshot.document.id || sceneLoadingBookId === snapshot.document.id;
-  const libraryBusy = Boolean(openingBook || bookTransition || libraryMotion !== "idle");
+  const libraryBusy = Boolean(openingBook || libraryMotion !== "idle");
 
   const isCreatorBook = Boolean(activeLibraryBook) && activeLibraryBook?.sample === false;
   const qualityGate = bookEngine.getQualityGate();
@@ -650,92 +696,94 @@ export function App() {
     window.setTimeout(() => libraryOpener.current?.focus(), 0);
   }, []);
 
-  const findLibraryCoverRect = useCallback((bookId: string) => readRect(
-    librarySheet.current?.querySelector(`[data-book-id="${bookId}"] .library-cover-frame`) ?? null,
-  ), []);
-
-  const finishBookTransition = useCallback(() => {
-    if (!bookTransition) return;
-    recordDiagnostic("book:navigation-transition-settled", {
-      documentId: bookTransition.id,
-      direction: bookTransition.direction,
-    });
-    if (bookTransition.direction === "open") {
-      openingBookRef.current = null;
-      setOpeningBook(null);
-      hideLibrary();
-    } else {
-      setLibraryMotion("idle");
-      setBookTransition(null);
-      window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
-      return;
+  const settleLibraryToReader = useCallback(() => {
+    // Escape is an explicit settle, not merely a visibility toggle. Cancel a
+    // close that has not reached animateCase yet as well as a case animation
+    // already in flight, then restore the fully-open reader pose.
+    if (libraryFrame.current !== null) {
+      cancelAnimationFrame(libraryFrame.current);
+      libraryFrame.current = null;
     }
-    setBookTransition(null);
-  }, [bookTransition, hideLibrary]);
+    openCleanup.current?.();
+    setOpenProgress(1);
+    openingBookRef.current = null;
+    setOpeningBook(null);
+    hideLibrary();
+  }, [hideLibrary]);
 
   const beginOpenTransition = useCallback((book: OpeningBook) => {
-    const sourceRect = book.sourceRect ?? findLibraryCoverRect(book.id);
-    if (reducedMotion || !sourceRect) {
+    if (reducedMotion) {
       recordDiagnostic("book:navigation-transition-reduced", { documentId: book.id, direction: "open" });
       openingBookRef.current = null;
       setOpeningBook(null);
+      setOpenProgress(1);
       hideLibrary();
       return;
     }
-    const liveSnapshot = bookEngine.getSnapshot();
-    const transitionSpread = liveSnapshot.document.spreads[liveSnapshot.session.currentSpreadIndex]
-      ?? liveSnapshot.document.spreads[0];
+    recordDiagnostic("book:cover-open-started", { documentId: book.id });
     openingBookRef.current = book;
     setOpeningBook(null);
     setLibraryMotion("opening-book");
-    setBookTransition({
-      id: book.id,
-      title: book.title,
-      coverUrl: book.coverUrl,
-      spreadTextureUrl: transitionSpread?.textureUrl ?? "",
-      spreadTitle: transitionSpread?.title ?? book.title,
-      spreadBody: transitionSpread?.body ?? "",
-      direction: "open",
-      cardRect: sourceRect,
+    animateCase(1, () => {
+      openingBookRef.current = null;
+      hideLibrary();
+      recordDiagnostic("book:cover-open-settled", { documentId: book.id });
     });
-    recordDiagnostic("book:navigation-transition-started", { documentId: book.id, direction: "open" });
-  }, [findLibraryCoverRect, hideLibrary, reducedMotion]);
+  }, [animateCase, hideLibrary, reducedMotion]);
+
+  /**
+   * Where the book sits on the shelf, in stage-relative CSS pixels.
+   *
+   * The renderer unprojects this so the case can start the open from the exact
+   * slot the reader clicked and land back in it on the way home. Without it the
+   * book opens in the middle of the screen with no relationship to the shelf,
+   * which reads as a cut rather than as picking a book up.
+   */
+  const handoffRect = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  const measureShelfCard = useCallback((bookId: string) => {
+    const card = librarySheet.current?.querySelector(`[data-book-id="${bookId}"] .library-cover-frame`);
+    if (!card) return null;
+    const c = card.getBoundingClientRect();
+    if (c.width < 2 || c.height < 2) return null;
+    // Viewport coordinates, not stage-relative: the stage is display:none at
+    // the moment the reader clicks, so its own rect is all zeros and any
+    // subtraction here would silently be against nothing. The renderer
+    // converts against the canvas it is actually drawing into.
+    return { x: c.left, y: c.top, width: c.width, height: c.height };
+  }, []);
 
   const openLibrary = useCallback(() => {
-    if (showLibrary || bookTransition || openingBookRef.current) return;
+    if (showLibrary || openingBookRef.current) return;
     libraryOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setLibraryMotion("closing-book");
     setShowLibrary(true);
     if (reducedMotion) {
       setLibraryMotion("idle");
+      setOpenProgress(0);
       recordDiagnostic("book:navigation-transition-reduced", { documentId: snapshot.document.id, direction: "close" });
       return;
     }
+    // The destination slot does not exist until the shelf has laid out, so the
+    // close waits two frames for a real rect before it starts travelling. A
+    // book that shuts in mid-air and then cuts to the shelf is the thing this
+    // is here to avoid.
     libraryFrame.current = window.requestAnimationFrame(() => {
       libraryFrame.current = window.requestAnimationFrame(() => {
         libraryFrame.current = null;
-        const cardRect = findLibraryCoverRect(snapshot.document.id);
-        if (!cardRect) {
-          setLibraryMotion("idle");
-          return;
-        }
-        const liveSnapshot = bookEngine.getSnapshot();
-        const transitionSpread = liveSnapshot.document.spreads[liveSnapshot.session.currentSpreadIndex]
-          ?? liveSnapshot.document.spreads[0];
-        setBookTransition({
-          id: snapshot.document.id,
-          title: snapshot.document.title,
-          coverUrl: resolvedCoverUrls[snapshot.document.id] ?? activeLibraryBook?.coverTextureUrl ?? "",
-          spreadTextureUrl: transitionSpread?.textureUrl ?? "",
-          spreadTitle: transitionSpread?.title ?? snapshot.document.title,
-          spreadBody: transitionSpread?.body ?? "",
-          direction: "close",
-          cardRect,
+        handoffRect.current = measureShelfCard(snapshot.document.id);
+        recordDiagnostic("book:cover-close-started", {
+          documentId: snapshot.document.id,
+          anchored: Boolean(handoffRect.current),
         });
-        recordDiagnostic("book:navigation-transition-started", { documentId: snapshot.document.id, direction: "close" });
+        animateCase(0, () => {
+          setLibraryMotion("idle");
+          recordDiagnostic("book:cover-close-settled", { documentId: snapshot.document.id });
+          window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
+        });
       });
     });
-  }, [activeLibraryBook?.coverTextureUrl, bookTransition, findLibraryCoverRect, reducedMotion, resolvedCoverUrls, showLibrary, snapshot.document.id, snapshot.document.title]);
+  }, [animateCase, measureShelfCard, reducedMotion, showLibrary, snapshot.document.id]);
 
   const handleBookLoading = useCallback((documentId: string) => {
     setSceneLoadingBookId(documentId);
@@ -756,13 +804,37 @@ export function App() {
     recordDiagnostic("book:visual-review-unavailable", { documentId });
   }, []);
 
+  /**
+   * The cover swings only once the scene behind the shelf can actually draw
+   * the book. Starting on the document switch instead meant the shelf faded
+   * out onto an empty stage for the length of a WebGL cold start - the two
+   * phases were strictly serial, which is what made click-to-readable take
+   * roughly two and a half seconds. The shelf now holds its "Opening" state
+   * during the warmup and the reader never sees the gap.
+   */
   useEffect(() => {
     if (!openingBook || snapshot.document.id !== openingBook.id) return;
-    if (bookTransition?.direction === "open") return;
-    beginOpenTransition(openingBook);
-  }, [beginOpenTransition, bookTransition?.direction, openingBook, snapshot.document.id]);
+    if (readyBookId === openingBook.id) {
+      beginOpenTransition(openingBook);
+      return undefined;
+    }
+    /**
+     * Readiness is a signal from the render loop, and the render loop stops on
+     * a hidden page or a stalled GPU. Waiting for it unconditionally would trap
+     * the reader on a shelf that says "Opening" forever, so the open proceeds
+     * regardless after a bounded wait - the same failsafe the CSS transition
+     * carried, kept for the same reason.
+     */
+    const failsafe = window.setTimeout(() => {
+      recordDiagnostic("book:cover-open-unready", { documentId: openingBook.id });
+      beginOpenTransition(openingBook);
+    }, 2600);
+    return () => window.clearTimeout(failsafe);
+  }, [beginOpenTransition, openingBook, readyBookId, snapshot.document.id]);
 
   const closeCodexGuide = useCallback(() => {
+    const request = currentImageHandoff();
+    if (request) dismissImageHandoff(request.requestId);
     setShowCreateGuide(false);
     window.setTimeout(() => createGuideOpener.current?.focus(), 0);
   }, []);
@@ -818,10 +890,11 @@ export function App() {
     recordDiagnostic(didCopy ? "element-agent:starter-copied" : "element-agent:copy-blocked", { elementId: selected.id, spreadId: spread.id });
   }, [selected, selectedElementPrompt, spread.id]);
 
-  const openBookFromLibrary = useCallback((bookId: string, source?: HTMLElement) => {
-    if (openingBookRef.current || bookTransition) return;
+  const openBookFromLibrary = useCallback((bookId: string) => {
+    if (openingBookRef.current) return;
     const book = library.books.find((candidate) => candidate.id === bookId);
     if (!book) return;
+    handoffRect.current = measureShelfCard(bookId);
     // The three stages track real work: the renderer chunk arriving, this
     // spread's artwork decoding, and the scene being composed from both.
     const warm = prewarmReader(bookId);
@@ -835,7 +908,6 @@ export function App() {
       id: book.id,
       title: book.title,
       coverUrl: resolvedCoverUrls[book.id] ?? book.coverTextureUrl,
-      sourceRect: readRect(source?.querySelector(".library-cover-frame") ?? null) ?? findLibraryCoverRect(book.id),
     };
 
     if (bookId === snapshot.document.id && readyBookId === bookId) {
@@ -864,7 +936,7 @@ export function App() {
       setShowMore(false);
       setShowOutline(false);
     });
-  }, [advanceLoadStage, beginOpenTransition, bookTransition, findLibraryCoverRect, library.books, prewarmReader, readyBookId, resolvedCoverUrls, snapshot.document.id]);
+  }, [advanceLoadStage, beginOpenTransition, library.books, prewarmReader, readyBookId, resolvedCoverUrls, snapshot.document.id]);
 
   useEffect(() => registerWebMcpTools(setWebMcpAvailable), []);
 
@@ -904,11 +976,14 @@ export function App() {
       if (event.key === "Escape" && showLibrary) {
         // Escape always resolves the shelf. When a cover transition is already
         // running, skip straight to the reader instead of ignoring the key.
-        if (openingBook || bookTransition || libraryMotion !== "idle") {
-          openingBookRef.current = null;
-          setOpeningBook(null);
-          setBookTransition(null);
-          hideLibrary();
+        if (
+          openingBookRef.current
+          || libraryFrame.current !== null
+          || openCleanup.current !== null
+          || openingBook
+          || libraryMotion !== "idle"
+        ) {
+          settleLibraryToReader();
         } else {
           openBookFromLibrary(snapshot.document.id);
         }
@@ -931,35 +1006,19 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [bookTransition, closeCodexGuide, closeElementAgentGuide, hideLibrary, libraryMotion, openBookFromLibrary, openingBook, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
+  }, [closeCodexGuide, closeElementAgentGuide, libraryMotion, openBookFromLibrary, openingBook, settleLibraryToReader, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
 
   useEffect(() => {
-    if (!showLibrary) return undefined;
-    const sheet = librarySheet.current;
-    if (!sheet) return undefined;
-    const keepFocusInside = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const controls = [...sheet.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-        .filter((control) => !control.hasAttribute("disabled"));
-      if (controls.length === 0) return;
-      const first = controls[0];
-      const last = controls.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    sheet.addEventListener("keydown", keepFocusInside);
-    return () => sheet.removeEventListener("keydown", keepFocusInside);
-  }, [showLibrary]);
-
-  useEffect(() => {
-    if (!showLibrary || libraryMotion !== "idle" || bookTransition) return;
+    if (!showLibrary || libraryMotion !== "idle") return;
     window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
-  }, [bookTransition, libraryMotion, showLibrary]);
+  }, [libraryMotion, showLibrary]);
+
+  useLayoutEffect(() => {
+    if (!showLibrary) return;
+    const sheet = librarySheet.current;
+    if (!sheet || sheet.contains(document.activeElement)) return;
+    sheet.querySelector<HTMLElement>("#library-shelf")?.focus();
+  }, [showLibrary]);
 
   // The shelf always opens on the reader's own books - including the first time
   // one exists - so a stale Explore selection never hides what they just made.
@@ -1012,8 +1071,62 @@ export function App() {
 
   const setTheme = (theme: ThemeId) => bookEngine.setTheme(theme, "human");
 
+  /**
+   * The Agent asks; the page answers. Before this the readiness contract told
+   * the model to name a control the UI did not have, and the reader had to
+   * translate a sentence into six clicks through a dialog headed "New book".
+   */
+  const [handoffRequest, setHandoffRequest] = useState<ImageHandoffRequest | null>(null);
+
+  /**
+   * Copy an image in the conversation, press paste on the page. The app had no
+   * clipboard-in path whatsoever, so an image generated a moment earlier still
+   * had to be saved to disk and picked back up through a file dialog.
+   */
+  // The importer closes over state that changes on every render, so the handler
+  // is held in a ref. A layout effect refreshes it after a render commits but
+  // before the browser can dispatch a paste event; a passive effect leaves a
+  // stale-callback window, while a render-time write can leak discarded state.
+  const pasteImporter = useRef<(files: FileList) => void>(() => undefined);
+
+  useEffect(() => {
+    if (!showCreateGuide) return undefined;
+    const onPaste = (event: ClipboardEvent) => {
+      const files = event.clipboardData?.files;
+      if (!files?.length) return;
+      event.preventDefault();
+      recordDiagnostic("handoff:pasted", { count: files.length });
+      pasteImporter.current(files);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [showCreateGuide]);
+
+  useEffect(() => subscribeToImageHandoff((request) => {
+    setHandoffRequest(request);
+    if (!request) return;
+    recordDiagnostic("handoff:requested", { requestId: request.requestId });
+    // A tool call must reveal the drawer it promises to open. Preview and the
+    // other modal surfaces can otherwise keep it hidden, so exit or close them
+    // before showing the reader the Agent's request.
+    bookEngine.setPreview(false);
+    setShowElementAgentGuide(false);
+    setShowPublication(false);
+    setShowCreateGuide(true);
+    // Photos live behind a mode the reader has to pick first, which makes no
+    // sense when the Agent has just asked for one.
+    dispatchCreationWorkshop({ type: "set-mode", mode: "both" });
+    // The picker itself still needs a real user gesture - the browser requires
+    // one and the host cannot automate uploads - so the page gets as far as it
+    // is allowed to and leaves exactly one click.
+    window.setTimeout(() => addPhotoButton.current?.focus(), 60);
+  }), []);
+
   const importWorkshopPhotos = async (files: FileList | null) => {
     if (!files?.length) return;
+    // Bind the eventual completion to the request visible when this import
+    // began. A newer Agent request may supersede it while images are decoded.
+    const handoffRequestId = handoffRequest?.requestId ?? null;
     if (!workshopHydrated) {
       setWorkshopImportError("Wait for saved photos to finish restoring before adding new images.");
       return;
@@ -1033,6 +1146,11 @@ export function App() {
       }
       if (batch.imported.length > 0) {
         dispatchCreationWorkshop({ type: "append-assets", assets: batch.imported });
+        // The pending tool call resolves with real ids, so the Agent resumes
+        // immediately instead of waiting to be told the upload finished.
+        if (handoffRequestId && completeImageHandoff(handoffRequestId, batch.imported.map((asset) => asset.id))) {
+          recordDiagnostic("handoff:provided", { requestId: handoffRequestId, count: batch.imported.length });
+        }
       } else if (batch.failed > 0) {
         setWorkshopImportError("This browser could not store those images. Free some space, then try again.");
       } else {
@@ -1042,6 +1160,9 @@ export function App() {
       setAssetImporting(false);
     }
   };
+  useLayoutEffect(() => {
+    pasteImporter.current = (files: FileList) => { void importWorkshopPhotos(files); };
+  });
 
   const moveWorkshopAsset = (index: number, direction: -1 | 1) => {
     dispatchCreationWorkshop({ type: "move-asset", index, direction });
@@ -1099,15 +1220,13 @@ export function App() {
   };
 
   return (
-    <main className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""} ${bookTransition ? `is-book-nav-active is-book-nav-${bookTransition.direction}` : ""}`}>
+    <MotionConfig reducedMotion={reducedMotion ? "always" : "never"}>
+      <main className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""}`}>
       <header className="topbar" hidden={showLibrary || showCreateGuide} aria-hidden={showElementAgentGuide || undefined}>
         {!snapshot.session.preview && <button className="library-button" onClick={openLibrary} aria-label="Open book library"><Books size={18} /> <span>Books</span></button>}
         <button className="wordmark" onClick={() => { bookEngine.setPreview(false); openLibrary(); }} aria-label="Open book library">Apertale</button>
         <div className="topbar-actions">
-          <div className="theme-switch" role="group" aria-label="Scene theme">
-            <button className={!isNight ? "is-active" : ""} onClick={() => setTheme("paper-atelier")} aria-label="Day theme" aria-pressed={!isNight}><Sun size={17} weight="regular" /> <span>Day</span></button>
-            <button className={isNight ? "is-active" : ""} onClick={() => setTheme("midnight-desk")} aria-label="Night theme" aria-pressed={isNight}><Moon size={17} weight="regular" /> <span>Night</span></button>
-          </div>
+          <ThemeSwitch theme={snapshot.session.sceneThemeId} onChange={setTheme} groupLabel="Scene theme" />
           <button className="preview-button" onClick={() => bookEngine.setPreview(!snapshot.session.preview)} aria-label={snapshot.session.preview ? "Exit preview" : "Preview book"}>
             {snapshot.session.preview ? <EyeSlash size={18} /> : <Eye size={18} />}
             <span>{snapshot.session.preview ? "Exit preview" : "Preview"}</span>
@@ -1117,7 +1236,7 @@ export function App() {
 
       {showLibrary && !snapshot.session.preview && !showCreateGuide && (
         <section
-          className={`book-library ${libraryMotion !== "idle" ? `is-${libraryMotion}` : ""} ${bookTransition ? "is-transitioning" : ""}`}
+          className={`book-library ${libraryMotion !== "idle" ? `is-${libraryMotion}` : ""}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby="library-title"
@@ -1127,12 +1246,9 @@ export function App() {
           <div className="library-atmosphere" />
           <div className="library-sheet" ref={librarySheet}>
             <header className="library-topbar">
-              <button className="library-wordmark" onClick={(event) => openBookFromLibrary("apertale-field-guide", event.currentTarget)} disabled={libraryBusy}><BookOpenText size={19} /> Apertale</button>
+              <button className="library-wordmark" onClick={() => openBookFromLibrary("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={19} /> Apertale</button>
               <div className="library-topbar-actions">
-                <div className="theme-switch" role="group" aria-label="Library theme">
-                  <button className={!isNight ? "is-active" : ""} onClick={() => setTheme("paper-atelier")} aria-label="Day theme" aria-pressed={!isNight} disabled={libraryBusy}><Sun size={17} /><span>Day</span></button>
-                  <button className={isNight ? "is-active" : ""} onClick={() => setTheme("midnight-desk")} aria-label="Night theme" aria-pressed={isNight} disabled={libraryBusy}><Moon size={17} /><span>Night</span></button>
-                </div>
+                <ThemeSwitch theme={snapshot.session.sceneThemeId} onChange={setTheme} groupLabel="Library theme" disabled={libraryBusy} />
                 <button className="library-close" autoFocus onClick={() => openBookFromLibrary(snapshot.document.id)} aria-label="Return to open book" disabled={libraryBusy}><X size={20} /></button>
               </div>
             </header>
@@ -1189,7 +1305,7 @@ export function App() {
                     key={book.id}
                     data-book-id={book.id}
                     className={`library-card library-card-${(index % 5) + 1} ${book.id === library.activeBookId ? "is-active" : ""} ${openingBook?.id === book.id ? "is-opening" : ""}`}
-                    onClick={(event) => openBookFromLibrary(book.id, event.currentTarget)}
+                    onClick={() => openBookFromLibrary(book.id)}
                     onPointerEnter={() => prewarmReader(book.id)}
                     onFocus={() => prewarmReader(book.id)}
                     aria-busy={openingBook?.id === book.id}
@@ -1218,7 +1334,12 @@ export function App() {
                       {openingBook?.id === book.id && <span className="library-opening-badge" aria-hidden="true"><SpinnerGap size={15} weight="bold" /> Opening</span>}
                     </span>
                     <span className="library-card-copy">
-                      <small>{book.id === "apertale-field-guide" ? "Start here" : book.sample ? "Curated demo" : "Your book"} · {book.spreadCount} {book.spreadCount === 1 ? "spread" : "spreads"}</small>
+                      {/* The shelf tab already says whether these are curated
+                          samples or the reader's own books, so repeating it on
+                          every card spent the label's width on nothing. Only
+                          the Field Guide earns a prefix, because "start here"
+                          is a call to action rather than a category. */}
+                      <small>{book.id === "apertale-field-guide" ? "Start here · " : ""}{book.spreadCount} {book.spreadCount === 1 ? "spread" : "spreads"}</small>
                       <strong>{book.title}</strong>
                     </span>
                   </button>
@@ -1231,16 +1352,26 @@ export function App() {
         </section>
       )}
 
-      {bookTransition && <BookTransitionOverlay transition={bookTransition} onDone={finishBookTransition} />}
 
       <section
+        ref={stage}
         className={`stage ${showCreateGuide ? "is-creation-workshop" : ""}`}
-        hidden={showLibrary && !showCreateGuide}
+        /**
+         * Hidden only while the shelf is SETTLED over it. `hidden` applies
+         * display:none, so keying this on showLibrary alone meant both the
+         * cover open and the cover close ran to completion inside a display:none
+         * subtree - the shelf then vanished onto an already-open book, and
+         * reappeared over an already-shut one. Neither animation was ever on
+         * screen. While a transition is running the stage must be visible;
+         * that is the entire point of the transition.
+         */
+        hidden={showLibrary && libraryMotion === "idle" && !showCreateGuide}
         aria-hidden={(showLibrary && !showCreateGuide) || undefined}
+        inert={showLibrary && !showCreateGuide ? true : undefined}
         aria-busy={!showCreateGuide && stageIsLoading}
         aria-label={showCreateGuide ? "Blank three-dimensional book workshop" : `${spread.title}. Spread ${snapshot.session.currentSpreadIndex + 1} of ${snapshot.document.spreads.length}`}
       >
-        {showLibrary && !showCreateGuide ? null : renderWebGl ? (
+        {renderWebGl ? (
           <Suspense fallback={showCreateGuide
             ? <div className="fallback-book workshop-blank-fallback is-loading" />
             : <div className="fallback-book is-loading"><img src={spread.textureUrl} alt="" /></div>}>
@@ -1248,6 +1379,12 @@ export function App() {
               snapshot={showCreateGuide ? workshopSnapshot : snapshot}
               turn={showCreateGuide ? null : turn}
               mode={showCreateGuide ? "workshop" : "reader"}
+              // Preview is a reader's view, and the workshop book is a prop.
+              // Neither may be dragged, and on a phone the canvas is the only
+              // surface large enough that a stray drag reaches it at all.
+              readOnly={snapshot.session.preview || showCreateGuide}
+              openProgress={openProgress}
+              handoffRect={handoffRect}
               onSelect={showCreateGuide ? () => undefined : (elementId) => { bookEngine.setSelection(elementId); setShowMore(false); }}
               onHover={showCreateGuide ? () => undefined : setHoveredId}
               onMoveElement={showCreateGuide ? () => undefined : (elementId, x, y) => humanEdit(elementId, { x, y })}
@@ -1325,8 +1462,9 @@ export function App() {
               <button onClick={toggleLock}>{selected.locked ? <Lock size={17} /> : <LockOpen size={17} />} {selected.locked ? "Unlock" : "Lock"}</button>
               <button className="icon-button" onClick={() => setShowMore(!showMore)} aria-label="More element controls"><DotsThree size={21} weight="bold" /></button>
             </div>
+            <AnimatePresence>
             {showMore && (
-              <div className={`element-panel ${selected.page === "right" ? "clears-right" : "clears-left"}`}>
+              <Panel key="element-panel" from="scale" className={`element-panel ${selected.page === "right" ? "clears-right" : "clears-left"}`}>
                 <div><span>Scale</span><button onClick={() => adjustSelected("scale", -0.1)} aria-label="Scale down" disabled={selected.locked}><Minus size={14} /></button><output>{Math.round(selected.transform.scaleX * 100)}%</output><button onClick={() => adjustSelected("scale", 0.1)} aria-label="Scale up" disabled={selected.locked}><Plus size={14} /></button></div>
                 <div><span>Rotate</span><button onClick={() => adjustSelected("rotate", -8)} aria-label="Rotate counter-clockwise" disabled={selected.locked}><ArrowCounterClockwise size={14} /></button><output>{Math.round(selected.transform.rotationDeg)}°</output><button onClick={() => adjustSelected("rotate", 8)} aria-label="Rotate clockwise" disabled={selected.locked}><ArrowClockwise size={14} /></button></div>
                 <label>
@@ -1356,8 +1494,9 @@ export function App() {
                     <option value="slow-orbit">Slow orbit</option>
                   </select>
                 </label>
-              </div>
+              </Panel>
             )}
+            </AnimatePresence>
           </div>
         )}
 
@@ -1419,13 +1558,17 @@ export function App() {
           </aside>
         )}
 
-        {snapshot.lastAction && !showCreateGuide && (
-          <div className={`agent-action agent-action-${snapshot.lastAction.phase}`} role="status">
-            {snapshot.lastAction.phase === "success" ? <Check size={16} weight="bold" /> : <Sparkle size={16} />}
-            <span>{snapshot.lastAction.summary}</span>
-            {snapshot.lastAction.undoToken && <button onClick={undoLastAction}>Undo</button>}
-          </div>
-        )}
+        {/* Status used to appear and vanish on a class toggle, so a reader who
+            looked away never learned that anything had happened. Presence
+            animation is the whole point of routing it through Toast. */}
+        <Toast
+          open={Boolean(snapshot.lastAction) && !showCreateGuide}
+          className={`agent-action agent-action-${snapshot.lastAction?.phase ?? "success"}`}
+        >
+          {snapshot.lastAction?.phase === "success" ? <Check size={16} weight="bold" /> : <Sparkle size={16} />}
+          <span>{snapshot.lastAction?.summary}</span>
+          {snapshot.lastAction?.undoToken && <button onClick={undoLastAction}>Undo</button>}
+        </Toast>
       </section>
 
       {!snapshot.session.preview && !showCreateGuide && (
@@ -1451,8 +1594,9 @@ export function App() {
         </footer>
       )}
 
+      <AnimatePresence>
       {showOutline && !snapshot.session.preview && !showCreateGuide && (
-        <aside className="story-outline" aria-label="Book outline">
+        <Panel key="story-outline" from="left" className="story-outline" aria-label="Book outline" role="complementary">
           <div className="outline-head"><div><span>Story outline</span><small>Revision {snapshot.document.revision}</small></div><button onClick={() => setShowOutline(false)} aria-label="Close outline"><X size={18} /></button></div>
           <ol>
             {snapshot.document.spreads.map((item, index) => (
@@ -1466,8 +1610,9 @@ export function App() {
             ><i /> {webMcpAvailable ? "WebMCP connected" : "WebMCP ready"}</span>
             {activeLibraryBook?.sample && <button onClick={confirmReset}><ArrowCounterClockwise size={15} /> Reset sample</button>}
           </div>
-        </aside>
+        </Panel>
       )}
+      </AnimatePresence>
 
       {showCreateGuide && !snapshot.session.preview && (
         <section className="creation-workshop" role="dialog" aria-modal="true" aria-labelledby="codex-guide-title">
@@ -1490,14 +1635,6 @@ export function App() {
                   <span>{webMcpAvailable ? "Ready beside Codex" : "Read here. Open in Codex (ChatGPT desktop) to create."}</span>
                 </p>
 
-                <div className="workshop-readiness is-incomplete" role="status">
-                  <WarningCircle size={16} weight="fill" />
-                  <div>
-                    <strong>Finish the brief in Codex</strong>
-                    <span>{creationBrief.readiness.questions.slice(0, 3).join(" ")}</span>
-                  </div>
-                </div>
-
                 <fieldset className="workshop-field">
                   <legend>Start from</legend>
                   <div className="workshop-segment">
@@ -1512,23 +1649,6 @@ export function App() {
                     ))}
                   </div>
                 </fieldset>
-
-                {usesPhotos && (
-                  <fieldset className="workshop-field">
-                    <legend>Photo use</legend>
-                    <div className="workshop-segment workshop-photo-use">
-                      {CREATION_PHOTO_USES.map((choice) => (
-                        <button
-                          type="button"
-                          key={choice.id}
-                          className={`workshop-option ${creationPhotoUse === choice.id ? "is-selected" : ""}`}
-                          onClick={() => dispatchCreationWorkshop({ type: "set-photo-use", photoUse: choice.id })}
-                          aria-pressed={creationPhotoUse === choice.id}
-                        >{choice.label}</button>
-                      ))}
-                    </div>
-                  </fieldset>
-                )}
 
                 <fieldset className="workshop-field">
                   <legend>Spreads</legend>
@@ -1561,8 +1681,39 @@ export function App() {
                   </div>
                 </fieldset>
 
+                {/* Photo use sits at the END of the panel, beside the photos
+                    it describes. It used to be inserted between Start from and
+                    Spreads, so choosing a photo mode shoved everything the
+                    reader was already looking at further down the page.
+                    Deliberately NOT height-animated: an animated collapse that
+                    fails to run leaves the options present but invisible and
+                    unclickable, and hiding working controls is a worse failure
+                    than appearing without a flourish. */}
+                {usesPhotos && (
+                  <fieldset className="workshop-field">
+                    <legend>Photo use</legend>
+                    <div className="workshop-segment workshop-photo-use">
+                      {CREATION_PHOTO_USES.map((choice) => (
+                        <button
+                          type="button"
+                          key={choice.id}
+                          className={`workshop-option ${creationPhotoUse === choice.id ? "is-selected" : ""}`}
+                          onClick={() => dispatchCreationWorkshop({ type: "set-photo-use", photoUse: choice.id })}
+                          aria-pressed={creationPhotoUse === choice.id}
+                        >{choice.label}</button>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
                 {usesPhotos && (
                   <section className="workshop-photos" aria-label="Source images, in book order">
+                    {/* The Agent's own sentence, printed where the reader acts
+                        on it. A request that only exists in the chat pane is
+                        what made this step feel disconnected. */}
+                    <Toast open={Boolean(handoffRequest)} className="workshop-handoff-request">
+                      <Sparkle size={16} weight="fill" />
+                      <span>{handoffRequest?.reason}</span>
+                    </Toast>
                     <div className="workshop-photos-head">
                       <span>Photos<small>{workshopAssets.length}/{MAX_WORKSHOP_ASSETS}</small></span>
                       <button
@@ -1699,6 +1850,7 @@ export function App() {
             : []),
         )}
       </div>}
-    </main>
+      </main>
+    </MotionConfig>
   );
 }

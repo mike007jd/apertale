@@ -1,6 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Moon, Sun, X } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, X } from "@phosphor-icons/react";
+import { MotionConfig } from "motion/react";
+import { ThemeSwitch } from "./design/ThemeSwitch";
 import { hasReveal, resolveInteraction } from "./interaction";
+import { announce, supportsWebGl2 } from "./readerShell";
 import {
   canTurnPage,
   createPageTurnSession,
@@ -23,22 +26,6 @@ function shareTokenFromPath() {
 }
 
 /** Joins announcement fragments without producing the doubled `..` of naive concatenation. */
-function announce(...parts: Array<string | undefined | null>) {
-  return parts
-    .map((part) => (part ?? "").trim())
-    .filter(Boolean)
-    .map((part) => (/[.!?…:;]$/u.test(part) ? part : `${part}.`))
-    .join(" ");
-}
-
-function supportsWebGl2() {
-  try {
-    return Boolean(document.createElement("canvas").getContext("webgl2"));
-  } catch {
-    return false;
-  }
-}
-
 export function SharedBookApp() {
   const [documentState, setDocumentState] = useState<DocumentState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -177,14 +164,12 @@ export function SharedBookApp() {
   const nav = pageTurnNavDisabled(turn, spreadIndex, snapshot.document.spreads.length, waitingForRenderer);
 
   return (
-    <main className="app-shell is-preview is-shared-reader">
+    <MotionConfig reducedMotion={reducedMotion ? "always" : "never"}>
+      <main className="app-shell is-preview is-shared-reader">
       <header className="topbar">
         <span className="wordmark" aria-label="Apertale shared book">Apertale</span>
         <div className="topbar-actions">
-          <div className="theme-switch" role="group" aria-label="Scene theme">
-            <button className={theme === "paper-atelier" ? "is-active" : ""} onClick={() => setTheme("paper-atelier")} aria-pressed={theme === "paper-atelier"}><Sun size={17} /> <span>Day</span></button>
-            <button className={theme === "midnight-desk" ? "is-active" : ""} onClick={() => setTheme("midnight-desk")} aria-pressed={theme === "midnight-desk"}><Moon size={17} /> <span>Night</span></button>
-          </div>
+          <ThemeSwitch theme={theme} onChange={setTheme} groupLabel="Scene theme" />
           <span className="preview-button">Read only</span>
         </div>
       </header>
@@ -250,7 +235,8 @@ export function SharedBookApp() {
         )}
       </section>
 
-      <div className="sr-only" aria-live="polite">{announce(snapshot.document.title, spread.title, spread.body)}</div>
-    </main>
+        <div className="sr-only" aria-live="polite">{announce(snapshot.document.title, spread.title, spread.body)}</div>
+      </main>
+    </MotionConfig>
   );
 }

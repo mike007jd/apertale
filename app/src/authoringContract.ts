@@ -4,10 +4,10 @@ import siteManifest from "../site-manifest.json";
 
 export const SITE_TOOL = Object.freeze(siteManifest.webMcp.tools);
 const manifestToolNames = Object.values(SITE_TOOL);
-if (manifestToolNames.length !== 6 || new Set(manifestToolNames).size !== manifestToolNames.length) {
-  throw new TypeError("Invalid Apertale manifest: exactly six unique WebMCP tools are required.");
+if (manifestToolNames.length !== 7 || new Set(manifestToolNames).size !== manifestToolNames.length) {
+  throw new TypeError("Invalid Apertale manifest: exactly seven unique WebMCP tools are required.");
 }
-export const SITE_TOOL_NAMES = Object.freeze(manifestToolNames) as readonly [string, string, string, string, string, string];
+export const SITE_TOOL_NAMES = Object.freeze(manifestToolNames) as readonly [string, string, string, string, string, string, string];
 
 export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", "authoring-guide", "creation-readiness", "quality-review"] as const;
 
@@ -164,7 +164,7 @@ export function assessCreationReadiness(
   }
   const invalidAsset = assets.find((asset) => !/^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(asset.id));
   if (invalidAsset) {
-    addBlocker("sourceAssets", `${invalidAsset.name} does not have a verified browser-local asset id.`, "Please use Image handoff for any source that is not already in Apertale.");
+    addBlocker("sourceAssets", `${invalidAsset.name} does not have a verified browser-local asset id.`, "Call request_image_handoff so the page can open the photo drawer for this source.");
   }
 
   const isPhotoBook = bookType === "photo-led-keepsake" || bookType === "preserved-photo-album";
@@ -176,7 +176,7 @@ export function assessCreationReadiness(
     const validated = new Set(options.validatedSourceAssetIds ?? []);
     const missing = assets.filter((asset) => !validated.has(asset.id));
     if (missing.length > 0) {
-      addBlocker("sourceAssets", `The browser has not verified ${missing.map((asset) => asset.name).join(", ")}.`, "Please use Image handoff for the missing photos, then ask me to check readiness again.");
+      addBlocker("sourceAssets", `The browser has not verified ${missing.map((asset) => asset.name).join(", ")}.`, "Call request_image_handoff for the missing photos, then check readiness again.");
     }
   }
 
@@ -389,7 +389,7 @@ export function creationCompletionGates(input: AuthoringCountSpec): CreationComp
     {
       id: "layout",
       token: "[GATE:layout]",
-      requirement: "Only after the complete asset plan and final cover/spread asset set exist, create the book through the six Site Tools, import exact assets through supported transfer or explicit Image handoff, set the cover, apply full-spread backgrounds, add meaningful interactions, and verify all spreads.",
+      requirement: "Only after the complete asset plan and final cover/spread asset set exist, create the book through the Site Tools, import exact assets through supported transfer or by calling request_image_handoff, set the cover, apply full-spread backgrounds, add meaningful interactions, and verify all spreads.",
     },
     {
       id: "evidence",
@@ -448,11 +448,11 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "handoff-before-refer",
-      rule: "Hand off each generated asset through supported transfer or Image handoff, then refresh get_project_context(detail: assets), before referring to that asset id.",
+      rule: "Hand off each generated asset through supported transfer or request_image_handoff, then refresh get_project_context(detail: assets), before referring to that asset id.",
     },
     {
       id: "layout",
-      rule: "Then create, set-cover, and patch through the six Site Tools. Never overwrite a curated sample.",
+      rule: "Then create, set-cover, and patch through the Site Tools. Never overwrite a curated sample.",
     },
     {
       id: "interaction",

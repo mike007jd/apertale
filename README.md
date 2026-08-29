@@ -68,7 +68,7 @@ npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 
 - [`app/`](app/) — React, TypeScript, Three.js, WebMCP adapter, tests, and host-portable production bundle.
 - [`CONTEXT.md`](CONTEXT.md) — current domain ownership and adapter boundaries for page turns, authoring, assets, artifacts, and publishing schema.
-- [`.codex/skills/apertale-authoring/`](.codex/skills/apertale-authoring/) — Codex authoring skill for planning and building books through the six Site Tools.
+- [`.codex/skills/apertale-authoring/`](.codex/skills/apertale-authoring/) — Codex authoring skill for planning and building books through the manifest-backed Site Tools.
 - [`docs/PRODUCT_ARCHITECTURE.md`](docs/PRODUCT_ARCHITECTURE.md) — active product, usage, asset, interaction, security, and delivery architecture.
 - [`docs/CHALLENGE_READINESS.md`](docs/CHALLENGE_READINESS.md) — active challenge gate separating verified local work from missing external delivery.
 - [`docs/ASSET_PROVENANCE.md`](docs/ASSET_PROVENANCE.md) — runtime illustration, cover, icon, reference, and user-import provenance.

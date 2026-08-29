@@ -9,7 +9,8 @@
       "compose_spread",
       "apply_scene_patch",
       "set_presentation",
-      "undo_project_change"
+      "undo_project_change",
+      "request_image_handoff"
     ]
   }
 }
