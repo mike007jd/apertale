@@ -3,7 +3,7 @@ import { BookEngine } from "./bookEngine";
 import { hasReveal, resolveInteraction } from "./interaction";
 import { evaluateDeterministicQuality, QUALITY_VISUAL_CRITERION_IDS, assertPublishableQuality, type QualityVisualReviewSubmission } from "./qualityContract";
 import { sampleBooks } from "./sampleBook";
-import { THEME_IDS } from "./types";
+import { THEME_IDS, isProceduralElement } from "./types";
 
 const cityEngine = () => {
   const engine = new BookEngine();
@@ -72,21 +72,21 @@ describe("BookEngine document contract", () => {
       const rendersGroundedComposite = layeredShowcase.textureUrl === layeredShowcase.artwork?.sourceAssetId;
       if (rendersGroundedComposite) {
         expect(layeredShowcase.elements.length, `${layeredShowcase.title} should retain semantic interactions`).toBeGreaterThanOrEqual(3);
-        expect(layeredShowcase.elements.every((element) => element.assetId.startsWith("procedural:"))).toBe(true);
+        expect(layeredShowcase.elements.every(isProceduralElement)).toBe(true);
       } else {
         expect(
-          layeredShowcase.elements.filter((element) => !element.assetId.startsWith("procedural:")).length,
+          layeredShowcase.elements.filter((element) => !isProceduralElement(element)).length,
           `${layeredShowcase.title} should ship multiple real foreground layers`,
         ).toBeGreaterThanOrEqual(2);
       }
     });
     const atlas = sampleBooks.find((book) => book.id === "apertale-atlas-of-wonders")!;
     expect(atlas.spreads.every((spread) => spread.textureUrl === spread.artwork?.sourceAssetId)).toBe(true);
-    expect(atlas.spreads.every((spread) => spread.artwork?.cleanPlateAssetId === spread.artwork?.sourceAssetId)).toBe(true);
-    expect(atlas.spreads.every((spread) => spread.elements.every((element) => element.assetId.startsWith("procedural:")))).toBe(true);
+    expect(atlas.spreads.every((spread) => spread.artwork?.cleanPlateAssetId !== spread.artwork?.sourceAssetId)).toBe(true);
+    expect(atlas.spreads.every((spread) => spread.elements.every(isProceduralElement))).toBe(true);
     const sleepingCity = sampleBooks.find((book) => book.id === "apertale-lantern-garden")!.spreads[3];
     expect(sleepingCity.textureUrl).toBe(sleepingCity.artwork?.sourceAssetId);
-    expect(sleepingCity.elements.every((element) => element.assetId.startsWith("procedural:"))).toBe(true);
+    expect(sleepingCity.elements.every(isProceduralElement)).toBe(true);
   });
 
   it("gives every spread authored hover, focus, and click reveal without forcing idle motion", () => {
@@ -108,7 +108,7 @@ describe("BookEngine document contract", () => {
     expect(sampleBooks[3].spreads[4].elements.find((element) => element.id === "warm-window-child")?.motion).toBeUndefined();
     const storyCutouts = sampleBooks[3].spreads
       .flatMap((spread) => spread.elements)
-      .filter((element) => !element.assetId.startsWith("procedural:"));
+      .filter((element) => !isProceduralElement(element));
     expect(storyCutouts).toHaveLength(15);
     expect(storyCutouts.every((element) => element.assetId.endsWith("-cutout-v3.png"))).toBe(true);
     const anchoredIds = ["pyramid-main", "great-wall-tower", "petra-treasury-facade", "chichen-pyramid", "machu-citadel", "taj-monument", "corcovado-statue", "river-hill-home", "cloud-road-towers", "garden-arched-gate", "warm-window-child"];
@@ -126,12 +126,20 @@ describe("BookEngine document contract", () => {
     atlas.revision = 2;
     const taj = atlas.spreads.find((item) => item.id === "taj-mahal")!.elements.find((element) => element.id === "taj-monument")!;
     taj.transform.x = 0.91;
+    taj.transform.scaleX = 1.5;
+    taj.transform.scaleY = 1.22;
+    taj.assetId = "/assets/generated/wonders-taj-mahal-monument-cutout-v2.png";
+    taj.kind = "lifted";
+    taj.locked = false;
     taj.interaction!.focus = "orbit-inspect";
-    localStorage.setItem("apertale.library.v4", JSON.stringify({ activeBookId: atlas.id, documents }));
+    localStorage.setItem("apertale.library.v4", JSON.stringify({ activeBookId: atlas.id, documents, sampleSourceVersion: 3 }));
 
     const migrated = new BookEngine().getSnapshot().document;
     const migratedTaj = migrated.spreads.find((item) => item.id === "taj-mahal")!.elements.find((element) => element.id === "taj-monument")!;
     expect(migratedTaj.transform.x).toBe(0.91);
+    expect(migratedTaj.transform).toMatchObject({ scaleX: 0.72, scaleY: 0.72 });
+    expect(migratedTaj).toMatchObject({ kind: "decoration", locked: true, depth: 0.12 });
+    expect(isProceduralElement(migratedTaj)).toBe(true);
     expect(migratedTaj.interaction?.focus).toBe("spotlight");
   });
 

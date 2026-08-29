@@ -12,7 +12,7 @@ import {
   qualityGateState,
   validateVisualReview,
 } from "./qualityContract";
-import { MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralElement } from "./types";
+import { MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralElement, spreadBaseAssetId } from "./types";
 import type {
   AuthoringQualityLifecycle,
   QualityGateState,
@@ -203,15 +203,21 @@ function loadLibrary(): StoredLibrary {
           if (!storedElement) {
             storedSpread.elements.push(clone(element));
           } else if (shouldMigrateSampleSemantics) {
+            const replacesImageWithProcedural = !isProceduralElement(storedElement) && isProceduralElement(element);
             // Curated books receive shipped interaction/asset bug fixes once,
             // independently of the reader's document revision. Preserve the
-            // reader's transform and lock state while replacing stale motion,
-            // focus, and generated-asset contracts.
+            // reader's position while replacing stale visual contracts.
             storedElement.assetId = element.assetId;
             storedElement.frameAssetIds = clone(element.frameAssetIds);
             storedElement.kind = element.kind;
             storedElement.motion = clone(element.motion);
             storedElement.interaction = clone(element.interaction);
+            if (replacesImageWithProcedural) {
+              storedElement.transform.scaleX = element.transform.scaleX;
+              storedElement.transform.scaleY = element.transform.scaleY;
+              storedElement.depth = element.depth;
+              storedElement.locked = element.locked;
+            }
           } else if (element.frameAssetIds?.length) {
             // Frame sequences are a shipped capability upgrade. Preserve the
             // reader's transform and interaction edits while ensuring older
@@ -720,7 +726,7 @@ export class BookEngine {
     if (!spread) return null;
     return {
       spreadId: spread.id,
-      mediaRef: spread.artwork?.cleanPlateAssetId ?? spread.textureUrl ?? null,
+      mediaRef: spreadBaseAssetId(spread) ?? null,
     };
   }
 

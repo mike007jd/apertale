@@ -1,8 +1,8 @@
-import { isProceduralElement, type Spread } from "./types";
+import { isProceduralElement, spreadBaseAssetId, type Spread } from "./types";
 
 export function fallbackAssetPlan(spread: Spread) {
   return {
-    baseAssetId: spread.artwork?.cleanPlateAssetId ?? spread.textureUrl,
+    baseAssetId: spreadBaseAssetId(spread),
     foreground: spread.elements.filter((element) => !isProceduralElement(element)),
   };
 }

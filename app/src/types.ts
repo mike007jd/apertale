@@ -108,6 +108,12 @@ export type Spread = {
   elements: BookElement[];
 };
 
+/** Resolve the asset actually painted behind a spread's interactive elements. */
+export function spreadBaseAssetId(spread: Pick<Spread, "textureUrl" | "artwork">) {
+  if (spread.textureUrl && spread.textureUrl === spread.artwork?.sourceAssetId) return spread.textureUrl;
+  return spread.artwork?.cleanPlateAssetId ?? spread.textureUrl;
+}
+
 export type DocumentState = {
   id: string;
   revision: number;
