@@ -32,7 +32,7 @@ describe("site-native authoring guide contract", () => {
     expect(guide.skillMirror).toBe(AUTHORING_GUIDE_SKILL_MIRROR);
     expect(guide.contract).toBe("two-phase");
     expect(guide.tools).toEqual([...SITE_TOOL_NAMES]);
-    expect(guide.tools).toHaveLength(6);
+    expect(guide.tools).toHaveLength(7);
     expect(PROJECT_CONTEXT_DETAILS).toEqual([
       "compact",
       "selected-reveal",

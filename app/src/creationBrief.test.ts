@@ -53,7 +53,7 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("generated cover count 1");
     expect(brief.prompt).toContain("generated full-spread count 6");
     expect(brief.prompt).toContain("provenance entries 7");
-    expect(brief.prompt).toContain("six Site Tools");
+    expect(brief.prompt).toContain("Site Tools");
     expect(brief.prompt).toContain("dedicated portrait cover");
     expect(brief.prompt).toContain("purpose-built full-spread artwork");
     expect(brief.prompt).toContain("Never claim generation or import succeeded without evidence");
@@ -121,14 +121,14 @@ describe("host-side creation brief contract", () => {
     const unverified = buildCreationBrief(input).readiness;
     expect(unverified.blockingMissingFields.some((blocker) => blocker.reason.includes("has not verified"))).toBe(true);
     expect(unverified.questions).toContain(
-      "Please use Image handoff for the missing photos, then ask me to check readiness again.",
+      "Call request_image_handoff for the missing photos, then check readiness again.",
     );
 
     const verified = buildCreationBrief({ ...input, validatedSourceAssetIds: [uuid(1), uuid(2)] }).readiness;
     expect(verified.ready).toBe(true);
     expect(verified.blockingMissingFields.some((blocker) => blocker.reason.includes("has not verified"))).toBe(false);
     expect(verified.questions).not.toContain(
-      "Please use Image handoff for the missing photos, then ask me to check readiness again.",
+      "Call request_image_handoff for the missing photos, then check readiness again.",
     );
   });
 

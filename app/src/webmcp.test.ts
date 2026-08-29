@@ -20,7 +20,7 @@ describe("WebMCP registration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("registers six compact project tools and runs the shared-state acceptance path", async () => {
+  it("registers the compact project tools and runs the shared-state acceptance path", async () => {
     bookEngine.openBook("apertale-your-story");
     bookEngine.reset();
     const tools: WebMCP.ModelContextTool[] = [];
@@ -53,7 +53,7 @@ describe("WebMCP registration", () => {
         schemaNodes.push(...Object.values(record));
       }
     }
-    expect(registrationSignals).toHaveLength(6);
+    expect(registrationSignals).toHaveLength(7);
     const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
     const manageBookSchema = tool("manage_book").inputSchema as { required?: string[] };
     const projectContextSchema = tool("get_project_context").inputSchema as {
@@ -426,7 +426,7 @@ describe("WebMCP registration", () => {
     const statuses: boolean[] = [];
     const cleanup = registerWebMcpTools((available) => statuses.push(available));
     await vi.waitFor(() => expect(statuses).toEqual([true]));
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(7);
 
     const getProjectContext = tools.find((candidate) => candidate.name === "get_project_context")!;
     const signal = { signal: new AbortController().signal };
@@ -476,8 +476,8 @@ describe("WebMCP registration", () => {
     const cleanup = registerWebMcpTools((available) => statuses.push(available));
     await vi.waitFor(() => expect(statuses).toEqual([false]));
 
-    expect(modelContext.registerTool).toHaveBeenCalledTimes(6);
-    expect(registrationSignals).toHaveLength(6);
+    expect(modelContext.registerTool).toHaveBeenCalledTimes(7);
+    expect(registrationSignals).toHaveLength(7);
     expect(registrationSignals.every((signal) => signal.aborted)).toBe(true);
     cleanup();
     expect(statuses).toEqual([false]);

@@ -1,5 +1,6 @@
 import { bookEngine } from "./bookEngine";
 import { getAssetMetadata, listAssetMetadata } from "./assetStore";
+import { abortImageHandoff, requestImageHandoff } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MOTION_PRESETS, MAX_BOOK_SPREADS } from "./types";
@@ -745,6 +746,57 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             expectedRevision: requiredRevision(input),
             undoToken: requiredString(input, "undoToken"),
           }, "agent");
+        }),
+      },
+      { signal: controller.signal },
+    ),
+    register(
+      {
+        name: SITE_TOOL.requestImageHandoff,
+        title: "Request an image handoff",
+        description:
+          "Ask the reader for one or more photos. Opens the photo drawer in the page with your reason shown to them, and resolves with the browser-local asset ids once they have chosen — so you can reference the ids immediately instead of waiting to be told the upload finished. You cannot send image bytes through a tool call and the browser requires the reader's own click to open a file picker, so this asks rather than uploads.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            requestId: { type: "string", description: "Caller-supplied id for this request." },
+            reason: { type: "string", description: "Plain-language reason shown to the reader, in your own words. For example: the fifth spread needs a photo of your grandmother.", maxLength: 220 },
+            expectedCount: { type: "integer", minimum: 1, maximum: 12, description: "How many photos this request needs." },
+          },
+          required: ["requestId", "reason"],
+          additionalProperties: false,
+        },
+        // Mutating, and its result carries ids derived from a file the reader
+        // chose, so it takes the same hint every other mutating tool carries.
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: (input, options) => runTool(SITE_TOOL.requestImageHandoff, options?.signal ?? uncancelledToolSignal, async () => {
+          assertOnly(input, ["requestId", "reason", "expectedCount"]);
+          const requestId = requiredString(input, "requestId");
+          const prior = sessionResults.get(requestId);
+          if (prior) return prior;
+          const reason = boundedString(input, "reason", 220);
+          let expectedCount = 1;
+          if (typeof input.expectedCount !== "undefined") {
+            if (!Number.isInteger(input.expectedCount) || Number(input.expectedCount) < 1 || Number(input.expectedCount) > 12) {
+              invalid("expectedCount must be an integer between 1 and 12.");
+            }
+            expectedCount = Number(input.expectedCount);
+          }
+          const signal = options?.signal ?? uncancelledToolSignal;
+          // Agent-side cancellation has to reach the drawer, or a cancelled
+          // request would leave it open with nothing listening.
+          const onAbort = () => abortImageHandoff();
+          signal.addEventListener("abort", onAbort, { once: true });
+          try {
+            const outcome = await requestImageHandoff({ requestId, reason, expectedCount });
+            const result = outcome.status === "provided"
+              ? { status: "provided", assetIds: outcome.assetIds, note: "Refresh get_project_context(detail: \"assets\") before referencing these ids." }
+              : { status: "dismissed", reason: outcome.reason };
+            sessionResults.set(requestId, result);
+            return result;
+          } finally {
+            signal.removeEventListener("abort", onAbort);
+          }
         }),
       },
       { signal: controller.signal },

@@ -9,7 +9,8 @@
       "composeSpread": "compose_spread",
       "applyScenePatch": "apply_scene_patch",
       "setPresentation": "set_presentation",
-      "undoProjectChange": "undo_project_change"
+      "undoProjectChange": "undo_project_change",
+      "requestImageHandoff": "request_image_handoff"
     }
   }
 }

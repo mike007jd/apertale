@@ -43,6 +43,7 @@ import {
 import { AnimatePresence } from "motion/react";
 import { Panel, Toast } from "./design/primitives";
 import { ThemeSwitch } from "./design/ThemeSwitch";
+import { completeImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
 import { useFocusTrap } from "./focusTrap";
 import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete } from "./renderEvidence";
@@ -730,6 +731,7 @@ export function App() {
   }, [beginOpenTransition, openingBook, readyBookId, snapshot.document.id]);
 
   const closeCodexGuide = useCallback(() => {
+    dismissImageHandoff();
     setShowCreateGuide(false);
     window.setTimeout(() => createGuideOpener.current?.focus(), 0);
   }, []);
@@ -977,6 +979,45 @@ export function App() {
 
   const setTheme = (theme: ThemeId) => bookEngine.setTheme(theme, "human");
 
+  /**
+   * The Agent asks; the page answers. Before this the readiness contract told
+   * the model to name a control the UI did not have, and the reader had to
+   * translate a sentence into six clicks through a dialog headed "New book".
+   */
+  const [handoffRequest, setHandoffRequest] = useState<ImageHandoffRequest | null>(null);
+
+  /**
+   * Copy an image in the conversation, press paste on the page. The app had no
+   * clipboard-in path whatsoever, so an image generated a moment earlier still
+   * had to be saved to disk and picked back up through a file dialog.
+   */
+  useEffect(() => {
+    if (!showCreateGuide) return undefined;
+    const onPaste = (event: ClipboardEvent) => {
+      const files = event.clipboardData?.files;
+      if (!files?.length) return;
+      event.preventDefault();
+      recordDiagnostic("handoff:pasted", { count: files.length });
+      void importWorkshopPhotos(files);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  });
+
+  useEffect(() => subscribeToImageHandoff((request) => {
+    setHandoffRequest(request);
+    if (!request) return;
+    recordDiagnostic("handoff:requested", { requestId: request.requestId, expectedCount: request.expectedCount });
+    setShowCreateGuide(true);
+    // Photos live behind a mode the reader has to pick first, which makes no
+    // sense when the Agent has just asked for one.
+    dispatchCreationWorkshop({ type: "set-mode", mode: "both" });
+    // The picker itself still needs a real user gesture - the browser requires
+    // one and the host cannot automate uploads - so the page gets as far as it
+    // is allowed to and leaves exactly one click.
+    window.setTimeout(() => addPhotoButton.current?.focus(), 60);
+  }), []);
+
   const importWorkshopPhotos = async (files: FileList | null) => {
     if (!files?.length) return;
     if (!workshopHydrated) {
@@ -998,6 +1039,12 @@ export function App() {
       }
       if (batch.imported.length > 0) {
         dispatchCreationWorkshop({ type: "append-assets", assets: batch.imported });
+        // The pending tool call resolves with real ids, so the Agent resumes
+        // immediately instead of waiting to be told the upload finished.
+        if (handoffRequest) {
+          completeImageHandoff(batch.imported.map((asset) => asset.id));
+          recordDiagnostic("handoff:provided", { requestId: handoffRequest.requestId, count: batch.imported.length });
+        }
       } else if (batch.failed > 0) {
         setWorkshopImportError("This browser could not store those images. Free some space, then try again.");
       } else {
@@ -1535,6 +1582,13 @@ export function App() {
 
                 {usesPhotos && (
                   <section className="workshop-photos" aria-label="Source images, in book order">
+                    {/* The Agent's own sentence, printed where the reader acts
+                        on it. A request that only exists in the chat pane is
+                        what made this step feel disconnected. */}
+                    <Toast open={Boolean(handoffRequest)} className="workshop-handoff-request">
+                      <Sparkle size={16} weight="fill" />
+                      <span>{handoffRequest?.reason}</span>
+                    </Toast>
                     <div className="workshop-photos-head">
                       <span>Photos<small>{workshopAssets.length}/{MAX_WORKSHOP_ASSETS}</small></span>
                       <button
