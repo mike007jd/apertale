@@ -70,18 +70,37 @@ function clamp(value: number, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value));
 }
 
+/**
+ * Splitting on the ASCII space is only line breaking for scripts that use one.
+ * A Chinese, Japanese or Thai body produced a single token, so the whole
+ * paragraph became one unbreakable line that ran off the bottom of the page.
+ * Intl.Segmenter knows where each script actually allows a break.
+ */
+const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
+  ? new Intl.Segmenter(undefined, { granularity: "word" })
+  : null;
+
+function segmentsOf(text: string): string[] {
+  if (!segmenter) return text.split(" ").map((word, index) => (index === 0 ? word : ` ${word}`));
+  return [...segmenter.segment(text)].map((entry) => entry.segment);
+}
+
 function wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
   const lines: string[] = [];
   let line = "";
-  text.split(" ").forEach((word) => {
-    const test = `${line}${word} `;
-    if (context.measureText(test).width > maxWidth && line) {
-      lines.push(line.trim());
-      line = `${word} `;
-    } else line = test;
-  });
-  lines.push(line.trim());
-  return lines;
+  for (const piece of segmentsOf(text)) {
+    // A break opportunity at the start of a line would leave the line empty,
+    // so a single over-long segment is allowed to overhang rather than loop.
+    const test = line + piece;
+    if (line && context.measureText(test).width > maxWidth) {
+      lines.push(line.trimEnd());
+      line = piece.trimStart();
+      continue;
+    }
+    line = test;
+  }
+  if (line.trim()) lines.push(line.trimEnd());
+  return lines.length ? lines : [""];
 }
 
 function sampleCanvasLuminance(context: CanvasRenderingContext2D) {
@@ -133,19 +152,51 @@ function createPageOverlayCanvas(background: HTMLCanvasElement, spread: Spread, 
     let top = 190;
 
     context.font = `${darkSpread ? 72 : 76}px Georgia, serif`;
-    const titleLines = wrapText(context, spread.title, 560);
-    context.font = "31px Avenir Next, Arial, sans-serif";
-    const bodyLines = wrapText(context, spread.body, 470);
+    const titleLines = wrapText(context, spread.title, 620);
+
+    /**
+     * The body used to be authored at 31px, which lands at under 15 CSS px on
+     * the primary canvas with no resolution headroom. It is set at 56px now,
+     * and steps down only as far as it must to stay on the page - the old code
+     * had no clamp at all, so an 800-character body simply ran off the bottom.
+     */
+    const bodyTop = 190 + titleLines.length * 86 + 44;
+    const bodyRoom = canvas.height - bodyTop - 150;
+    let bodySize = 56;
+    let bodyLines: string[] = [];
+    for (;;) {
+      context.font = `${bodySize}px Avenir Next, Arial, sans-serif`;
+      bodyLines = wrapText(context, spread.body, 560);
+      if (bodyLines.length * (bodySize * 1.46) <= bodyRoom || bodySize <= 34) break;
+      bodySize -= 3;
+    }
+    const bodyLeading = bodySize * 1.46;
+    const bodyFits = Math.max(1, Math.floor(bodyRoom / bodyLeading));
+    if (bodyLines.length > bodyFits) bodyLines = bodyLines.slice(0, bodyFits);
 
     if (illustrated) {
-      const scrim = context.createLinearGradient(64, 0, 730, 0);
-      scrim.addColorStop(0, darkSpread ? "rgba(9, 14, 13, .74)" : "rgba(255, 251, 242, .88)");
-      scrim.addColorStop(0.72, darkSpread ? "rgba(9, 14, 13, .54)" : "rgba(255, 251, 242, .70)");
-      scrim.addColorStop(1, darkSpread ? "rgba(9, 14, 13, 0)" : "rgba(255, 251, 242, 0)");
-      context.fillStyle = scrim;
-      context.beginPath();
-      context.roundRect(62, 92, 690, Math.min(1070, 226 + titleLines.length * 84 + bodyLines.length * 45), 34);
-      context.fill();
+      /**
+       * This used to be a rounded rectangle with a hard edge - a card drawn on
+       * the paper, with the story written inside the card. Print does not do
+       * that: it lays a wash into the sheet and sets the type in it, so the
+       * page reads as one surface. Two gradients, no border, nothing to catch
+       * the eye as an edge.
+       */
+      const across = context.createLinearGradient(0, 0, 880, 0);
+      across.addColorStop(0, darkSpread ? "rgba(9, 14, 13, .80)" : "rgba(255, 251, 242, .90)");
+      across.addColorStop(0.55, darkSpread ? "rgba(9, 14, 13, .52)" : "rgba(255, 251, 242, .66)");
+      across.addColorStop(1, darkSpread ? "rgba(9, 14, 13, 0)" : "rgba(255, 251, 242, 0)");
+      context.fillStyle = across;
+      context.fillRect(0, 0, 880, canvas.height);
+
+      const down = context.createLinearGradient(0, 0, 0, canvas.height);
+      down.addColorStop(0, darkSpread ? "rgba(9, 14, 13, .18)" : "rgba(255, 251, 242, .22)");
+      down.addColorStop(0.34, "rgba(0, 0, 0, 0)");
+      down.addColorStop(0.72, "rgba(0, 0, 0, 0)");
+      down.addColorStop(1, darkSpread ? "rgba(9, 14, 13, .16)" : "rgba(255, 251, 242, .2)");
+      context.fillStyle = down;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
       context.fillStyle = darkSpread ? "rgba(244, 232, 203, .96)" : "rgba(18, 20, 18, .96)";
     }
 
@@ -158,10 +209,10 @@ function createPageOverlayCanvas(background: HTMLCanvasElement, spread: Spread, 
 
     context.font = `${darkSpread ? 72 : 76}px Georgia, serif`;
     titleLines.forEach((titleLine, index) => context.fillText(titleLine, 112, top + index * 84));
-    context.font = "31px Avenir Next, Arial, sans-serif";
+    context.font = `${bodySize}px Avenir Next, Arial, sans-serif`;
     context.globalAlpha = 0.88;
-    top = top + titleLines.length * 86 + 40;
-    bodyLines.forEach((bodyLine, index) => context.fillText(bodyLine, 116, top + index * 45));
+    top = bodyTop;
+    bodyLines.forEach((bodyLine, index) => context.fillText(bodyLine, 114, top + index * bodyLeading));
 
     if (!spread.textureUrl) {
       const rule = top + bodyLines.length * 45 + 46;
@@ -994,7 +1045,9 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       const priorClearAlpha = renderer.getClearAlpha();
       const priorAutoClear = renderer.autoClear;
       stageBackgroundMaterial.map = pair.spread;
-      stageBackgroundMaterial.color.set(night ? 0xf4e6ce : 0xffffff);
+      // Night is lighting, not a filter: the desk lamp and the reduced key
+      // do the work, so the illustration keeps its own colour.
+      stageBackgroundMaterial.color.set(0xffffff);
       stageBackgroundMaterial.needsUpdate = true;
       stageOverlayMaterial.map = pair.overlay;
       stageOverlayMaterial.needsUpdate = true;
@@ -1262,7 +1315,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     };
     let lastReadinessSpreadIndex = -1;
     const dayPaperColor = new THREE.Color(0xfffbef);
-    const nightPaperColor = new THREE.Color(0xe6dccb);
+    const nightPaperColor = new THREE.Color(0xf6efe2);
     const dayPageBlockColor = new THREE.Color(0xe8dcc4);
     const nightPageBlockColor = new THREE.Color(0x5f554d);
     const dayEdgeColor = new THREE.Color(0xe8dcc4);

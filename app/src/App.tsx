@@ -431,7 +431,9 @@ export function App() {
 
   const animateCase = useCallback((to: 0 | 1, done?: () => void) => {
     openCleanup.current?.();
-    if (reducedMotion) {
+    // A frozen case is a capture aid, not an animation: settle immediately so
+    // the surrounding state machine still completes.
+    if (reducedMotion || forcedOpenProgress !== null) {
       setOpenProgress(to);
       done?.();
       return;
