@@ -88,7 +88,6 @@ summary:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  button, select, summary, [role="button"] { transition-duration: 1ms; }
   button:hover:not(:disabled), button:active:not(:disabled),
   [role="button"]:hover, [role="button"]:active { scale: 1; }
 }
@@ -397,7 +396,6 @@ summary:focus-visible,
     transform 90ms ease-out;
 }
 
-.library-tabs button:active:not(:disabled) { transform: scale(.95); }
 .library-tabs button:disabled { cursor: wait; }
 
 .library-tabs button.is-active {
@@ -679,8 +677,6 @@ summary:focus-visible,
     transform 90ms ease-out;
 }
 
-.theme-switch button:active { transform: scale(.93); }
-
 .theme-switch button.is-active { color: var(--ink); }
 
 /* The travelling thumb. Motion measures both option positions and animates the
@@ -741,8 +737,9 @@ summary:focus-visible,
   /* Its own stacking context. The composited layers index themselves by depth
      up to 100 and the page copy sits at 80, so without this the inside of a
      flat book outranked the element actions floating over it and the reader
-     read "Ask Codex" through a paragraph. */
-  z-index: 1;
+     read "Ask Codex" through a paragraph. `isolation` states exactly that and
+     nothing else; `z-index` would also reorder it against its auto siblings. */
+  isolation: isolate;
   inset: 14% 7% 13%;
   display: grid;
   place-items: center;
@@ -818,11 +815,6 @@ summary:focus-visible,
   top: var(--selection-y);
   width: 0;
   height: 0;
-  /* The anchor is written by the renderer every frame; it is a position, not
-     an animation. The reduced-motion sheet sets `transition-duration` on every
-     element, and with the default `transition-property: all` the ring would
-     chase the element it is meant to be circling. */
-  transition-property: none;
 }
 
 .selection-ring {
@@ -852,11 +844,6 @@ summary:focus-visible,
 
 .context-menu {
   position: absolute;
-  /* Where a surface sits is not an animation. The reduced-motion sheet sets
-     `transition-duration` on every element, and the default
-     `transition-property: all` would then slide this into place on each new
-     selection rather than putting it there. */
-  transition-property: none;
   top: 82px;
   left: 0;
   display: flex;
@@ -864,11 +851,11 @@ summary:focus-visible,
   width: max-content;
   border-radius: var(--radius-m);
   padding: 5px;
-  transform: translateX(-50%);
+  translate: -50% 0;
 }
 
-.context-menu.clears-right { top: 138px; transform: translateX(-100%); }
-.context-menu.clears-left { transform: none; }
+.context-menu.clears-right { top: 138px; translate: -100% 0; }
+.context-menu.clears-left { translate: 0; }
 
 .context-menu button {
   display: flex;
@@ -896,17 +883,16 @@ summary:focus-visible,
 
 .element-panel {
   position: absolute;
-  transition-property: none;
   top: 138px;
   left: 0;
   width: 270px;
   border-radius: var(--radius-l);
   padding: 14px;
-  transform: translateX(-50%);
+  translate: -50% 0;
 }
 
-.element-panel.clears-right { top: 194px; transform: translateX(-100%); }
-.element-panel.clears-left { transform: none; }
+.element-panel.clears-right { top: 194px; translate: -100% 0; }
+.element-panel.clears-left { translate: 0; }
 
 .element-panel > div,
 .element-panel label {
@@ -944,10 +930,12 @@ summary:focus-visible,
   min-height: 38px;
   border-radius: var(--radius-pill);
   padding: 0 14px;
-  transform: translateX(-50%);
+  /* `translate`, not `transform`: Toast writes its entrance into the inline
+     transform, and a transform-based centering would simply be replaced by it
+     - the toast then hangs off the right edge of a phone. */
+  translate: -50% 0;
   color: var(--muted);
   font-size: var(--text-body);
-  animation: action-in 220ms ease-out both;
 }
 
 .agent-action-success { color: var(--ink); }
@@ -1048,12 +1036,6 @@ summary:focus-visible,
   width: min(390px, calc(100% - 60px));
   border-radius: var(--radius-l);
   padding: 20px;
-  animation: panel-in 240ms ease-out both;
-}
-
-@keyframes panel-in {
-  from { opacity: 0; transform: translateX(-12px); }
-  to { opacity: 1; transform: translateX(0); }
 }
 
 .outline-head,
@@ -1156,26 +1138,6 @@ summary:focus-visible,
 .workshop-signal i { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--shape-circle); background: #aaa59a; box-shadow: var(--ring-neutral); }
 .workshop-signal.is-connected { color: var(--ink-2); }
 .workshop-signal.is-connected i { background: #47a879; box-shadow: var(--ring-ok); }
-
-/* A hanging note against a rule, the way a printed sidenote works - not a
-   second card nested inside the panel's card. */
-.workshop-readiness {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-3);
-  border: 0;
-  border-left: 2px solid var(--accent);
-  border-radius: 0;
-  padding: var(--space-1) 0 var(--space-1) var(--space-4);
-  color: var(--ink);
-  background: none;
-}
-
-.workshop-readiness > svg { margin-top: 4px; color: var(--accent); }
-.workshop-readiness div { display: grid; gap: 3px; min-width: 0; }
-.workshop-readiness strong { font-size: var(--text-body); font-weight: var(--weight-strong); }
-.workshop-readiness span { max-width: 44ch; color: var(--ink-3); font-size: var(--text-body); line-height: 1.55; }
 
 /* Creation is a full workspace, not a form modal. The live Three.js stage
    supplies the blank physical book while this layer supplies only controls. */
@@ -1345,9 +1307,8 @@ summary:focus-visible,
   text-transform: uppercase;
 }
 
-.workshop-segment { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-5); }
-
-.workshop-lengths { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-5); }
+.workshop-segment,
+.workshop-lengths,
 .workshop-chips { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-5); }
 
 /* No box. A small closed vocabulary reads as a set of words when they are
@@ -1750,7 +1711,6 @@ summary:focus-visible,
   .element-panel,
   .element-panel.clears-right,
   .element-panel.clears-left {
-    transform: none;
     translate: clamp(
       calc(10px - var(--selection-x)),
       -50%,
@@ -1809,29 +1769,22 @@ summary:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* `transition: none`, not a 1ms duration. Duration alone leaves
+     `transition-property` at its initial `all`, which switches transitions ON
+     for every element that never asked for one - so a surface positioned by a
+     written custom property slides to each new place instead of being put
+     there. Nothing in the app waits on transitionend, so there is no reason to
+     keep a 1ms window open. */
   *, *::before, *::after {
     scroll-behavior: auto !important;
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 1ms !important;
+    transition: none !important;
   }
   .library-opening-badge svg,
   .book-loading-icon svg { animation: none !important; }
   .book-loading-feedback { animation-delay: 0ms !important; }
 }
-
-:root[data-motion="reduced"] *,
-:root[data-motion="reduced"] *::before,
-:root[data-motion="reduced"] *::after {
-  scroll-behavior: auto !important;
-  animation-duration: 1ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 1ms !important;
-}
-
-:root[data-motion="reduced"] .library-opening-badge svg,
-:root[data-motion="reduced"] .book-loading-icon svg { animation: none !important; }
-:root[data-motion="reduced"] .book-loading-feedback { animation-delay: 0ms !important; }
 
 /* Structured interaction surfaces: element rail, hover affordance, reveal card. */
 
@@ -2546,7 +2499,7 @@ summary:focus-visible,
     transition: transform 90ms ease-out, border-color var(--motion-feedback) ease;
   }
 
-  .reader-sheet-controls button:active:not(:disabled) { transform: scale(.93); border-color: var(--accent); }
+  .reader-sheet-controls button:active:not(:disabled) { border-color: var(--accent); }
   .reader-sheet-controls button:disabled { opacity: .3; }
   .reader-sheet-progress { color: var(--muted); font-size: var(--text-body); text-align: center; }
   .reader-sheet-progress strong { color: var(--ink); font-size: var(--text-lead); font-weight: 650; }

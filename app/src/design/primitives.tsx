@@ -1,5 +1,5 @@
 /**
- * The six interaction primitives.
+ * The three interaction primitives.
  *
  * Before these existed, 63 controls were hand-styled bare elements: 8 had any
  * transition at all, 9 changed on hover with no transition declared so the
@@ -18,79 +18,24 @@
  *    panel swapping its contents) uses a duration and `ease.info`, because
  *    information should not have inertia.
  *
- * These wrap the existing class names rather than replacing them, so a call
- * site adopts the interaction layer without also rewriting its appearance.
- * That is what let all 63 controls gain four states in one change.
+ * The four states themselves are NOT delivered here. They come from the element
+ * selector block at the top of styles.css, which reaches every bare `button`
+ * without a call site having to adopt anything — which is what made fixing all
+ * 63 at once possible. Wrappers only exist where a state cannot be expressed in
+ * CSS at all: presence (a thing that must animate on its way out, after React
+ * would have unmounted it) and shared-element travel. Anything a `:hover` rule
+ * can already say belongs in the stylesheet, not in a component here.
  */
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { HTMLMotionProps } from "motion/react";
-import { forwardRef, type ReactNode } from "react";
-import { motion as motionTokens } from "./tokens.generated";
+import type { ReactNode } from "react";
+import { durationMs, easePoints, motion as motionTokens } from "./tokens.generated";
 
 const spring = { type: "spring", ...motionTokens.springObject } as const;
 const surfaceSpring = { type: "spring", ...motionTokens.springSurface } as const;
 
 /** Informational motion: a duration, never a spring. */
-const info = { duration: 0.22, ease: [0.2, 0.8, 0.2, 1] } as const;
-
-type ButtonProps = Omit<HTMLMotionProps<"button">, "ref"> & {
-  /**
-   * `primary` is the one accented action a screen is allowed. `standard` is
-   * ordinary chrome. `quiet` is a control that should not compete with the
-   * page — it earns its affordance on hover rather than announcing it.
-   */
-  tone?: "primary" | "standard" | "quiet";
-};
-
-/**
- * The press feel is deliberately asymmetric: a control sinks quickly and
- * returns on a spring, which is how a physical key behaves. A symmetric
- * transition reads as a light switch rather than as something being pushed.
- */
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { tone = "standard", children, disabled, ...rest },
-  ref,
-) {
-  const reduced = useReducedMotion();
-  return (
-    <motion.button
-      ref={ref}
-      type="button"
-      disabled={disabled}
-      data-tone={tone}
-      whileHover={disabled || reduced ? undefined : { y: -1 }}
-      whileTap={disabled || reduced ? undefined : { scale: 0.96, y: 0 }}
-      transition={spring}
-      {...rest}
-    >
-      {children}
-    </motion.button>
-  );
-});
-
-/**
- * Icon-only controls take the same states but scale rather than lift, because
- * a round target has no baseline for a lift to read against.
- */
-export const IconButton = forwardRef<HTMLButtonElement, Omit<ButtonProps, "tone"> & { label: string }>(
-  function IconButton({ label, children, disabled, ...rest }, ref) {
-    const reduced = useReducedMotion();
-    return (
-      <motion.button
-        ref={ref}
-        type="button"
-        aria-label={label}
-        disabled={disabled}
-        whileHover={disabled || reduced ? undefined : { scale: 1.06 }}
-        whileTap={disabled || reduced ? undefined : { scale: 0.92 }}
-        transition={spring}
-        {...rest}
-      >
-        {children}
-      </motion.button>
-    );
-  },
-);
+const info = { duration: durationMs.state / 1000, ease: easePoints.info } as const;
 
 export type SwitchOption<T extends string> = {
   value: T;
@@ -113,7 +58,6 @@ export function Switch<T extends string>({
   className,
   groupLabel,
   disabled = false,
-  thumbClassName = "switch-thumb",
 }: {
   value: T;
   options: readonly SwitchOption<T>[];
@@ -121,7 +65,6 @@ export function Switch<T extends string>({
   className?: string;
   groupLabel: string;
   disabled?: boolean;
-  thumbClassName?: string;
 }) {
   const reduced = useReducedMotion();
   return (
@@ -137,13 +80,11 @@ export function Switch<T extends string>({
             aria-label={option.ariaLabel}
             aria-pressed={selected}
             disabled={disabled}
-            whileTap={disabled || reduced ? undefined : { scale: 0.94 }}
-            transition={spring}
           >
             {selected && (
               <motion.span
                 aria-hidden="true"
-                className={thumbClassName}
+                className="switch-thumb"
                 layoutId={`${groupLabel}-thumb`}
                 transition={reduced ? { duration: 0 } : spring}
               />
@@ -165,55 +106,26 @@ export function Switch<T extends string>({
 export function Panel({
   children,
   className,
-  from = "below",
+  from,
   ...rest
-}: Omit<HTMLMotionProps<"div">, "ref"> & { from?: "below" | "left" | "right" | "scale" }) {
+}: Omit<HTMLMotionProps<"div">, "ref"> & { from: "left" | "scale" }) {
   const reduced = useReducedMotion();
-  const offset =
-    from === "left" ? { x: -12 } : from === "right" ? { x: 12 } : from === "scale" ? { scale: 0.96 } : { y: 10 };
+  const offset = from === "left" ? { x: -12 } : { scale: 0.96 };
+  // Only the axis `from` introduced is animated back. Writing all four settled
+  // values would emit `translate(0,0) scale(1)` into the inline transform and
+  // overwrite whatever the call site's stylesheet had put there.
+  const settled = from === "left" ? { x: 0 } : { scale: 1 };
   return (
     <motion.div
       className={className}
       initial={reduced ? false : { opacity: 0, ...offset }}
-      animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+      animate={{ opacity: 1, ...settled }}
       exit={reduced ? { opacity: 0 } : { opacity: 0, ...offset, transition: info }}
       transition={reduced ? { duration: 0 } : surfaceSpring}
       {...rest}
     >
       {children}
     </motion.div>
-  );
-}
-
-/**
- * Label, control, and description as one unit, so a call site cannot ship a
- * control whose label is only a nearby span. The description is wired through
- * aria-describedby rather than left as adjacent text.
- */
-export function Field({
-  label,
-  description,
-  htmlFor,
-  className,
-  children,
-}: {
-  label: ReactNode;
-  description?: ReactNode;
-  htmlFor?: string;
-  className?: string;
-  children: ReactNode;
-}) {
-  const descriptionId = htmlFor && description ? `${htmlFor}-description` : undefined;
-  return (
-    <div className={className}>
-      {htmlFor ? <label htmlFor={htmlFor}>{label}</label> : <span className="field-label">{label}</span>}
-      {children}
-      {description && (
-        <small id={descriptionId} className="field-description">
-          {description}
-        </small>
-      )}
-    </div>
   );
 }
 
@@ -229,12 +141,10 @@ export function Toast({
   open,
   className,
   children,
-  role = "status",
 }: {
   open: boolean;
   className?: string;
   children: ReactNode;
-  role?: "status" | "alert";
 }) {
   const reduced = useReducedMotion();
   return (
@@ -242,8 +152,8 @@ export function Toast({
       {open && (
         <motion.div
           className={className}
-          role={role}
-          aria-live={role === "alert" ? "assertive" : "polite"}
+          role="status"
+          aria-live="polite"
           aria-atomic="true"
           initial={reduced ? false : { opacity: 0, y: -8, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
