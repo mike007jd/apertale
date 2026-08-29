@@ -197,7 +197,18 @@ summary:focus-visible,
   background: #e8dece;
 }
 
-.book-library.is-transitioning .library-sheet,
+/* The shelf clears early so the cover swing behind it is what the reader
+   watches; on the way back it arrives late, after the case has shut. */
+@keyframes library-to-open-book {
+  0% { opacity: 1; }
+  46%, 100% { opacity: 0; }
+}
+
+@keyframes library-from-open-book {
+  0%, 54% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
 .book-library.is-opening-book .library-sheet,
 .book-library.is-closing-book .library-sheet { pointer-events: none; }
 
@@ -591,177 +602,6 @@ summary:focus-visible,
 
 @keyframes library-sheet-in { from { opacity: 0; transform: translateY(10px); } }
 
-@keyframes library-to-open-book {
-  0%, 18% { opacity: 1; transform: scale(1); }
-  62%, 100% { opacity: 0; transform: scale(1.012); }
-}
-
-@keyframes library-from-open-book {
-  0%, 38% { opacity: 0; transform: scale(1.012); }
-  70%, 100% { opacity: 1; transform: scale(1); }
-}
-
-.book-nav-transition {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  overflow: hidden;
-  perspective: 1800px;
-  pointer-events: none;
-  background: #f4f0e8;
-}
-
-:root[data-theme="night"] .book-nav-transition { background: #100d0a; }
-
-.book-nav-transition.is-open {
-  animation: book-nav-open-lifecycle var(--motion-navigation) linear both;
-}
-
-.book-nav-transition.is-close {
-  animation: book-nav-close-lifecycle var(--motion-navigation) linear both;
-}
-
-.book-nav-transition::before {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background: url("/assets/generated/day-background.png") center / cover;
-  content: "";
-  opacity: .58;
-}
-
-:root[data-theme="night"] .book-nav-transition::before {
-  background-image: url("/assets/generated/night-background.png");
-  opacity: .74;
-}
-
-.book-nav-spread {
-  position: absolute;
-  left: var(--book-spread-x);
-  top: var(--book-spread-y);
-  display: block;
-  width: var(--book-spread-w);
-  height: var(--book-spread-h);
-  border: 10px solid #173f39;
-  border-radius: 12px 18px 20px 12px;
-  overflow: hidden;
-  background: #e9dcc0;
-  box-shadow: 0 42px 90px rgba(34, 24, 15, .38);
-  transform-origin: 50% 50%;
-  z-index: 1;
-}
-
-:root[data-theme="night"] .book-nav-spread { border-color: #23160f; box-shadow: 0 44px 100px rgba(0, 0, 0, .68); }
-
-.book-nav-spread::after {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 6%;
-  background: linear-gradient(90deg, rgba(74, 54, 35, .03), rgba(54, 39, 27, .2), rgba(255, 255, 255, .14), rgba(74, 54, 35, .03));
-  content: "";
-  transform: translateX(-50%);
-}
-
-.book-nav-spread-art {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.book-nav-spread-copy {
-  display: grid;
-  align-content: center;
-  width: 100%;
-  height: 100%;
-  padding: 11% 12%;
-  color: #28241e;
-  background:
-    radial-gradient(circle at 70% 26%, rgba(255, 255, 255, .7), transparent 28%),
-    linear-gradient(110deg, #f9f0dc, #e7d4ae);
-}
-
-.book-nav-spread-copy p { margin: 0 0 12px; color: #a05f4c; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
-.book-nav-spread-copy h2 { max-width: 15ch; margin: 0; font-family: "Iowan Old Style", Baskerville, Georgia, serif; font-size: clamp(25px, 3.2vw, 48px); line-height: 1.02; }
-.book-nav-spread-copy span { display: block; max-width: 48ch; margin-top: 18px; color: #665f55; font-size: clamp(11px, 1.2vw, 15px); line-height: 1.5; }
-
-.book-nav-cover {
-  position: absolute;
-  left: var(--book-card-x);
-  top: var(--book-card-y);
-  width: var(--book-card-w);
-  height: var(--book-card-h);
-  border-radius: 4px 10px 10px 4px;
-  transform-origin: 4% 50%;
-  transform-style: preserve-3d;
-  backface-visibility: hidden;
-  box-shadow: 0 28px 58px rgba(38, 27, 18, .42), -6px 5px 0 rgba(65, 44, 29, .18);
-  z-index: 2;
-}
-
-.book-nav-cover img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  object-fit: cover;
-  backface-visibility: hidden;
-}
-
-.book-nav-transition.is-open .book-nav-cover {
-  animation: cover-to-open-book var(--motion-navigation) var(--ease-navigation) both;
-}
-
-.book-nav-transition.is-open .book-nav-spread {
-  animation: spread-open var(--motion-navigation) var(--ease-navigation) both;
-}
-
-.book-nav-transition.is-close .book-nav-cover {
-  animation: cover-to-library var(--motion-navigation) var(--ease-navigation) both;
-}
-
-.book-nav-transition.is-close .book-nav-spread {
-  animation: spread-close var(--motion-navigation) var(--ease-navigation) both;
-}
-
-@keyframes book-nav-open-lifecycle {
-  0%, 78% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-@keyframes book-nav-close-lifecycle {
-  0%, 72% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-@keyframes cover-to-open-book {
-  0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1, 1) rotateY(0); }
-  46%, 56% { opacity: 1; transform: translate3d(var(--book-open-dx), var(--book-open-dy), 0) scale(var(--book-open-sx), var(--book-open-sy)) rotateY(0); }
-  68%, 100% { opacity: 0; transform: translate3d(var(--book-open-dx), var(--book-open-dy), 0) scale(var(--book-open-sx), var(--book-open-sy)) rotateY(-78deg); }
-}
-
-@keyframes spread-open {
-  0%, 58% { opacity: 0; clip-path: inset(0 49% 0 49% round 18px); transform: scale(.97); }
-  70% { opacity: 1; clip-path: inset(0 24% 0 24% round 16px); transform: scale(.985); }
-  100% { opacity: 1; clip-path: inset(0 0 0 0 round 12px); transform: scale(1); }
-}
-
-@keyframes cover-to-library {
-  0%, 48% { opacity: 0; transform: translate3d(var(--book-open-dx), var(--book-open-dy), 0) scale(var(--book-open-sx), var(--book-open-sy)) rotateY(-78deg); }
-  60% { opacity: 1; transform: translate3d(var(--book-open-dx), var(--book-open-dy), 0) scale(var(--book-open-sx), var(--book-open-sy)) rotateY(0); }
-  70% { opacity: 1; transform: translate3d(var(--book-open-dx), var(--book-open-dy), 0) scale(var(--book-open-sx), var(--book-open-sy)) rotateY(0); }
-  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1, 1) rotateY(0); }
-}
-
-@keyframes spread-close {
-  0%, 34% { opacity: 1; clip-path: inset(0 0 0 0 round 12px); transform: scale(1); }
-  48% { opacity: 1; clip-path: inset(0 24% 0 24% round 16px); transform: scale(.985); }
-  60%, 100% { opacity: 0; clip-path: inset(0 49% 0 49% round 18px); transform: scale(.97); }
-}
-
-.app-shell.is-book-nav-active .stage { pointer-events: none; }
 
 /* Three jobs, three treatments.
  *

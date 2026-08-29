@@ -80,10 +80,8 @@ type OpeningBook = {
   id: string;
   title: string;
   coverUrl: string;
-  sourceRect: MotionRect | null;
 };
 
-type MotionRect = { left: number; top: number; width: number; height: number };
 type LibraryMotion = "idle" | "opening-book" | "closing-book";
 type LibraryTab = "yours" | "explore";
 
@@ -97,17 +95,6 @@ export function partitionLibraryBooks<Book extends { sample?: boolean }>(books: 
   const curated = books.filter((book) => Boolean(book.sample));
   return { personal, curated, tabbed: personal.length > 0 };
 }
-
-type BookTransition = {
-  id: string;
-  title: string;
-  coverUrl: string;
-  spreadTextureUrl: string;
-  spreadTitle: string;
-  spreadBody: string;
-  direction: "open" | "close";
-  cardRect: MotionRect;
-};
 
 async function copyPlainText(text: string): Promise<boolean> {
   try {
@@ -140,76 +127,6 @@ async function copyPlainText(text: string): Promise<boolean> {
   }
 }
 
-function readRect(element: Element | null): MotionRect | null {
-  if (!(element instanceof HTMLElement)) return null;
-  const rect = element.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return null;
-  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-}
-
-function transitionStyle(cardRect: MotionRect): CSSProperties {
-  const openHeight = Math.min(window.innerHeight * 0.68, 620);
-  const openWidth = openHeight * (2 / 3);
-  const openLeft = (window.innerWidth - openWidth) / 2;
-  const openTop = (window.innerHeight - openHeight) / 2;
-  const spreadWidth = Math.min(openWidth * 2.08, window.innerWidth * 0.82);
-  return {
-    "--book-card-x": `${cardRect.left}px`,
-    "--book-card-y": `${cardRect.top}px`,
-    "--book-card-w": `${cardRect.width}px`,
-    "--book-card-h": `${cardRect.height}px`,
-    "--book-open-dx": `${openLeft - cardRect.left}px`,
-    "--book-open-dy": `${openTop - cardRect.top}px`,
-    "--book-open-sx": `${openWidth / cardRect.width}`,
-    "--book-open-sy": `${openHeight / cardRect.height}`,
-    "--book-spread-x": `${(window.innerWidth - spreadWidth) / 2}px`,
-    "--book-spread-y": `${openTop}px`,
-    "--book-spread-w": `${spreadWidth}px`,
-    "--book-spread-h": `${openHeight}px`,
-  } as CSSProperties;
-}
-
-function BookTransitionOverlay({ transition, onDone }: { transition: BookTransition; onDone: () => void }) {
-  // `animationend` is the normal settle signal, but a browser that skips or
-  // interrupts the animation must never leave the shelf and reader both locked.
-  useEffect(() => {
-    const timer = window.setTimeout(onDone, 1600);
-    return () => window.clearTimeout(timer);
-  }, [onDone]);
-  return (
-    <div
-      className={`book-nav-transition is-${transition.direction}`}
-      style={transitionStyle(transition.cardRect)}
-      aria-hidden="true"
-      onAnimationEnd={(event) => {
-        if (event.target === event.currentTarget) onDone();
-      }}
-    >
-      <div className={`book-nav-spread ${transition.spreadTextureUrl ? "has-art" : "has-copy"}`}>
-        {transition.spreadTextureUrl ? (
-          <img className="book-nav-spread-art" src={transition.spreadTextureUrl} alt="" />
-        ) : (
-          <article className="book-nav-spread-copy">
-            <p>{transition.title}</p>
-            <h2>{transition.spreadTitle}</h2>
-            <span>{transition.spreadBody}</span>
-          </article>
-        )}
-      </div>
-      <div className="book-nav-cover">
-        <img src={transition.coverUrl} alt="" />
-      </div>
-    </div>
-  );
-}
-
-/**
- * Honest staged feedback for the one operation a reader is waiting on.
- *
- * The three stages map to real events: intent/prewarm, the renderer reporting
- * that it started loading this spread, and the long composition tail. Reduced
- * motion keeps the same status text and step marks without a sustained spin.
- */
 const LOAD_STAGES = ["warming", "loading", "composing"] as const;
 type LoadStage = (typeof LOAD_STAGES)[number];
 
@@ -433,7 +350,6 @@ export function App() {
   const [showLibrary, setShowLibrary] = useState(true);
   const [libraryMotion, setLibraryMotion] = useState<LibraryMotion>("idle");
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("yours");
-  const [bookTransition, setBookTransition] = useState<BookTransition | null>(null);
   const [showCreateGuide, setShowCreateGuide] = useState(false);
   const [showElementAgentGuide, setShowElementAgentGuide] = useState(false);
   const [elementPromptCopied, setElementPromptCopied] = useState(false);
@@ -655,7 +571,7 @@ export function App() {
     snapshot.document.spreads.length,
   );
   const stageIsLoading = readyBookId !== snapshot.document.id || sceneLoadingBookId === snapshot.document.id;
-  const libraryBusy = Boolean(openingBook || bookTransition || libraryMotion !== "idle");
+  const libraryBusy = Boolean(openingBook || libraryMotion !== "idle");
 
   const isCreatorBook = Boolean(activeLibraryBook) && activeLibraryBook?.sample === false;
   const qualityGate = bookEngine.getQualityGate();
@@ -723,29 +639,6 @@ export function App() {
     window.setTimeout(() => libraryOpener.current?.focus(), 0);
   }, []);
 
-  const findLibraryCoverRect = useCallback((bookId: string) => readRect(
-    librarySheet.current?.querySelector(`[data-book-id="${bookId}"] .library-cover-frame`) ?? null,
-  ), []);
-
-  const finishBookTransition = useCallback(() => {
-    if (!bookTransition) return;
-    recordDiagnostic("book:navigation-transition-settled", {
-      documentId: bookTransition.id,
-      direction: bookTransition.direction,
-    });
-    if (bookTransition.direction === "open") {
-      openingBookRef.current = null;
-      setOpeningBook(null);
-      hideLibrary();
-    } else {
-      setLibraryMotion("idle");
-      setBookTransition(null);
-      window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
-      return;
-    }
-    setBookTransition(null);
-  }, [bookTransition, hideLibrary]);
-
   const beginOpenTransition = useCallback((book: OpeningBook) => {
     if (reducedMotion) {
       recordDiagnostic("book:navigation-transition-reduced", { documentId: book.id, direction: "open" });
@@ -767,7 +660,7 @@ export function App() {
   }, [animateCase, hideLibrary, reducedMotion]);
 
   const openLibrary = useCallback(() => {
-    if (showLibrary || bookTransition || openingBookRef.current) return;
+    if (showLibrary || openingBookRef.current) return;
     libraryOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setLibraryMotion("closing-book");
     setShowLibrary(true);
@@ -785,7 +678,7 @@ export function App() {
       recordDiagnostic("book:cover-close-settled", { documentId: snapshot.document.id });
       window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
     });
-  }, [animateCase, bookTransition, reducedMotion, showLibrary, snapshot.document.id]);
+  }, [animateCase, reducedMotion, showLibrary, snapshot.document.id]);
 
   const handleBookLoading = useCallback((documentId: string) => {
     setSceneLoadingBookId(documentId);
@@ -890,8 +783,8 @@ export function App() {
     recordDiagnostic(didCopy ? "element-agent:starter-copied" : "element-agent:copy-blocked", { elementId: selected.id, spreadId: spread.id });
   }, [selected, selectedElementPrompt, spread.id]);
 
-  const openBookFromLibrary = useCallback((bookId: string, source?: HTMLElement) => {
-    if (openingBookRef.current || bookTransition) return;
+  const openBookFromLibrary = useCallback((bookId: string) => {
+    if (openingBookRef.current) return;
     const book = library.books.find((candidate) => candidate.id === bookId);
     if (!book) return;
     // The three stages track real work: the renderer chunk arriving, this
@@ -907,7 +800,6 @@ export function App() {
       id: book.id,
       title: book.title,
       coverUrl: resolvedCoverUrls[book.id] ?? book.coverTextureUrl,
-      sourceRect: readRect(source?.querySelector(".library-cover-frame") ?? null) ?? findLibraryCoverRect(book.id),
     };
 
     if (bookId === snapshot.document.id && readyBookId === bookId) {
@@ -936,7 +828,7 @@ export function App() {
       setShowMore(false);
       setShowOutline(false);
     });
-  }, [advanceLoadStage, beginOpenTransition, bookTransition, findLibraryCoverRect, library.books, prewarmReader, readyBookId, resolvedCoverUrls, snapshot.document.id]);
+  }, [advanceLoadStage, beginOpenTransition, library.books, prewarmReader, readyBookId, resolvedCoverUrls, snapshot.document.id]);
 
   useEffect(() => registerWebMcpTools(setWebMcpAvailable), []);
 
@@ -976,10 +868,9 @@ export function App() {
       if (event.key === "Escape" && showLibrary) {
         // Escape always resolves the shelf. When a cover transition is already
         // running, skip straight to the reader instead of ignoring the key.
-        if (openingBook || bookTransition || libraryMotion !== "idle") {
+        if (openingBook || libraryMotion !== "idle") {
           openingBookRef.current = null;
           setOpeningBook(null);
-          setBookTransition(null);
           hideLibrary();
         } else {
           openBookFromLibrary(snapshot.document.id);
@@ -1003,7 +894,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [bookTransition, closeCodexGuide, closeElementAgentGuide, hideLibrary, libraryMotion, openBookFromLibrary, openingBook, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
+  }, [closeCodexGuide, closeElementAgentGuide, hideLibrary, libraryMotion, openBookFromLibrary, openingBook, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
 
   useEffect(() => {
     if (!showLibrary) return undefined;
@@ -1029,9 +920,9 @@ export function App() {
   }, [showLibrary]);
 
   useEffect(() => {
-    if (!showLibrary || libraryMotion !== "idle" || bookTransition) return;
+    if (!showLibrary || libraryMotion !== "idle") return;
     window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
-  }, [bookTransition, libraryMotion, showLibrary]);
+  }, [libraryMotion, showLibrary]);
 
   // The shelf always opens on the reader's own books - including the first time
   // one exists - so a stale Explore selection never hides what they just made.
@@ -1171,7 +1062,7 @@ export function App() {
   };
 
   return (
-    <main className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""} ${bookTransition ? `is-book-nav-active is-book-nav-${bookTransition.direction}` : ""}`}>
+    <main className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""}`}>
       <header className="topbar" hidden={showLibrary || showCreateGuide} aria-hidden={showElementAgentGuide || undefined}>
         {!snapshot.session.preview && <button className="library-button" onClick={openLibrary} aria-label="Open book library"><Books size={18} /> <span>Books</span></button>}
         <button className="wordmark" onClick={() => { bookEngine.setPreview(false); openLibrary(); }} aria-label="Open book library">Apertale</button>
@@ -1186,7 +1077,7 @@ export function App() {
 
       {showLibrary && !snapshot.session.preview && !showCreateGuide && (
         <section
-          className={`book-library ${libraryMotion !== "idle" ? `is-${libraryMotion}` : ""} ${bookTransition ? "is-transitioning" : ""}`}
+          className={`book-library ${libraryMotion !== "idle" ? `is-${libraryMotion}` : ""}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby="library-title"
@@ -1196,7 +1087,7 @@ export function App() {
           <div className="library-atmosphere" />
           <div className="library-sheet" ref={librarySheet}>
             <header className="library-topbar">
-              <button className="library-wordmark" onClick={(event) => openBookFromLibrary("apertale-field-guide", event.currentTarget)} disabled={libraryBusy}><BookOpenText size={19} /> Apertale</button>
+              <button className="library-wordmark" onClick={() => openBookFromLibrary("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={19} /> Apertale</button>
               <div className="library-topbar-actions">
                 <ThemeSwitch theme={snapshot.session.sceneThemeId} onChange={setTheme} groupLabel="Library theme" disabled={libraryBusy} />
                 <button className="library-close" autoFocus onClick={() => openBookFromLibrary(snapshot.document.id)} aria-label="Return to open book" disabled={libraryBusy}><X size={20} /></button>
@@ -1255,7 +1146,7 @@ export function App() {
                     key={book.id}
                     data-book-id={book.id}
                     className={`library-card library-card-${(index % 5) + 1} ${book.id === library.activeBookId ? "is-active" : ""} ${openingBook?.id === book.id ? "is-opening" : ""}`}
-                    onClick={(event) => openBookFromLibrary(book.id, event.currentTarget)}
+                    onClick={() => openBookFromLibrary(book.id)}
                     onPointerEnter={() => prewarmReader(book.id)}
                     onFocus={() => prewarmReader(book.id)}
                     aria-busy={openingBook?.id === book.id}
@@ -1302,7 +1193,6 @@ export function App() {
         </section>
       )}
 
-      {bookTransition && <BookTransitionOverlay transition={bookTransition} onDone={finishBookTransition} />}
 
       <section
         className={`stage ${showCreateGuide ? "is-creation-workshop" : ""}`}
