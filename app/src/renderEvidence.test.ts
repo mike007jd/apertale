@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete, sceneAssetsReadyForEvidence } from "./renderEvidence";
+import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete, sceneAssetsReadyForEvidence } from "./renderEvidence";
 import type { Spread } from "./types";
 
 const spread = (): Spread => ({
@@ -37,6 +37,16 @@ const spread = (): Spread => ({
 });
 
 describe("render evidence readiness", () => {
+  it("counts only a resolved dedicated cover as shelf cover evidence", () => {
+    const personalBook = { sample: false, coverAssetId: "asset:12345678-1234-4234-8234-123456789abc" };
+    expect(dedicatedCoverRendered(personalBook, "blob:cover")).toBe(true);
+    // An unresolvable dedicated cover falls back to a bundled placeholder;
+    // that load must not satisfy the cover-evidence blocker.
+    expect(dedicatedCoverRendered(personalBook, undefined)).toBe(false);
+    expect(dedicatedCoverRendered({ sample: false }, "/assets/generated/day-background.png")).toBe(false);
+    expect(dedicatedCoverRendered({ sample: true, coverAssetId: personalBook.coverAssetId }, "blob:cover")).toBe(false);
+  });
+
   it("uses the final clean plate and real foreground layers for fallback rendering", () => {
     const plan = fallbackAssetPlan(spread());
     expect(plan.baseAssetId).toBe("/clean.png");

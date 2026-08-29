@@ -2,10 +2,11 @@ import { bookEngine } from "./bookEngine";
 import { getAssetMetadata, listAssetMetadata } from "./assetStore";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
-import { MOTION_PRESETS } from "./types";
+import { MOTION_PRESETS, MAX_BOOK_SPREADS } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 import {
   QUALITY_CONTRACT_VERSION,
+  QUALITY_REVIEW_MAX_ROUNDS,
   QUALITY_RUBRIC,
   QUALITY_VISUAL_CRITERION_IDS,
   buildQualityRenderManifest,
@@ -179,7 +180,7 @@ const qualityReviewSchema = {
   properties: {
     contractVersion: { type: "integer", enum: [QUALITY_CONTRACT_VERSION] },
     reviewedRevision: { type: "integer", minimum: 1 },
-    expectedRound: { type: "integer", minimum: 1, maximum: 2 },
+    expectedRound: { type: "integer", minimum: 1, maximum: QUALITY_REVIEW_MAX_ROUNDS },
     sampleReady: { type: "boolean" },
     summary: { type: "string", minLength: 1, maxLength: 800 },
     checks: {
@@ -307,7 +308,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             spreads: {
               type: "array",
               minItems: 1,
-              maxItems: 12,
+              maxItems: MAX_BOOK_SPREADS,
               items: {
                 type: "object",
                 properties: {
@@ -368,34 +369,18 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             return result;
           }
           if (action === "begin-critique") {
-            const expectedRevision = requiredRevision(input);
-            if (expectedRevision !== bookEngine.getSnapshot().document.revision) {
-              const result = {
-                ok: false,
-                code: "revision_conflict",
-                currentRevision: bookEngine.getSnapshot().document.revision,
-                summary: `Expected revision ${expectedRevision}; refresh quality-review before starting critique.`,
-              };
-              sessionResults.set(requestId, result);
-              return result;
-            }
-            const result = bookEngine.beginQualityReview();
+            // The engine owns the expectedRevision check so every critique
+            // entry point reports the same conflict and keeps requestId
+            // idempotency.
+            const result = bookEngine.beginQualityReview(requiredRevision(input));
             sessionResults.set(requestId, result);
             return result;
           }
           if (action === "record-critique") {
-            const expectedRevision = requiredRevision(input);
-            if (expectedRevision !== bookEngine.getSnapshot().document.revision) {
-              const result = {
-                ok: false,
-                code: "revision_conflict",
-                currentRevision: bookEngine.getSnapshot().document.revision,
-                summary: `Expected revision ${expectedRevision}; refresh quality-review before recording critique.`,
-              };
-              sessionResults.set(requestId, result);
-              return result;
-            }
-            const result = bookEngine.recordQualityReview(input.qualityReview as QualityVisualReviewSubmission);
+            const result = bookEngine.recordQualityReview(
+              input.qualityReview as QualityVisualReviewSubmission,
+              requiredRevision(input),
+            );
             sessionResults.set(requestId, result);
             return result;
           }
@@ -421,7 +406,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           const sourceAssetIds = creationBriefSourceAssetIds(creationBrief);
           const validatedSourceAssets = await getAssetMetadata(sourceAssetIds);
           const title = boundedString(input, "title", 100);
-          if (!Array.isArray(input.spreads) || input.spreads.length < 1 || input.spreads.length > 12) invalid("spreads must contain 1–12 spread drafts.");
+          if (!Array.isArray(input.spreads) || input.spreads.length < 1 || input.spreads.length > MAX_BOOK_SPREADS) invalid(`spreads must contain 1–${MAX_BOOK_SPREADS} spread drafts.`);
           const spreads = input.spreads.map((raw, index) => {
             if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`spreads[${index}] must be an object.`);
             const draft = raw as ToolInput;

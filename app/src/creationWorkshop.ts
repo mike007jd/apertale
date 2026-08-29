@@ -159,11 +159,15 @@ export function buildCreationWorkshopBrief(state: CreationWorkshopState): Creati
       : state.photoUse === "preserve-originals"
         ? "preserved-photo-album"
         : undefined;
+  // Every workshop photo was stored or restored through the trusted asset
+  // adapter, so it is already verified: passing the ids as validated stops the
+  // readiness gate from asking a false Image-handoff question.
   return buildCreationBrief({
     mode: state.mode,
     spreadCount: state.spreadCount,
     visualDirection: state.visualDirection,
     sourceAssets: (state.mode === "idea" ? [] : state.assets).map(({ id, name }) => ({ id, name })),
+    validatedSourceAssetIds: state.assets.map(({ id }) => id),
     bookType,
     photoPolicy: state.photoUse === "illustrated-keepsake"
       ? { sourceUse: "reference-and-compose", preserveIdentity: true, allowFaceChanges: false }

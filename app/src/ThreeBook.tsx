@@ -38,7 +38,6 @@ type PagePair = {
 const PAGE_W = 4.2;
 const PAGE_H = 5.18;
 const PAGE_THICKNESS = 0.024;
-/** How far a pop-up leans out of the page, in radians. */
 
 function clamp(value: number, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value));
@@ -1205,8 +1204,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
           1 + (hover.scale - 1) * sceneElement.hoverAmount + (focus.scale - 1) * sceneElement.focusAmount;
         sceneElement.root.position.set(x, y, element.depth + rise);
         sceneElement.root.rotation.z = THREE.MathUtils.degToRad(-element.transform.rotationDeg);
-        const stageScale = 1;
-        const appliedScale = scale * interactionScale * stageScale;
+        const appliedScale = scale * interactionScale;
         sceneElement.root.scale.set(appliedScale, element.transform.scaleY * (appliedScale / element.transform.scaleX), appliedScale);
 
         // Hover lean follows the live pointer; focus orbit is a named response.

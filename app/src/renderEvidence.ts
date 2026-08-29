@@ -1,10 +1,22 @@
-import type { Spread } from "./types";
+import { isProceduralElement, type Spread } from "./types";
 
 export function fallbackAssetPlan(spread: Spread) {
   return {
     baseAssetId: spread.artwork?.cleanPlateAssetId ?? spread.textureUrl,
-    foreground: spread.elements.filter((element) => !element.assetId.startsWith("procedural:")),
+    foreground: spread.elements.filter((element) => !isProceduralElement(element)),
   };
+}
+
+/**
+ * Shelf cover evidence is only honest when the frame that loaded is the book's
+ * resolved dedicated cover. A bundled placeholder or spread texture must leave
+ * the missing-cover blocker deterministic instead of satisfying it.
+ */
+export function dedicatedCoverRendered(
+  book: { sample?: boolean; coverAssetId?: string },
+  resolvedDedicatedCoverUrl: string | undefined,
+) {
+  return !book.sample && Boolean(book.coverAssetId) && Boolean(resolvedDedicatedCoverUrl);
 }
 
 export function fallbackRenderComplete(expectedCount: number, loadedIds: ReadonlySet<string>, failed: boolean) {

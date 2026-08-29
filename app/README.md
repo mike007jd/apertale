@@ -55,6 +55,8 @@ npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 
 `npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 66 legacy v2 layers need regeneration rather than padding-only repair. The code, unit, build, and Sites checks remain independently green.
 
+`npm run audit:cutouts` and `npm run optimize:assets` shell out to the ImageMagick 7 CLI, so they require a `magick` executable on `PATH` (install ImageMagick 7, for example with `brew install imagemagick` on macOS); without it the audit reports an ImageMagick inspection failure for every file.
+
 `npm run optimize:assets` is a maintenance command that rewrites checked-in runtime images. Use it only for a deliberate asset-optimization batch and review the generated diff.
 
 The production build is emitted as a host-portable bundle:

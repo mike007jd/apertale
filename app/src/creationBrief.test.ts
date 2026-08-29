@@ -102,6 +102,36 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("one original artwork asset id per spread");
   });
 
+  it("marks trusted source ids as verified while unknown sources still ask for handoff", () => {
+    const uuid = (index: number) => `asset:12345678-1234-4234-8234-${index.toString(16).padStart(12, "0")}`;
+    const input: CreationBriefInput = {
+      mode: "photos",
+      spreadCount: 6,
+      visualDirection: "Watercolor storybook",
+      premise: "A harbour year.",
+      audience: "The family",
+      bookType: "photo-led-keepsake",
+      photoPolicy: { sourceUse: "reference-and-compose", preserveIdentity: true, allowFaceChanges: false },
+      sourceAssets: [
+        { id: uuid(1), name: "Harbor at dawn.jpg" },
+        { id: uuid(2), name: "Red tram.png" },
+      ],
+    };
+
+    const unverified = buildCreationBrief(input).readiness;
+    expect(unverified.blockingMissingFields.some((blocker) => blocker.reason.includes("has not verified"))).toBe(true);
+    expect(unverified.questions).toContain(
+      "Please use Image handoff for the missing photos, then ask me to check readiness again.",
+    );
+
+    const verified = buildCreationBrief({ ...input, validatedSourceAssetIds: [uuid(1), uuid(2)] }).readiness;
+    expect(verified.ready).toBe(true);
+    expect(verified.blockingMissingFields.some((blocker) => blocker.reason.includes("has not verified"))).toBe(false);
+    expect(verified.questions).not.toContain(
+      "Please use Image handoff for the missing photos, then ask me to check readiness again.",
+    );
+  });
+
   it("honors both-mode by keeping the idea promise and photo-truth rejection together", () => {
     const brief = buildCreationBrief({
       mode: "both",

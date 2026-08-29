@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BookEngine } from "./bookEngine";
 import { hasReveal, resolveInteraction } from "./interaction";
-import { QUALITY_VISUAL_CRITERION_IDS, assertPublishableQuality, type QualityVisualReviewSubmission } from "./qualityContract";
+import { evaluateDeterministicQuality, QUALITY_VISUAL_CRITERION_IDS, assertPublishableQuality, type QualityVisualReviewSubmission } from "./qualityContract";
 import { sampleBooks } from "./sampleBook";
+import { THEME_IDS } from "./types";
 
 const cityEngine = () => {
   const engine = new BookEngine();
@@ -1034,5 +1035,252 @@ describe("BookEngine document contract", () => {
     expect(engine.openBook("apertale-your-story")).toBe(true);
     expect(engine.getSnapshot().document.revision).toBe(2);
     expect(engine.getSnapshot().document.spreads[0].elements[0].transform.x).toBe(0.71);
+  });
+
+  it("keeps complete render evidence for a fully rendered 12-spread book on both themes and surfaces", () => {
+    localStorage.setItem("apertale.library.v4", JSON.stringify({
+      activeBookId: "full-render-evidence-book",
+      documents: [{
+        id: "full-render-evidence-book",
+        revision: 3,
+        title: "Full Render Evidence Book",
+        spreads: Array.from({ length: 12 }, (_, order) => ({
+          id: `spread-${order + 1}`,
+          order,
+          title: `Spread ${order + 1}`,
+          body: "A rendered spread.",
+          elements: [],
+        })),
+      }],
+      sampleSourceVersion: 3,
+    }));
+    const engine = new BookEngine();
+    expect(engine.adoptCreationBrief(readyStoryBrief(12), [], 3)).toMatchObject({ ok: true });
+    const document = engine.getSnapshot().document;
+
+    for (const theme of THEME_IDS) {
+      expect(engine.recordRenderEvidence({
+        documentId: document.id,
+        revision: document.revision,
+        scope: "cover",
+        theme,
+        surface: "shelf",
+        locator: `[data-book-id="${document.id}"] .library-cover-frame img`,
+      })).toBe(true);
+    }
+    for (const spread of document.spreads) {
+      for (const theme of THEME_IDS) {
+        for (const surface of ["webgl", "fallback"] as const) {
+          expect(engine.recordRenderEvidence({
+            documentId: document.id,
+            revision: document.revision,
+            scope: "spread",
+            spreadId: spread.id,
+            theme,
+            surface,
+            locator: ".book-scene canvas",
+          })).toBe(true);
+        }
+      }
+    }
+    // Re-recording one identity replaces its own entry instead of growing the buffer.
+    expect(engine.recordRenderEvidence({
+      documentId: document.id,
+      revision: document.revision,
+      scope: "spread",
+      spreadId: document.spreads[0].id,
+      theme: THEME_IDS[0],
+      surface: "webgl",
+      locator: ".book-scene canvas",
+    })).toBe(true);
+
+    const evidence = engine.getQualityLifecycle()?.renderEvidence ?? [];
+    expect(evidence).toHaveLength(50);
+    expect(new Set(evidence.map((item) => `${item.scope}:${item.spreadId ?? ""}:${item.theme}:${item.surface}`)).size).toBe(50);
+    const completeness = evaluateDeterministicQuality(
+      document,
+      evidence,
+      engine.getQualityLifecycle()?.creationBrief,
+    ).find((check) => check.criterionId === "render-evidence-completeness");
+    expect(completeness).toMatchObject({ outcome: "pass" });
+  });
+
+  it("does not resurrect cleared motion through a scene-patch interaction update", () => {
+    const engine = cityEngine();
+    const added = engine.dispatch({
+      type: "scene-patch",
+      requestId: "add-moving-gull",
+      expectedRevision: 1,
+      spreadId: "city-for-small-things",
+      operations: [{
+        op: "add",
+        id: "moving-gull",
+        label: "Moving gull",
+        assetId: "/assets/generated/story-city-boy-cutout-v3.png",
+        page: "left",
+        motion: { preset: "water-bob", durationMs: 4200, loop: true },
+        hover: "lift-glow",
+      }],
+    }, "agent");
+    expect(added.ok).toBe(true);
+
+    const retuned = engine.dispatch({
+      type: "scene-patch",
+      requestId: "retune-gull-hover",
+      expectedRevision: added.ok ? added.revision : 0,
+      spreadId: "city-for-small-things",
+      operations: [{ op: "update", elementId: "moving-gull", hover: "warm-rim" }],
+    }, "agent");
+    expect(retuned.ok).toBe(true);
+    const stored = engine.getSnapshot().document.spreads[0].elements.find((element) => element.id === "moving-gull");
+    expect(stored?.interaction).not.toHaveProperty("motion");
+
+    const stilled = engine.dispatch({
+      type: "animate",
+      requestId: "still-the-gull",
+      expectedRevision: retuned.ok ? retuned.revision : 0,
+      elementId: "moving-gull",
+      motion: null,
+    }, "human");
+    expect(stilled.ok).toBe(true);
+    const cleared = engine.getSnapshot().document.spreads[0].elements.find((element) => element.id === "moving-gull");
+    expect(cleared?.motion).toBeUndefined();
+    expect(cleared?.interaction).not.toHaveProperty("motion");
+    expect(resolveInteraction(cleared!).motion).toBeUndefined();
+  });
+
+  const legacyInteractionMotion = { preset: "gentle-float", durationMs: 5200, loop: true };
+
+  const legacyInteractionMotionEngine = () => {
+    localStorage.setItem("apertale.library.v4", JSON.stringify({
+      activeBookId: "legacy-interaction-motion-book",
+      documents: [{
+        id: "legacy-interaction-motion-book",
+        revision: 2,
+        title: "Legacy Interaction Motion Book",
+        spreads: [{
+          id: "legacy-spread",
+          order: 0,
+          title: "Legacy spread",
+          body: "Two elements whose only animation lives in interaction.motion.",
+          elements: ["legacy-drifter", "legacy-bobber"].map((id) => ({
+            id,
+            label: id === "legacy-drifter" ? "Legacy drifter" : "Legacy bobber",
+            kind: "lifted",
+            assetId: "/assets/generated/story-city-boy-cutout-v3.png",
+            page: id === "legacy-drifter" ? "left" : "right",
+            transform: { x: 0.5, y: 0.5, scaleX: 0.7, scaleY: 0.7, rotationDeg: 0 },
+            depth: 0.1,
+            locked: false,
+            interaction: {
+              hover: "lift-glow",
+              focus: "spotlight",
+              reveal: { kind: "caption", title: id, summary: "", facts: [] },
+              hint: `Explore ${id}`,
+              motion: legacyInteractionMotion,
+            },
+            provenance: "sample",
+          })),
+        }],
+      }],
+      sampleSourceVersion: 3,
+    }));
+    return new BookEngine();
+  };
+
+  it("keeps a legacy interaction-only motion alive across unrelated scene-patch interaction updates", () => {
+    const engine = legacyInteractionMotionEngine();
+    const retuned = engine.dispatch({
+      type: "scene-patch",
+      requestId: "retune-legacy-drifter-hover",
+      expectedRevision: 2,
+      spreadId: "legacy-spread",
+      operations: [{ op: "update", elementId: "legacy-drifter", hover: "warm-rim" }],
+    }, "agent");
+    expect(retuned.ok).toBe(true);
+
+    const stored = engine.getSnapshot().document.spreads[0].elements.find((element) => element.id === "legacy-drifter");
+    expect(stored?.motion).toBeUndefined();
+    expect(stored?.interaction?.hover).toBe("warm-rim");
+    expect(stored?.interaction?.motion).toEqual(legacyInteractionMotion);
+    expect(resolveInteraction(stored!).motion).toEqual(legacyInteractionMotion);
+  });
+
+  it("clears both motion representations on an explicit motion clear and keeps them cleared", () => {
+    const engine = legacyInteractionMotionEngine();
+
+    const stilled = engine.dispatch({
+      type: "animate",
+      requestId: "still-legacy-drifter",
+      expectedRevision: 2,
+      elementId: "legacy-drifter",
+      motion: null,
+    }, "human");
+    expect(stilled.ok).toBe(true);
+
+    const retuned = engine.dispatch({
+      type: "scene-patch",
+      requestId: "still-and-retune-legacy-bobber",
+      expectedRevision: stilled.ok ? stilled.revision : 0,
+      spreadId: "legacy-spread",
+      operations: [{ op: "update", elementId: "legacy-bobber", motion: null, hover: "warm-rim" }],
+    }, "agent");
+    expect(retuned.ok).toBe(true);
+
+    const clearedDocument = engine.getSnapshot().document;
+    for (const elementId of ["legacy-drifter", "legacy-bobber"]) {
+      const stored = clearedDocument.spreads[0].elements.find((element) => element.id === elementId);
+      expect(stored?.motion).toBeUndefined();
+      expect(stored?.interaction).not.toHaveProperty("motion");
+      expect(resolveInteraction(stored!).motion).toBeUndefined();
+    }
+
+    // A later unrelated interaction update must not resurrect the cleared motion.
+    const revisited = engine.dispatch({
+      type: "scene-patch",
+      requestId: "retune-after-clear",
+      expectedRevision: retuned.ok ? retuned.revision : 0,
+      spreadId: "legacy-spread",
+      operations: [{ op: "update", elementId: "legacy-drifter", focus: "rise-and-center" }],
+    }, "agent");
+    expect(revisited.ok).toBe(true);
+    const after = engine.getSnapshot().document.spreads[0].elements.find((element) => element.id === "legacy-drifter");
+    expect(after?.interaction?.focus).toBe("rise-and-center");
+    expect(after?.interaction).not.toHaveProperty("motion");
+    expect(resolveInteraction(after!).motion).toBeUndefined();
+  });
+
+  it("enforces the inspected revision at the engine owner for critique begin and record", () => {
+    const engine = new BookEngine();
+    const created = engine.dispatch({
+      type: "create-book",
+      requestId: "create-revision-owned-critique",
+      expectedRevision: 1,
+      documentId: "book-revision-owned-critique",
+      title: "Revision Owned Critique",
+      spreads: [{ id: "opening", title: "Opening", body: "A beginning." }],
+      creationBrief: readyStoryBrief(1),
+      validatedSourceAssetIds: [],
+    }, "agent");
+    expect(created.ok).toBe(true);
+    const revision = engine.getSnapshot().document.revision;
+
+    expect(engine.beginQualityReview(revision + 1)).toEqual({
+      ok: false,
+      code: "revision_conflict",
+      currentRevision: revision,
+      summary: `Expected revision ${revision + 1}; refresh quality-review before starting critique.`,
+    });
+    expect(engine.beginQualityReview(revision)).toMatchObject({ ok: true, nextRound: 1 });
+    expect(engine.recordQualityReview(blockingVisualReview(revision, 1), revision + 1)).toEqual({
+      ok: false,
+      code: "revision_conflict",
+      currentRevision: revision,
+      summary: `Expected revision ${revision + 1}; refresh quality-review before recording critique.`,
+    });
+    expect(engine.recordQualityReview(blockingVisualReview(revision, 1), revision)).toMatchObject({
+      ok: true,
+      qualityReport: { round: 1 },
+    });
   });
 });

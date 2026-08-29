@@ -11,12 +11,13 @@ import {
   type CreationReadinessAssessment,
   type CreationSourceAsset,
 } from "./authoringContract";
+import { MAX_BOOK_SPREADS } from "./types";
 
 export const AUTHORING_MODES = ["idea", "photos", "both"] as const;
 export type AuthoringMode = (typeof AUTHORING_MODES)[number];
 
 const CREATION_SPREAD_COUNT_MIN = 1;
-const CREATION_SPREAD_COUNT_MAX = 12;
+const CREATION_SPREAD_COUNT_MAX = MAX_BOOK_SPREADS;
 const CREATION_SOURCE_ASSET_LIMIT = 24;
 
 export type CreationBriefInput = {
@@ -28,6 +29,8 @@ export type CreationBriefInput = {
   premise?: string;
   audience?: string;
   photoPolicy?: CreationPhotoPolicy;
+  /** Ids the trusted asset adapter already proved to exist, e.g. photos stored by the creation workshop. */
+  validatedSourceAssetIds?: readonly string[];
 };
 
 export type CreationBrief = {
@@ -113,6 +116,8 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     visualDirection,
     sourceAssets,
     photoPolicy: input.photoPolicy,
+  }, {
+    validatedSourceAssetIds: input.validatedSourceAssetIds,
   });
   const prompt = [
     "Work on the Apertale page that is open beside this conversation. It is a WebMCP-enabled living-book canvas.",

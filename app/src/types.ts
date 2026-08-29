@@ -1,7 +1,10 @@
 import type { CreationBriefPayload, CreationReadinessAssessment } from "./authoringContract";
 
-export type ThemeId = "paper-atelier" | "midnight-desk";
+export const THEME_IDS = ["paper-atelier", "midnight-desk"] as const;
+export type ThemeId = (typeof THEME_IDS)[number];
 export type QualityTier = "balanced" | "reduced";
+/** Authoring bound shared by persistence validation, create, readiness, and the WebMCP schema. */
+export const MAX_BOOK_SPREADS = 12 as const;
 export const MOTION_PRESETS = ["gentle-float", "fly-across", "water-bob", "soft-pulse", "slow-orbit"] as const;
 export type MotionPreset = (typeof MOTION_PRESETS)[number];
 export type CommandSource = "human" | "agent";
@@ -68,6 +71,13 @@ export type BookElement = {
   interaction?: InteractionSpec;
   provenance: "sample" | "human" | "agent";
 };
+
+export const PROCEDURAL_ASSET_PREFIX = "procedural:";
+
+/** Procedural markers carry knowledge details without an image asset; every other element is an image foreground layer. */
+export function isProceduralElement(element: Pick<BookElement, "assetId">) {
+  return element.assetId.startsWith(PROCEDURAL_ASSET_PREFIX);
+}
 
 /**
  * A full-spread illustration prepared for layered interaction.

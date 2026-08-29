@@ -1,4 +1,5 @@
 import { MAX_SOURCE_IMAGE_BYTES, optimizeImportedImage } from "./imageOptimizer";
+import { MAX_BOOK_UPLOADED_ASSETS } from "./qualityContract";
 
 const DATABASE_NAME = "apertale-assets";
 const DATABASE_VERSION = 1;
@@ -146,12 +147,12 @@ export async function getAssetMetadata(assetIds: string[]) {
   return records.filter((record): record is StoredAsset => Boolean(record)).map(({ blob: _blob, ...metadata }) => metadata);
 }
 
-export async function listAssetMetadata(limit = 24) {
+export async function listAssetMetadata(limit = MAX_BOOK_UPLOADED_ASSETS) {
   if (!globalThis.indexedDB) return [];
   const records = await withStore<StoredAsset[]>("readonly", (store) => store.getAll());
   return records
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .slice(0, Math.max(0, Math.min(24, limit)))
+    .slice(0, Math.max(0, Math.min(MAX_BOOK_UPLOADED_ASSETS, limit)))
     .map(({ blob: _blob, ...metadata }) => metadata);
 }
 

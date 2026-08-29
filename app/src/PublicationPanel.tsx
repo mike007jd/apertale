@@ -15,6 +15,7 @@ import {
 import { deletePublication, getPublicationRecord, publishDocument, revokePublication } from "./publishingClient";
 import type { PublicationProgress, PublicationRecord } from "./publishingClient";
 import { recordDiagnostic } from "./diagnostics";
+import { useFocusTrap } from "./focusTrap";
 import { listStoredProjectAssetIds } from "./projectArtifact";
 import type { QualityGateState } from "./qualityContract";
 import type { DocumentState } from "./types";
@@ -99,26 +100,7 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
     return () => window.removeEventListener("keydown", onEscape);
   }, [busy, onClose]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const controls = [...(card.current?.querySelectorAll<HTMLElement>('button, [href], input, [tabindex]:not([tabindex="-1"])') ?? [])]
-        .filter((control) => !control.hasAttribute("disabled"));
-      if (controls.length === 0) return;
-      const first = controls[0];
-      const last = controls.at(-1)!;
-      if (event.shiftKey && globalThis.document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && globalThis.document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    const node = card.current;
-    node?.addEventListener("keydown", onKeyDown);
-    return () => node?.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useFocusTrap(card, true);
 
   const run = useCallback(async (kind: Exclude<Busy, null>, work: () => Promise<PublicationRecord | null>, fallback: string) => {
     setBusy(kind);

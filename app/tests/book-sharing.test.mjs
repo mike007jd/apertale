@@ -686,6 +686,55 @@ test("retries metadata cleanup after files were already removed", async () => {
   assert.equal(repository.assets.size, 0);
 });
 
+test("uploads a full 12-spread image-led asset set before enforcing the shared bound", async () => {
+  const manageToken = "q".repeat(43);
+  const repository = new MemoryRepository();
+  const objects = new MemoryObjects();
+  const api = createBookShareApi({ repository, objects, tokenFactory: () => manageToken });
+  const draft = await (await api.handle(new Request("https://example.test/api/books", { method: "POST" }))).json();
+
+  const upload = async (serial) => {
+    const assetId = `asset:12345678-1234-4234-8234-${String(serial).padStart(12, "0")}`;
+    return api.handle(new Request(
+      `https://example.test/api/books/${draft.bookId}/assets/${encodeURIComponent(assetId)}`,
+      {
+        method: "PUT",
+        headers: { authorization: `Bearer ${manageToken}`, "content-type": "image/png" },
+        body: pngBytes(),
+      },
+    ));
+  };
+  // One dedicated cover plus, per spread, the original composite, the final
+  // base, and two foreground layers at the 12-spread maximum.
+  const bound = qualityRubric.maxBookUploadedAssets;
+  assert.equal(bound, 49);
+  for (let serial = 1; serial <= bound; serial += 1) {
+    assert.equal((await upload(serial)).status, 200, `upload ${serial} should be accepted`);
+  }
+
+  const overQuota = await upload(bound + 1);
+  assert.equal(overQuota.status, 409);
+  const rejection = await overQuota.json();
+  assert.equal(rejection.code, "asset_limit");
+  assert.equal(rejection.message, `A book may contain at most ${bound} uploaded assets.`);
+});
+
+test("rejects an oversized publish manifest in one body pass", async () => {
+  const manageToken = "s".repeat(43);
+  const repository = new MemoryRepository();
+  const objects = new MemoryObjects();
+  const api = createBookShareApi({ repository, objects, tokenFactory: () => manageToken });
+  const draft = await (await api.handle(new Request("https://example.test/api/books", { method: "POST" }))).json();
+
+  const oversized = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ manifest: { id: "x".repeat(1_100_000) }, shareToken: "t".repeat(43) }),
+  }));
+  assert.equal(oversized.status, 413);
+  assert.equal((await oversized.json()).code, "manifest_too_large");
+});
+
 test("bounds anonymous book creation without storing network identity", async () => {
   const repository = new MemoryRepository();
   const objects = new MemoryObjects();

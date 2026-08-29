@@ -2,6 +2,7 @@
   "id": "apertale-premium-book-quality",
   "version": 1,
   "maxReviewRounds": 2,
+  "maxBookUploadedAssets": 49,
   "spreadAssetPolicies": {
     "illustrated-storybook": {
       "separation": "inpainted-clean-plate",

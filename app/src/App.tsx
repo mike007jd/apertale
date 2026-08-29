@@ -43,7 +43,8 @@ import {
   restoreCreationWorkshopAssets,
 } from "./creationWorkshop";
 import { recordDiagnostic } from "./diagnostics";
-import { fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete } from "./renderEvidence";
+import { useFocusTrap } from "./focusTrap";
+import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete } from "./renderEvidence";
 import {
   FOCUS_LABELS,
   FOCUS_RESPONSES,
@@ -549,16 +550,21 @@ export function App() {
 
   useEffect(() => {
     let canceled = false;
+    // Only a successfully resolved dedicated cover earns an entry. A missing or
+    // unresolvable cover keeps the bundled placeholder visible but must not
+    // satisfy the deterministic cover-evidence blocker.
     Promise.all(library.books.map(async (book) => {
-      if (!book.coverAssetId) return [book.id, book.coverTextureUrl] as const;
+      if (!book.coverAssetId) return null;
       try {
         return [book.id, await resolveAssetUrl(book.coverAssetId)] as const;
       } catch {
         recordDiagnostic("asset:cover-resolve-failed", { bookId: book.id });
-        return [book.id, book.coverTextureUrl] as const;
+        return null;
       }
     })).then((entries) => {
-      if (!canceled) setResolvedCoverUrls(Object.fromEntries(entries));
+      if (!canceled) {
+        setResolvedCoverUrls(Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry !== null)));
+      }
     });
     return () => { canceled = true; };
   }, [library]);
@@ -961,51 +967,9 @@ export function App() {
     if (showLibrary) setLibraryTab("yours");
   }, [showLibrary]);
 
-  useEffect(() => {
-    if (!showCreateGuide) return undefined;
-    const card = createGuideCard.current;
-    if (!card) return undefined;
-    const keepFocusInside = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const controls = [...card.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-        .filter((control) => !control.hasAttribute("disabled") && !control.hasAttribute("hidden"));
-      if (controls.length === 0) return;
-      const first = controls[0];
-      const last = controls.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    card.addEventListener("keydown", keepFocusInside);
-    return () => card.removeEventListener("keydown", keepFocusInside);
-  }, [showCreateGuide]);
-
-  useEffect(() => {
-    if (!showElementAgentGuide) return undefined;
-    const card = elementAgentCard.current;
-    if (!card) return undefined;
-    const keepFocusInside = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const controls = [...card.querySelectorAll<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])')]
-        .filter((control) => !control.hasAttribute("disabled"));
-      if (controls.length === 0) return;
-      const first = controls[0];
-      const last = controls.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    card.addEventListener("keydown", keepFocusInside);
-    return () => card.removeEventListener("keydown", keepFocusInside);
-  }, [showElementAgentGuide]);
+  useFocusTrap(librarySheet, showLibrary);
+  useFocusTrap(createGuideCard, showCreateGuide);
+  useFocusTrap(elementAgentCard, showElementAgentGuide);
 
   useEffect(() => () => {
     if (openingFrame.current) cancelAnimationFrame(openingFrame.current);
@@ -1239,7 +1203,7 @@ export function App() {
                         decoding="async"
                         fetchPriority={index === 0 ? "high" : "auto"}
                         onLoad={() => {
-                          if (!book.sample) {
+                          if (dedicatedCoverRendered(book, resolvedCoverUrls[book.id])) {
                             bookEngine.recordRenderEvidence({
                               documentId: book.id,
                               revision: book.revision,

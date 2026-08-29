@@ -114,7 +114,6 @@ describe("page-turn session lifecycle", () => {
 
     expect(harness.commits).toEqual([]);
     expect(harness.currentIndex()).toBe(0);
-    expect(harness.controller.isTurning()).toBe(true);
     expect(harness.liveTurn()).toMatchObject({ direction: "forward" });
     expect(harness.liveTurn()!.progress).toBeGreaterThan(0);
     expect(harness.liveTurn()!.progress).toBeLessThan(1);
@@ -131,7 +130,6 @@ describe("page-turn session lifecycle", () => {
     expect(harness.commits).toEqual(["forward"]);
     expect(harness.currentIndex()).toBe(1);
     expect(harness.liveTurn()).toBeNull();
-    expect(harness.controller.isTurning()).toBe(false);
     expect(pageTurnNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
       previous: false,
       next: false,
@@ -179,7 +177,7 @@ describe("page-turn session lifecycle", () => {
     const harness = makeHarness({ spreadCount: 2 });
     harness.controller.onPageGesture("backward", "start", 0);
     harness.controller.onPageGesture("backward", "end", 0.9);
-    expect(harness.controller.isTurning()).toBe(false);
+    expect(harness.turns).toEqual([]);
     expect(harness.commits).toEqual([]);
 
     harness.controller.turnPage("forward");
@@ -226,7 +224,6 @@ describe("page-turn session lifecycle", () => {
     expect(harness.commits).toEqual(["forward"]);
     expect(harness.hasPendingFrame()).toBe(false);
     expect(harness.liveTurn()).toBeNull();
-    expect(harness.controller.isTurning()).toBe(false);
     expect(pageTurnNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
       previous: false,
       next: false,
@@ -237,7 +234,6 @@ describe("page-turn session lifecycle", () => {
     const harness = makeHarness({ reducedMotion: true });
     harness.controller.onPageGesture("forward", "start", 0);
     expect(harness.liveTurn()).toMatchObject({ direction: "forward", progress: 0 });
-    expect(harness.controller.isTurning()).toBe(true);
     expect(pageTurnNavDisabled(harness.liveTurn(), harness.currentIndex(), 4)).toEqual({
       previous: true,
       next: true,
@@ -246,7 +242,6 @@ describe("page-turn session lifecycle", () => {
     harness.controller.onPageGesture("forward", "move", 0.5);
     harness.controller.onPageGesture("forward", "end", 0.5);
     expect(harness.commits).toEqual(["forward"]);
-    expect(harness.controller.isTurning()).toBe(false);
     expect(harness.liveTurn()).toBeNull();
 
     harness.controller.turnPage("forward");
@@ -263,7 +258,6 @@ describe("page-turn session lifecycle", () => {
     expect(harness.commits).toEqual(["forward"]);
     expect(harness.hasPendingFrame()).toBe(false);
     expect(harness.liveTurn()).toBeNull();
-    expect(harness.controller.isTurning()).toBe(false);
   });
 
   it("tracks a drag and cancels back to the same spread below the commit threshold", () => {
@@ -305,7 +299,6 @@ describe("page-turn session lifecycle", () => {
     harness.controller.dispose();
     expect(harness.canceled.length).toBeGreaterThan(0);
     expect(harness.hasPendingFrame()).toBe(false);
-    expect(harness.controller.isTurning()).toBe(false);
 
     harness.fireLateFrame(800);
     expect(harness.commits).toEqual([]);
@@ -326,6 +319,6 @@ describe("page-turn session lifecycle", () => {
 
     expect(harness.commits).toEqual(["forward"]);
     expect(harness.currentIndex()).toBe(1);
-    expect(harness.controller.isTurning()).toBe(false);
+    expect(harness.liveTurn()).toBeNull();
   });
 });

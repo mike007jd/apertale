@@ -6,11 +6,25 @@ import {
   type CreationBookType,
   type CreationBriefPayload,
 } from "./authoringContract";
+import { MAX_BOOK_SPREADS, isProceduralElement } from "./types";
 import type { DocumentState, ThemeId } from "./types";
 
 export const QUALITY_CONTRACT_VERSION = 1 as const;
 export const QUALITY_RUBRIC_VERSION = 1 as const;
 export const QUALITY_REVIEW_MAX_ROUNDS = 2 as const;
+/** Closed runtime vocabulary for persisted quality lifecycle status. */
+export const QUALITY_REVIEW_STATUSES = ["needs-review", "checking", "ready", "blocked", "needs-user-input"] as const;
+
+const MIN_SPREAD_FOREGROUND_LAYERS = 2;
+/**
+ * Smallest asset capacity that can hold one publishable image-led book at the
+ * 12-spread maximum: a dedicated cover plus, per spread, the original
+ * composite, the final clean plate, and two foreground layers
+ * (1 + 12 × 4 = 49). Shared with the Worker through the rubric so client
+ * discovery and the upload quota advertise the same bound.
+ */
+const MINIMUM_CAPABLE_BOOK_ASSETS = 1 + MAX_BOOK_SPREADS * (2 + MIN_SPREAD_FOREGROUND_LAYERS);
+export const MAX_BOOK_UPLOADED_ASSETS = qualityRubricSource.maxBookUploadedAssets;
 
 type QualityCriterionMode = "deterministic" | "visual" | "both";
 type QualityCriterion = {
@@ -24,6 +38,7 @@ type QualityRubric = {
   id: string;
   version: typeof QUALITY_RUBRIC_VERSION;
   maxReviewRounds: typeof QUALITY_REVIEW_MAX_ROUNDS;
+  maxBookUploadedAssets: number;
   spreadAssetPolicies: Record<CreationBookType, {
     separation: "inpainted-clean-plate" | "preserved-photo-layout";
     sourceUse: "reference-and-compose" | "preserve-original-layout";
@@ -33,7 +48,12 @@ type QualityRubric = {
 };
 
 export const QUALITY_RUBRIC = Object.freeze(qualityRubricSource) as QualityRubric;
-if (QUALITY_RUBRIC.version !== QUALITY_RUBRIC_VERSION || QUALITY_RUBRIC.maxReviewRounds !== QUALITY_REVIEW_MAX_ROUNDS) {
+if (
+  QUALITY_RUBRIC.version !== QUALITY_RUBRIC_VERSION
+  || QUALITY_RUBRIC.maxReviewRounds !== QUALITY_REVIEW_MAX_ROUNDS
+  || !Number.isInteger(MAX_BOOK_UPLOADED_ASSETS)
+  || MAX_BOOK_UPLOADED_ASSETS < MINIMUM_CAPABLE_BOOK_ASSETS
+) {
   throw new TypeError("Invalid Apertale quality rubric version.");
 }
 
@@ -273,7 +293,7 @@ export function evaluateDeterministicQuality(
       cleanPlate ? undefined : "Add the final generated clean plate or approved preserved-photo layout.",
     ));
 
-    const foreground = spread.elements.filter((element) => !element.assetId.startsWith("procedural:"));
+    const foreground = spread.elements.filter((element) => !isProceduralElement(element));
     const layered = Boolean(cleanPlate) && foreground.length >= 2 && foreground.length <= 4;
     checks.push(evidence(
       "layered-spread-contract",
@@ -453,7 +473,7 @@ export function buildQualityRenderManifest(documentState: DocumentState, pageUrl
       sourceAssetId: spread.artwork?.sourceAssetId ?? null,
       personalSourceAssetId: spread.artwork?.personalSourceAssetId ?? null,
       foregroundLayers: spread.elements
-        .filter((element) => !element.assetId.startsWith("procedural:"))
+        .filter((element) => !isProceduralElement(element))
         .map((element) => ({
           id: element.id,
           label: element.label,

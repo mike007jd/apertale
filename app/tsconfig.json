@@ -17,7 +17,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "jsx": "react-jsx",
-    "types": ["vitest/globals", "webmcp-types"]
+    "types": ["webmcp-types"]
   },
   "include": ["src"],
   "exclude": ["dist", "node_modules"]

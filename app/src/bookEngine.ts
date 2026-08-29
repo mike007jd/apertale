@@ -5,13 +5,14 @@ import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS, res
 import { listProjectAssetReferences } from "./projectArtifact";
 import {
   QUALITY_REVIEW_MAX_ROUNDS,
+  QUALITY_REVIEW_STATUSES,
   buildQualityReport,
   creationAssetPolicyIssues,
   evaluateDeterministicQuality,
   qualityGateState,
   validateVisualReview,
 } from "./qualityContract";
-import { MOTION_PRESETS } from "./types";
+import { MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralElement } from "./types";
 import type {
   AuthoringQualityLifecycle,
   QualityGateState,
@@ -30,6 +31,7 @@ import type {
   DocumentState,
   EditCommand,
   InteractCommand,
+  InteractionSpec,
   LayeredArtwork,
   MotionSpec,
   MutationResult,
@@ -45,6 +47,17 @@ import type {
 
 const STORAGE_KEY = "apertale.library.v4";
 const SAMPLE_SOURCE_VERSION = 3;
+
+/**
+ * Every render-evidence identity a fully rendered book can hold at one
+ * revision: each spread on both themes across the WebGL and fallback
+ * surfaces, plus a shelf cover per theme. Bounding the buffer at this derived
+ * size keeps storage bounded while a complete 12-spread book can never evict
+ * genuine current-revision evidence.
+ */
+const RENDER_EVIDENCE_LIMIT = MAX_BOOK_SPREADS * THEME_IDS.length * 2 + THEME_IDS.length;
+
+const renderEvidenceKey = (item: QualityRenderEvidence) => `${item.scope}:${item.spreadId ?? ""}:${item.theme}:${item.surface}`;
 
 type ElementField = "kind" | "depth" | "locked" | "motion" | "transform" | "interaction" | "provenance";
 
@@ -124,7 +137,7 @@ function validDocument(parsed: DocumentState) {
     && parsed.revision >= 1
     && Array.isArray(parsed.spreads)
     && parsed.spreads.length >= 1
-    && parsed.spreads.length <= 12
+    && parsed.spreads.length <= MAX_BOOK_SPREADS
     && parsed.spreads.every((spread, order) => (
       typeof spread.id === "string"
       && typeof spread.title === "string"
@@ -150,7 +163,7 @@ function validQualityLifecycle(value: unknown): value is AuthoringQualityLifecyc
     && Number.isInteger(lifecycle.reviewRounds)
     && Number(lifecycle.reviewRounds) >= 0
     && Number(lifecycle.reviewRounds) <= QUALITY_REVIEW_MAX_ROUNDS
-    && ["needs-review", "checking", "ready", "blocked", "needs-user-input"].includes(String(lifecycle.reviewStatus))
+    && (QUALITY_REVIEW_STATUSES as readonly string[]).includes(String(lifecycle.reviewStatus))
     && Array.isArray(lifecycle.renderEvidence);
 }
 
@@ -248,6 +261,23 @@ function findElement(documentState: DocumentState, elementId: string) {
 
 function equalField(a: unknown, b: unknown) {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * `element.motion` is the authoritative motion field, but legacy stored books
+ * can keep their only animation in `interaction.motion`, which
+ * `resolveInteraction` falls back to. Strip that mirror whenever motion is
+ * written explicitly: a cleared motion must not resurrect through the
+ * fallback, and a replaced motion must not leave a stale shadow behind.
+ */
+function stripLegacyInteractionMotion(interaction: InteractionSpec | undefined) {
+  if (!interaction?.motion) return interaction;
+  return {
+    hover: interaction.hover,
+    focus: interaction.focus,
+    reveal: interaction.reveal,
+    hint: interaction.hint,
+  };
 }
 
 export class BookEngine {
@@ -358,7 +388,15 @@ export class BookEngine {
     };
   }
 
-  beginQualityReview() {
+  beginQualityReview(expectedRevision?: number) {
+    if (typeof expectedRevision === "number" && expectedRevision !== this.documentState.revision) {
+      return {
+        ok: false as const,
+        code: "revision_conflict" as const,
+        currentRevision: this.documentState.revision,
+        summary: `Expected revision ${expectedRevision}; refresh quality-review before starting critique.`,
+      };
+    }
     const lifecycle = this.ensureQualityLifecycle();
     if (!lifecycle.creationBrief?.bookType) {
       return {
@@ -430,19 +468,29 @@ export class BookEngine {
       ...input,
       renderedAt: new Date().toISOString(),
     };
+    // Drop stale-revision history and the entry this render supersedes, keyed
+    // by evidence identity so WebGL and fallback evidence for the same spread
+    // coexist without evicting each other.
     lifecycle.renderEvidence = [
-      ...lifecycle.renderEvidence.filter((item) => !(
-        item.revision !== documentState.revision
-        || (item.scope === next.scope && item.spreadId === next.spreadId && item.theme === next.theme && item.surface === next.surface)
+      ...lifecycle.renderEvidence.filter((item) => (
+        item.revision === documentState.revision && renderEvidenceKey(item) !== renderEvidenceKey(next)
       )),
       next,
-    ].slice(-26);
+    ].slice(-RENDER_EVIDENCE_LIMIT);
     this.persist();
     this.emit();
     return true;
   }
 
-  recordQualityReview(submission: QualityVisualReviewSubmission) {
+  recordQualityReview(submission: QualityVisualReviewSubmission, expectedRevision?: number) {
+    if (typeof expectedRevision === "number" && expectedRevision !== this.documentState.revision) {
+      return {
+        ok: false as const,
+        code: "revision_conflict" as const,
+        currentRevision: this.documentState.revision,
+        summary: `Expected revision ${expectedRevision}; refresh quality-review before recording critique.`,
+      };
+    }
     const lifecycle = this.ensureQualityLifecycle();
     const nextRound = lifecycle.reviewRounds + 1;
     if (lifecycle.reviewStatus !== "checking") {
@@ -608,7 +656,7 @@ export class BookEngine {
               ...(spread.artwork.personalSourceAssetId
                 ? { personalSourceAssetId: spread.artwork.personalSourceAssetId }
                 : {}),
-              foregroundLayerCount: spread.elements.filter((element) => !element.assetId.startsWith("procedural:")).length,
+              foregroundLayerCount: spread.elements.filter((element) => !isProceduralElement(element)).length,
             }
           : null,
         elements: spread.elements.map((element) => ({
@@ -782,8 +830,17 @@ export class BookEngine {
       fields = ["interaction"];
       verb = "retuned";
     } else if (command.type === "animate") {
-      nextElement = { ...nextElement, motion: command.motion ?? undefined, provenance: source };
-      fields = ["motion"];
+      // An explicit animate write owns motion: drop the legacy
+      // `interaction.motion` mirror too, or a cleared motion would resurrect
+      // through the resolveInteraction fallback.
+      const hadLegacyMotion = Boolean(nextElement.interaction?.motion);
+      nextElement = {
+        ...nextElement,
+        motion: command.motion ?? undefined,
+        ...(hadLegacyMotion ? { interaction: stripLegacyInteractionMotion(nextElement.interaction) } : {}),
+        provenance: source,
+      };
+      fields = hadLegacyMotion ? ["motion", "interaction"] : ["motion"];
       verb = command.motion ? "animated" : "stilled";
     } else {
       nextElement = this.applyEdit(nextElement, command, source);
@@ -837,7 +894,7 @@ export class BookEngine {
     }
     const title = command.title.trim();
     const validSpreads = command.spreads.length >= 1
-      && command.spreads.length <= 12
+      && command.spreads.length <= MAX_BOOK_SPREADS
       && new Set(command.spreads.map((spread) => spread.id)).size === command.spreads.length
       && command.spreads.every((spread) => (
         /^[a-z0-9][a-z0-9-]{0,63}$/.test(spread.id)
@@ -1144,15 +1201,28 @@ export class BookEngine {
         if (operation.transform) element.transform = { ...element.transform, ...operation.transform };
         if (typeof operation.depth === "number") element.depth = operation.depth;
         if (typeof operation.locked === "boolean") element.locked = operation.locked;
-        if (typeof operation.motion !== "undefined") element.motion = operation.motion ?? undefined;
+        if (typeof operation.motion !== "undefined") {
+          // An explicit motion write owns animation: drop the legacy
+          // `interaction.motion` mirror so cleared motion cannot resurrect
+          // and a replaced motion leaves no stale shadow.
+          element.motion = operation.motion ?? undefined;
+          element.interaction = stripLegacyInteractionMotion(element.interaction);
+        }
         if (typeof operation.frameAssetIds !== "undefined") element.frameAssetIds = operation.frameAssetIds ?? undefined;
         if (operation.hover || operation.focus || operation.reveal) {
           const interaction = resolveInteraction(element);
+          // Preserve a legacy `interaction.motion` fallback (some stored books
+          // keep their only animation there), but never copy the resolved read
+          // back: `element.motion` owns motion, and duplicating it here would
+          // persist a stale copy that resurrects after the authoritative field
+          // is cleared.
+          const legacyMotion = element.interaction?.motion;
           element.interaction = {
-            ...interaction,
             hover: operation.hover ?? interaction.hover,
             focus: operation.focus ?? interaction.focus,
             reveal: operation.reveal ? normalizeReveal(operation.reveal) : interaction.reveal,
+            hint: interaction.hint,
+            ...(legacyMotion ? { motion: legacyMotion } : {}),
           };
         }
         element.provenance = source;
@@ -1162,7 +1232,7 @@ export class BookEngine {
 
     if (
       command.operations.some((operation) => operation.op === "set-background")
-      && elements.filter((element) => !element.assetId.startsWith("procedural:")).length < 2
+      && elements.filter((element) => !isProceduralElement(element)).length < 2
     ) {
       return fail("A clean background requires at least two extracted foreground image layers in the same finished scene.");
     }

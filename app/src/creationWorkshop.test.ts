@@ -116,4 +116,25 @@ describe("creation workshop session", () => {
 
     expect(restored.assets.map((asset) => asset.id)).toEqual([id(1), id(2), id(3)]);
   });
+
+  it("treats stored workshop photos as verified sources instead of asking for Image handoff", () => {
+    const withPhotos = reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
+      type: "append-assets",
+      assets: [workshopAsset(1), workshopAsset(2)],
+    });
+    const brief = buildCreationWorkshopBrief(reduceCreationWorkshop(withPhotos, {
+      type: "set-photo-use",
+      photoUse: "illustrated-keepsake",
+    }));
+
+    expect(brief.readiness.blockingMissingFields.some((blocker) => blocker.reason.includes("has not verified"))).toBe(false);
+    expect(brief.readiness.questions).not.toContain(
+      "Please use Image handoff for the missing photos, then ask me to check readiness again.",
+    );
+    // Premise and audience still belong to the Agent conversation.
+    expect(brief.readiness.questions).toEqual(expect.arrayContaining([
+      expect.stringContaining("What is the book about"),
+      expect.stringContaining("Who is this book for?"),
+    ]));
+  });
 });

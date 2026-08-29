@@ -8,7 +8,10 @@ const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f-]{27,35}$/i;
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const MAX_ASSET_BYTES = 1_500_000;
 const MAX_MANIFEST_BYTES = 1_000_000;
-const MAX_ASSETS = 24;
+// Derived from the rubric so the client asset directory and this upload quota
+// advertise the same bound: one cover plus, per spread, an original composite,
+// a final base, and two foreground layers at the 12-spread maximum.
+const MAX_ASSETS = qualityRubric.maxBookUploadedAssets;
 const MAX_SITE_BOOKS = 2_000;
 const MAX_BOOKS_PER_WINDOW = 40;
 const CREATION_WINDOW_MS = 60 * 60 * 1_000;
@@ -316,9 +319,7 @@ function validateCreationAssetPolicy(manifest, brief, blocked) {
   });
 }
 
-function validateDeterministicPublishQuality(manifest, creationBrief) {
-  const blocked = (message) => { throw new HttpError(409, "quality_blocked", message); };
-  validateCreationAssetPolicy(manifest, creationBrief, blocked);
+function validateDeterministicPublishQuality(manifest) {
   if (!manifest.coverAssetId && !manifest.coverTextureUrl) {
     throw new HttpError(409, "quality_blocked", "Add a dedicated cover before publishing.");
   }
@@ -412,7 +413,6 @@ function validateQualityAttestation(manifest, quality) {
   ) blocked("The quality review severity counts are inconsistent.");
   const renderEvidenceCheck = quality.checks.find((check) => check.criterionId === "render-evidence-completeness");
   if (!renderEvidenceCheck || renderEvidenceCheck.outcome !== "pass") blocked("Current rendered evidence is required before publishing.");
-  validateCreationAssetPolicy(manifest, quality.creationBrief, blocked);
 }
 
 function assetHref(shareToken, assetId) {
@@ -445,12 +445,14 @@ function hydrateManifest(manifest, shareToken) {
 async function readJsonBody(request) {
   const declaredSize = Number(request.headers.get("content-length") ?? 0);
   if (declaredSize > MAX_MANIFEST_BYTES) throw new HttpError(413, "manifest_too_large", "The book manifest is too large.");
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_MANIFEST_BYTES) {
+  // Read the body once: the byte length gates the size check and the same
+  // buffer is decoded for parsing.
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength > MAX_MANIFEST_BYTES) {
     throw new HttpError(413, "manifest_too_large", "The book manifest is too large.");
   }
   try {
-    return JSON.parse(text);
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new HttpError(400, "invalid_json", "The request body must be valid JSON.");
   }
@@ -564,7 +566,12 @@ export function createBookShareApi({
     }
     const manifest = payload?.manifest;
     const references = validateManifest(manifest);
-    validateDeterministicPublishQuality(manifest, payload?.quality?.creationBrief);
+    // One shared creation-asset policy traversal: the deterministic publish
+    // checks and the stored attestation validate the same (manifest, brief)
+    // pair, so a second identical pass would only duplicate work.
+    const qualityBlocked = (message) => { throw new HttpError(409, "quality_blocked", message); };
+    validateCreationAssetPolicy(manifest, payload?.quality?.creationBrief, qualityBlocked);
+    validateDeterministicPublishQuality(manifest);
     validateQualityAttestation(manifest, payload?.quality);
     const uploaded = new Set(await repository.listAssetIds(bookId));
     const missing = [...references].filter((assetId) => !uploaded.has(assetId));

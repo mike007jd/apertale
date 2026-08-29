@@ -206,7 +206,7 @@ export function createPageTurnSession(deps: PageTurnSessionDeps) {
     deps.setTurn(null);
   };
 
-  return { turnPage, onPageGesture, isTurning: () => !disposed && active !== null, activate, dispose };
+  return { turnPage, onPageGesture, activate, dispose };
 }
 
 /**

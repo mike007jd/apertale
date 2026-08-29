@@ -365,6 +365,17 @@ describe("WebMCP registration", () => {
       expect.objectContaining({ criterionId: "render-evidence-completeness", outcome: "blocker" }),
     ]));
 
+    const staleQualityStart = JSON.parse(String(await tool("manage_book").execute({
+      requestId: "begin-quality-round-stale",
+      expectedRevision: layeredBackground.revision + 1,
+      action: "begin-critique",
+    }, { signal: new AbortController().signal })));
+    expect(staleQualityStart).toMatchObject({
+      ok: false,
+      code: "revision_conflict",
+      currentRevision: layeredBackground.revision,
+    });
+
     const qualityStart = JSON.parse(String(await tool("manage_book").execute({
       requestId: "begin-quality-round-one",
       expectedRevision: layeredBackground.revision,
