@@ -12,7 +12,7 @@ import {
   qualityGateState,
   validateVisualReview,
 } from "./qualityContract";
-import { MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralElement, spreadBaseAssetId } from "./types";
+import { DIRECT_MANIPULATION, MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralElement, spreadBaseAssetId } from "./types";
 import type {
   AuthoringQualityLifecycle,
   QualityGateState,
@@ -793,16 +793,13 @@ export class BookEngine {
    * pointer handlers, and a drag there used to write a real transform into a
    * document the reader believed they were only looking at.
    *
-   * Only the four commands a person can actually issue are refused, and only
-   * when a person issues them. Codex keeps working during a preview - the
-   * reader watching their book change is the point of that mode - and Undo
-   * stays available so a change they dislike can be taken back without first
-   * leaving preview.
+   * Only direct manipulation is refused, and only when a person issues it.
+   * `DIRECT_MANIPULATION` in types.ts is what decides that, so the set cannot
+   * fall out of date with the command union.
    */
   private refusedByPreview(command: DocumentCommand, source: CommandSource) {
     if (source !== "human" || !this.sessionState.preview) return null;
-    const direct = command.type === "edit" || command.type === "lift" || command.type === "animate" || command.type === "interact";
-    if (!direct) return null;
+    if (!DIRECT_MANIPULATION[command.type]) return null;
     return this.conflict("invalid", "Preview is read-only. Exit Preview to change this book.");
   }
 
