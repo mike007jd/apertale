@@ -1284,8 +1284,17 @@ export function App() {
 
       <section
         className={`stage ${showCreateGuide ? "is-creation-workshop" : ""}`}
-        hidden={showLibrary && !showCreateGuide}
-        aria-hidden={(showLibrary && !showCreateGuide) || undefined}
+        /**
+         * Hidden only while the shelf is SETTLED over it. `hidden` applies
+         * display:none, so keying this on showLibrary alone meant both the
+         * cover open and the cover close ran to completion inside a display:none
+         * subtree - the shelf then vanished onto an already-open book, and
+         * reappeared over an already-shut one. Neither animation was ever on
+         * screen. While a transition is running the stage must be visible;
+         * that is the entire point of the transition.
+         */
+        hidden={showLibrary && libraryMotion === "idle" && !showCreateGuide}
+        aria-hidden={(showLibrary && libraryMotion === "idle" && !showCreateGuide) || undefined}
         aria-busy={!showCreateGuide && stageIsLoading}
         aria-label={showCreateGuide ? "Blank three-dimensional book workshop" : `${spread.title}. Spread ${snapshot.session.currentSpreadIndex + 1} of ${snapshot.document.spreads.length}`}
       >

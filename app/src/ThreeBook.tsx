@@ -1172,6 +1172,11 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     function resize() {
       const width = host.clientWidth;
       const height = host.clientHeight;
+      // The stage is display:none while the shelf sits settled over it, so the
+      // host measures 0x0 until it is revealed. Fitting to that aspect gives an
+      // infinite camera distance, which then survives the next real resize as
+      // NaN. Keep the last good framing until the element has a size.
+      if (width < 2 || height < 2) return;
       renderer.setSize(width, height, false);
       camera.aspect = width / Math.max(height, 1);
       const verticalFov = THREE.MathUtils.degToRad(camera.fov);
