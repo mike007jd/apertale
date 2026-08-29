@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { isStoredAssetId, resolveAssetUrl } from "./assetStore";
+import { smootherstep } from "./design/curves";
 import { recordDiagnostic } from "./diagnostics";
+import { spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
 import { sceneAssetsReadyForEvidence } from "./renderEvidence";
@@ -29,7 +31,7 @@ type Props = {
    * case starts the open in the slot the reader clicked and lands back in it
    * on the way home.
    */
-  handoffRect?: { readonly current: { x: number; y: number; width: number; height: number } | null };
+  handoffRect?: { readonly current: ShelfSlot | null };
   onSelect: (elementId: string | null) => void;
   onHover: (elementId: string | null) => void;
   onMoveElement: (elementId: string, x: number, y: number) => void;
@@ -47,6 +49,9 @@ type Props = {
   }) => void;
   onFailure: () => void;
 };
+
+/** The shelf card a book is being lifted out of, in viewport pixels. */
+type ShelfSlot = { x: number; y: number; width: number; height: number };
 
 type PagePair = {
   spread: THREE.CanvasTexture;
@@ -819,7 +824,6 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     rearBoard.position.x = BOARD_W / 2;
     rearBoardPivot.add(rearBoard);
     rearBoardPivot.position.set(spineGap / 2, 0, -(0.22 + BOARD_T) / 2);
-    rearBoardPivot.rotation.y = 0;
     book.add(rearBoardPivot);
 
     /**
@@ -905,8 +909,28 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
      *
      * Returns null when there is no slot, in which case the case opens in place.
      */
+    /**
+     * Cached against the slot it was measured from. The doc comment above used
+     * to justify recomputing per frame with "the camera pans and dollies
+     * through the same transition" - it no longer does, and the only remaining
+     * variable input is the host box, which resize() already watches. The read
+     * was a getBoundingClientRect() issued in the same frame that had just
+     * written --selection-x onto an ancestor, i.e. a forced layout flush, and
+     * it kept running at rest on the shelf because openProgress 0 is not
+     * "settled".
+     */
+    let anchorCacheKey: ShelfSlot | null | undefined;
+    let anchorCache: { x: number; y: number; scale: number } | null = null;
+
     function shelfAnchor() {
-      const rect = propsRef.current.handoffRect?.current;
+      const rect = propsRef.current.handoffRect.current;
+      if (rect === anchorCacheKey) return anchorCache;
+      anchorCacheKey = rect;
+      anchorCache = measureShelfAnchor(rect);
+      return anchorCache;
+    }
+
+    function measureShelfAnchor(rect: ShelfSlot | null) {
       if (!rect) return null;
       const box = host.getBoundingClientRect();
       const width = box.width;
@@ -936,6 +960,9 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
      */
     const FLAT_PHI = 0.055;
 
+    /** Openness to board angle. Written twice, once without FLAT_PHI. */
+    const phiFor = (open: number) => FLAT_PHI + (1 - THREE.MathUtils.clamp(open, 0, 1)) * (Math.PI - FLAT_PHI);
+
     function applyCover() {
       const phi = coverPhi;
       const closure = (1 - Math.cos(phi)) / 2;
@@ -950,7 +977,6 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       // construction. The closed front board sits in front of the pages in
       // depth, so the depth test occludes them for free and keeps occluding
       // them continuously as the cover turns.
-      applyCamera();
     }
 
     const pageBlockMaterial = new THREE.MeshStandardMaterial({ color: 0xe8dcc4, roughness: 0.92 });
@@ -1065,9 +1091,8 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       });
     };
     const placeStaticElement = (element: BookElement, sceneElement: SceneElement, scaleMultiplier = 1) => {
-      const pageCenter = element.page === "right" ? PAGE_W / 2 : -PAGE_W / 2;
       sceneElement.root.position.set(
-        pageCenter + (element.transform.x - 0.5) * PAGE_W,
+        (spreadFraction(element) - 0.5) * 2 * PAGE_W,
         (0.5 - element.transform.y) * PAGE_H,
         element.depth,
       );
@@ -1093,6 +1118,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       });
     };
 
+    const clearColorScratch = new THREE.Color();
     const renderStageView = (
       pair: PagePair,
       target: THREE.WebGLRenderTarget,
@@ -1100,7 +1126,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       night: boolean,
     ) => {
       const priorTarget = renderer.getRenderTarget();
-      const priorClearColor = renderer.getClearColor(new THREE.Color());
+      const priorClearColor = renderer.getClearColor(clearColorScratch);
       const priorClearAlpha = renderer.getClearAlpha();
       const priorAutoClear = renderer.autoClear;
       // Bumping a material's version every frame sends three down a
@@ -1248,6 +1274,8 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     const sceneOffset = { x: 0, y: 0 };
 
     function resize() {
+      // The anchor is measured against this box, so a new box retires it.
+      anchorCacheKey = undefined;
       const width = host.clientWidth;
       const height = host.clientHeight;
       // The stage is display:none while the shelf sits settled over it, so the
@@ -1280,8 +1308,11 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     // The joint defaults to its closed transform, so the case has to be placed
     // once before the first frame or a reader who never triggers an open sees
     // a shut book.
-    coverPhi = (1 - THREE.MathUtils.clamp(propsRef.current.openProgress.current, 0, 1)) * Math.PI;
+    coverPhi = phiFor(propsRef.current.openProgress.current);
     applyCover();
+    // resize() owns the camera and refuses to run against a 0x0 host, so a
+    // stage that mounts hidden would otherwise never have it placed at all.
+    applyCamera();
 
     function setPointer(event: PointerEvent) {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -1359,8 +1390,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         const nextY = clamp(drag.initialY + (event.clientY - drag.startY) / (rect.height * 0.72));
         const sceneElement = sceneElements.get(drag.elementId);
         if (sceneElement && element) {
-          const pageX = element.page === "right" ? PAGE_W / 2 : -PAGE_W / 2;
-          sceneElement.root.position.x = pageX + (nextX - 0.5) * PAGE_W;
+          sceneElement.root.position.x = (spreadFraction({ page: element.page, transform: { x: nextX } }) - 0.5) * 2 * PAGE_W;
           sceneElement.root.position.y = (0.5 - nextY) * PAGE_H;
         }
         return;
@@ -1447,6 +1477,29 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         lastPageTurnReadiness.backward = null;
         lastPageTurnReadiness.forward = null;
       }
+      // Readiness is about textures, not about paint, and the shelf is waiting
+      // on it to know the book can be opened at all. It has to be reported from
+      // behind the curtain, which is why it is answered before the curtain is
+      // checked.
+      if (pagePair && !readySent) {
+        readySent = true;
+        propsRef.current.onReady(loadingDocumentId);
+      }
+
+      /**
+       * Nothing below this line can be seen while the shelf sits settled over
+       * the stage: `hidden` puts the whole section at display:none, so the host
+       * measures 0x0 - the same condition resize() already refuses to fit to.
+       *
+       * The scene deliberately stays mounted through that, so the book is warm
+       * the moment a reader picks one. Mounted is not the same as running. Left
+       * unguarded this frame issues four render passes - three of them into a
+       * fixed 1536x947 target with 2x MSAA, plus a 1024-square shadow map - and
+       * it issued them from first paint onwards, for a canvas nobody could see,
+       * on the app's own landing screen.
+       */
+      if (host.clientWidth < 2 || host.clientHeight < 2) return;
+
       if (pagePair && lastPrefetchedSpreadIndex !== current.session.currentSpreadIndex) {
         lastPrefetchedSpreadIndex = current.session.currentSpreadIndex;
         if (previous) ensureSpreadLoaded(previous);
@@ -1523,8 +1576,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         sceneElement.hoverAmount = THREE.MathUtils.lerp(sceneElement.hoverAmount, hovered ? 1 : 0, clamp(deltaSeconds * 7, 0, 1));
         sceneElement.focusAmount = THREE.MathUtils.lerp(sceneElement.focusAmount, focused ? 1 : 0, clamp(deltaSeconds * 5, 0, 1));
 
-        const pageCenter = element.page === "right" ? PAGE_W / 2 : -PAGE_W / 2;
-        let x = pageCenter + (element.transform.x - 0.5) * PAGE_W;
+        let x = (spreadFraction(element) - 0.5) * 2 * PAGE_W;
         let y = (0.5 - element.transform.y) * PAGE_H;
         let scale = element.transform.scaleX;
         if (element.motion && !reduced) {
@@ -1669,7 +1721,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         coverArtMaterial.opacity = Math.min(1, coverArtMaterial.opacity + delta * 4);
       }
       const requestedOpen = propsRef.current.mode === "workshop" ? 1 : propsRef.current.openProgress.current;
-      const requestedPhi = FLAT_PHI + (1 - THREE.MathUtils.clamp(requestedOpen, 0, 1)) * (Math.PI - FLAT_PHI);
+      const requestedPhi = phiFor(requestedOpen);
       if (Math.abs(requestedPhi - coverPhi) > 1e-4) {
         coverPhi = requestedPhi;
         applyCover();
@@ -1685,8 +1737,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         // Arrives slightly ahead of the swing, but eased to a stop rather than
         // clamped: min(1, t/0.82) cut the book's velocity from 1.53/s to zero
         // in one frame at 421ms, while the cover was still turning at 226 deg/s.
-        const ramp = Math.min(1, t / 0.85);
-        const travel = ramp * ramp * ramp * (ramp * (ramp * 6 - 15) + 10);
+        const travel = smootherstep(t / 0.85);
         book.position.x = THREE.MathUtils.lerp(anchor.x, 0, travel);
         book.position.y = THREE.MathUtils.lerp(anchor.y, bookRestY, travel);
         book.scale.setScalar(THREE.MathUtils.lerp(anchor.scale, 1, travel));
@@ -1736,10 +1787,6 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       } else {
         renderedEvidenceCandidate = "";
         renderedEvidenceFrames = 0;
-      }
-      if (pagePair && !readySent) {
-        readySent = true;
-        propsRef.current.onReady(loadingDocumentId);
       }
     }
     animate();
