@@ -786,9 +786,36 @@ export class BookEngine {
     this.showAction("human", "success", "Sample book restored");
   }
 
+  /**
+   * Preview is the reader's view of a finished book, so direct manipulation
+   * has to stop at the model and not merely at the controls. The panels and
+   * the element rail already hide themselves, but the canvas keeps its
+   * pointer handlers, and a drag there used to write a real transform into a
+   * document the reader believed they were only looking at.
+   *
+   * Only the four commands a person can actually issue are refused, and only
+   * when a person issues them. Codex keeps working during a preview - the
+   * reader watching their book change is the point of that mode - and Undo
+   * stays available so a change they dislike can be taken back without first
+   * leaving preview.
+   */
+  private refusedByPreview(command: DocumentCommand, source: CommandSource) {
+    if (source !== "human" || !this.sessionState.preview) return null;
+    const direct = command.type === "edit" || command.type === "lift" || command.type === "animate" || command.type === "interact";
+    if (!direct) return null;
+    return this.conflict("invalid", "Preview is read-only. Exit Preview to change this book.");
+  }
+
   dispatch(command: DocumentCommand, source: CommandSource): DocumentResult {
     const prior = this.requestResults.get(command.requestId);
     if (prior) return prior;
+
+    const refused = this.refusedByPreview(command, source);
+    if (refused) {
+      this.requestResults.set(command.requestId, refused);
+      this.showAction(source, "error", refused.summary, "elementId" in command ? command.elementId : undefined);
+      return refused;
+    }
 
     if (command.expectedRevision !== this.documentState.revision) {
       const result = this.conflict("revision_conflict", `Expected revision ${command.expectedRevision}; current revision is ${this.documentState.revision}.`);
