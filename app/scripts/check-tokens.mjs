@@ -2,8 +2,8 @@
 /**
  * The guard that keeps the design scales closed.
  *
- * styles.css reached 34 font sizes, 20 radii, 30 shadows and 68 spacing values
- * because nothing ever counted them. This script counts them, on every
+ * styles.css reached 34 font sizes, 20 radii and 30 shadows because nothing
+ * counted them. This script checks those closed scales on every
  * `verify:release`, and fails when a raw value reappears where a token belongs.
  *
  * It deliberately reports every offender with its line number rather than just
@@ -26,6 +26,9 @@ const generated = readFileSync(generatedPath, "utf8");
 
 /** Values a scale legitimately cannot express. Each needs a stated reason. */
 const EXEMPT = {
+  font: new Set([
+    "inherit", // native controls inherit the page typography
+  ]),
   radius: new Set([
     "50%", // circles — a shape primitive, not a scale step
     "inherit",
@@ -72,12 +75,13 @@ function scan({ label, pattern, exempt = new Set(), allowVar = true }) {
 }
 
 const checks = [
+  scan({ label: "font shorthand", pattern: /\bfont:\s*([^;}]+)/g, exempt: EXEMPT.font, allowVar: false }),
   scan({ label: "font-size", pattern: /font-size:\s*([^;}]+)/g, exempt: EXEMPT.fontSize }),
   scan({ label: "border-radius", pattern: /border-radius:\s*([^;}]+)/g, exempt: EXEMPT.radius }),
   scan({ label: "box-shadow", pattern: /box-shadow:\s*([^;}]+)/g, exempt: EXEMPT.shadow }),
 ];
 
-const budgets = { "font-size": budget.fontSize, "border-radius": budget.radius, "box-shadow": budget.shadow };
+const budgets = { "font shorthand": 0, "font-size": budget.fontSize, "border-radius": budget.radius, "box-shadow": budget.shadow };
 
 for (const { label, offenders } of checks) {
   const allowed = budgets[label] ?? 0;
@@ -137,6 +141,10 @@ for (const { line, selector } of accentSelectors) {
     continue;
   }
   screensSeen.set(screen, selector);
+}
+
+for (const [selector, screen] of ACCENT_OWNER) {
+  if (!screensSeen.has(screen)) accentProblems.push(`${selector} — ${screen} has no primary accent action`);
 }
 
 if (accentProblems.length) {

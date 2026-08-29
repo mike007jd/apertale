@@ -27,7 +27,7 @@ describe("image handoff", () => {
     await Promise.resolve();
     expect(settledEarly).not.toHaveBeenCalled();
 
-    completeImageHandoff(["asset:one", "asset:two"]);
+    expect(completeImageHandoff("req-1", ["asset:one", "asset:two"])).toBe(true);
     await expect(pending).resolves.toEqual({ status: "provided", assetIds: ["asset:one", "asset:two"] });
     expect(currentImageHandoff()).toBeNull();
     expect(seen).toEqual([null, "req-1", null]);
@@ -36,7 +36,7 @@ describe("image handoff", () => {
 
   it("resolves rather than rejects when the reader declines", async () => {
     const pending = ask("req-2");
-    dismissImageHandoff();
+    dismissImageHandoff("req-2");
     const outcome = await pending;
     // A person declining to hand over a photo is an answer the Agent can act
     // on, not a tool failure it has to interpret.
@@ -46,7 +46,7 @@ describe("image handoff", () => {
 
   it("resolves when the agent cancels, so the drawer never outlives its request", async () => {
     const pending = ask("req-3");
-    abortImageHandoff();
+    abortImageHandoff("req-3");
     await expect(pending).resolves.toMatchObject({ status: "dismissed" });
     expect(currentImageHandoff()).toBeNull();
   });
@@ -56,16 +56,29 @@ describe("image handoff", () => {
     const second = ask("req-5", "Second ask.");
     await expect(first).resolves.toMatchObject({ status: "dismissed" });
     expect(currentImageHandoff()?.requestId).toBe("req-5");
-    completeImageHandoff(["asset:three"]);
+    expect(completeImageHandoff("req-4", ["asset:from-stale-request"])).toBe(false);
+    expect(currentImageHandoff()?.requestId).toBe("req-5");
+    expect(completeImageHandoff("req-5", ["asset:three"])).toBe(true);
     await expect(second).resolves.toMatchObject({ status: "provided" });
   });
 
+  it("does not let a superseded request abort the request that replaced it", async () => {
+    const first = ask("req-6", "First ask.");
+    const second = ask("req-7", "Second ask.");
+    await expect(first).resolves.toMatchObject({ status: "dismissed" });
+
+    expect(abortImageHandoff("req-6")).toBe(false);
+    expect(currentImageHandoff()?.requestId).toBe("req-7");
+    expect(dismissImageHandoff("req-7")).toBe(true);
+    await expect(second).resolves.toMatchObject({ status: "dismissed" });
+  });
+
   it("gives a new subscriber the request that is already open", () => {
-    void ask("req-6");
+    void ask("req-8");
     const seen: Array<string | null> = [];
     const stop = subscribeToImageHandoff((request) => seen.push(request?.requestId ?? null));
-    expect(seen).toEqual(["req-6"]);
+    expect(seen).toEqual(["req-8"]);
     stop();
-    dismissImageHandoff();
+    dismissImageHandoff("req-8");
   });
 });

@@ -12,9 +12,12 @@
  * the CSS motion custom properties without exposing unused JS copies of every
  * visual scale.
  *
- * Scales are closed sets. Adding a step is a design decision made here, not an
- * ad-hoc value added at a call site; `scripts/check-tokens.mjs` fails the build
- * when styles.css reintroduces a raw value that belongs to a scale.
+ * Type sizes, radius, and elevation are closed sets. Adding a step is a design
+ * decision made here, not an ad-hoc value added at a call site;
+ * `scripts/check-tokens.mjs` fails the build when styles.css reintroduces a raw
+ * value in those scales. Other typography properties and spacing tokens name
+ * recurring values without claiming a closed gate that the stylesheet does
+ * not yet satisfy; measured component geometry remains explicit.
  */
 
 /**
@@ -38,7 +41,7 @@ export const type = {
   // 1280px canvas. A steeper slope hits the 66px ceiling there and eats enough
   // vertical budget to clip the shelf below the hero.
   "display-l": { size: "clamp(38px, 4.6vw, 66px)", line: "1.02", track: "track-display", weight: "display", family: "display" },
-} as const;
+};
 
 /** Seven distinct weights across two families collapsed to four roles. */
 export const weight = {
@@ -46,7 +49,7 @@ export const weight = {
   strong: 600,
   title: 700,
   display: 800,
-} as const;
+};
 
 /** Twenty ad-hoc letter-spacings collapsed to four intents. */
 export const track = {
@@ -54,12 +57,12 @@ export const track = {
   "track-normal": "0",
   "track-tight": "-.02em",
   "track-display": "-.035em",
-} as const;
+};
 
 export const family = {
   ui: '"Avenir Next", Avenir, "Segoe UI", system-ui, sans-serif',
   display: '"Iowan Old Style", Baskerville, Georgia, serif',
-} as const;
+};
 
 /**
  * Four steps on the 8pt grid. The scale encodes containment depth, not size
@@ -71,7 +74,7 @@ export const radius = {
   m: 16,
   l: 24,
   pill: 999,
-} as const;
+};
 
 /**
  * Shapes that are deliberately off-scale because they describe a physical
@@ -83,12 +86,12 @@ export const shape = {
   cover: "4px 8px 8px 4px",
   /** A hand-drawn organic ring. Off-grid is the entire point. */
   selection: "45% 52% 44% 48%",
-} as const;
+};
 
 /**
- * Full steps are multiples of 8. Half-steps exist only where 8 is too coarse.
- * 20px and 28px are deliberately absent — excluding them is what stops the
- * drift that produced 68 unique padding values.
+ * Full steps are multiples of 8. Half-steps exist where 8 is too coarse. These
+ * tokens cover recurring containment values; one-off measured layout geometry
+ * stays at its call site until a future spacing migration proves it is shared.
  */
 export const space = {
   0: "0",
@@ -101,7 +104,7 @@ export const space = {
   6: "32px",
   7: "48px",
   8: "64px",
-} as const;
+};
 
 /** One fluid step for page gutters that must breathe with the viewport. */
 export const spaceFluid = "clamp(24px, 4vw, 64px)";
@@ -128,7 +131,7 @@ export const elevation = {
     2: "0 2px 4px rgb(0 0 0 / .40), 0 10px 24px rgb(0 0 0 / .36), 0 0 28px rgb(255 183 87 / .05)",
     3: "0 4px 8px rgb(0 0 0 / .46), 0 28px 64px rgb(0 0 0 / .52), 0 0 70px rgb(255 183 87 / .09)",
   },
-} as const;
+};
 
 /**
  * Rings are focus and state, not elevation. Keeping them out of the elevation
@@ -144,7 +147,7 @@ export const ring = {
     day: "inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent)",
     night: "inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent)",
   },
-} as const;
+};
 
 /**
  * The book on the shelf is a physical object with a page block, so its shadow
@@ -154,7 +157,7 @@ export const ring = {
 export const bookShadow = {
   rest: { day: "0 22px 34px rgb(42 28 17 / .24), -6px 5px 0 rgb(65 44 29 / .16)", night: "0 25px 45px rgb(0 0 0 / .6), -6px 5px 0 rgb(70 44 24 / .5)" },
   hover: { day: "0 32px 45px rgb(42 28 17 / .30), -7px 6px 0 rgb(65 44 29 / .13)", night: "0 34px 56px rgb(0 0 0 / .66), -7px 6px 0 rgb(70 44 24 / .46)" },
-} as const;
+};
 
 /**
  * The accent elevation is reserved for the single primary action on a screen.
@@ -165,7 +168,7 @@ export const accentElevation = {
   rest: "0 9px 22px color-mix(in srgb, var(--accent) 24%, transparent)",
   hover: "0 13px 30px color-mix(in srgb, var(--accent) 30%, transparent)",
   press: "0 5px 12px color-mix(in srgb, var(--accent) 22%, transparent)",
-} as const;
+};
 
 /**
  * Two motion families, and every animation must declare which one it belongs
@@ -194,7 +197,7 @@ export const motion = {
     info: "cubic-bezier(.2, .8, .2, 1)",
     navigation: "cubic-bezier(.22, .72, .16, 1)",
   },
-} as const;
+};
 
 /**
  * Colors keep the existing palette — it was never the problem. What changes is
@@ -233,4 +236,4 @@ export const color = {
     "accent-ink": "#241a11",
     shadow: "rgba(0, 0, 0, 0.42)",
   },
-} as const;
+};

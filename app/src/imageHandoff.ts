@@ -57,6 +57,18 @@ export function currentImageHandoff() {
 }
 
 /**
+ * Settles only the request that initiated the action. Image decoding, a tool
+ * AbortSignal, and React state can all finish after a newer request has
+ * superseded the old one; none of those stale completions may answer the new
+ * request with the old request's assets or cancellation.
+ */
+function settleImageHandoff(requestId: string, outcome: ImageHandoffOutcome) {
+  if (pending?.request.requestId !== requestId) return false;
+  pending.settle(outcome);
+  return true;
+}
+
+/**
  * Opens the drawer and stays pending until the reader chooses or dismisses.
  * A second request supersedes the first rather than queueing: two drawers
  * cannot both be open, and an Agent that asks twice means the second ask.
@@ -77,8 +89,8 @@ export function requestImageHandoff(request: ImageHandoffRequest): Promise<Image
 }
 
 /** Called by the reader surface once the imported assets have real ids. */
-export function completeImageHandoff(assetIds: string[]) {
-  pending?.settle({ status: "provided", assetIds });
+export function completeImageHandoff(requestId: string, assetIds: string[]) {
+  return settleImageHandoff(requestId, { status: "provided", assetIds });
 }
 
 /**
@@ -86,11 +98,17 @@ export function completeImageHandoff(assetIds: string[]) {
  * rather than rejects: a person declining to hand over a photo is an answer,
  * and the Agent must be able to say so instead of reporting a failure.
  */
-export function dismissImageHandoff(reason = "The reader closed the photo drawer without adding an image.") {
-  pending?.settle({ status: "dismissed", reason });
+export function dismissImageHandoff(
+  requestId: string,
+  reason = "The reader closed the photo drawer without adding an image.",
+) {
+  return settleImageHandoff(requestId, { status: "dismissed", reason });
 }
 
 /** Cancellation from the agent side, through the tool's AbortSignal. */
-export function abortImageHandoff() {
-  pending?.settle({ status: "dismissed", reason: "The request was cancelled before the reader chose." });
+export function abortImageHandoff(requestId: string) {
+  return settleImageHandoff(requestId, {
+    status: "dismissed",
+    reason: "The request was cancelled before the reader chose.",
+  });
 }

@@ -787,7 +787,13 @@ summary:focus-visible,
 }
 .fallback-composite-copy p { margin: 0; font-size: var(--text-body); line-height: 1.42; }
 .fallback-composite-copy > p:first-child { margin-bottom: 7px; font-size: var(--text-caption); font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
-.fallback-composite-copy h2 { margin: 0 0 9px; font: 700 clamp(19px, 2.7vw, 38px)/1.02 "Iowan Old Style", Baskerville, Georgia, serif; }
+.fallback-composite-copy h2 {
+  margin: 0 0 9px;
+  font-family: var(--font-display);
+  font-size: var(--text-display-s);
+  font-weight: var(--weight-title);
+  line-height: var(--leading-display-s);
+}
 
 .page-arrow {
   position: absolute;
@@ -1549,7 +1555,9 @@ summary:focus-visible,
   padding: 9px 10px;
   color: var(--ink);
   background: var(--surface-strong);
-  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-caption);
+  line-height: var(--leading-caption);
 }
 
 .element-agent-overlay {
@@ -2434,6 +2442,11 @@ summary:focus-visible,
     border-width: 9px;
     border-radius: var(--radius-m);
   }
+
+  /* The portrait reader sheet directly below carries the same title and body
+     at reading size. Keep the narrow artwork band visual instead of rendering
+     a second copy that can only wrap into the book's crop. */
+  .fallback-composite-copy { display: none; }
 
   .page-arrow { display: none; }
   .bottom-controls .page-progress { display: none; }

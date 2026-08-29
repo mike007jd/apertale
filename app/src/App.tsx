@@ -47,7 +47,7 @@ import { announce, supportsWebGl2 } from "./readerShell";
 import { spreadFraction } from "./stageGeometry";
 import { Panel, Toast } from "./design/primitives";
 import { ThemeSwitch } from "./design/ThemeSwitch";
-import { completeImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
+import { completeImageHandoff, currentImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
 import { useFocusTrap } from "./focusTrap";
 import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete } from "./renderEvidence";
@@ -70,6 +70,12 @@ const runtimeParams = new URLSearchParams(window.location.search);
 const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
 const forceReducedMotion = runtimeParams.get("reducedMotion") === "1";
 const forceFallback = runtimeParams.get("fallback") === "1";
+const motionAuditSeconds = (() => {
+  if (!import.meta.env.DEV) return null;
+  const value = Number(runtimeParams.get("motionAudit"));
+  return Number.isFinite(value) && value >= 0.5 && value <= 30 ? value : null;
+})();
+const navigationDurationMs = motionAuditSeconds === null ? durationMs.navigation : motionAuditSeconds * 1000;
 /**
  * Freezes the case at a fixed openness so a mid-swing pose can be captured for
  * the visual QA record in app/qa. 0 is closed, 1 is open; anything outside that
@@ -435,7 +441,7 @@ export function App() {
     // directions now, rather than a compressed curve that has to land harder
     // to cover the same distance in less time. This IS `--motion-navigation`;
     // retyping the number is how the CSS and the case fall out of step.
-    const duration = durationMs.navigation;
+    const duration = navigationDurationMs;
 
     /*
      * One curve, end to end. This was three self-terminating power segments
@@ -543,10 +549,8 @@ export function App() {
   }, [workshopAssets, workshopHydrated]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return undefined;
-    const requestedSeconds = Number(runtimeParams.get("motionAudit"));
-    if (!Number.isFinite(requestedSeconds) || requestedSeconds < 0.5 || requestedSeconds > 30) return undefined;
-    document.documentElement.style.setProperty("--motion-navigation", `${requestedSeconds}s`);
+    if (motionAuditSeconds === null) return undefined;
+    document.documentElement.style.setProperty("--motion-navigation", `${motionAuditSeconds}s`);
     return () => { document.documentElement.style.removeProperty("--motion-navigation"); };
   }, []);
 
@@ -692,6 +696,21 @@ export function App() {
     window.setTimeout(() => libraryOpener.current?.focus(), 0);
   }, []);
 
+  const settleLibraryToReader = useCallback(() => {
+    // Escape is an explicit settle, not merely a visibility toggle. Cancel a
+    // close that has not reached animateCase yet as well as a case animation
+    // already in flight, then restore the fully-open reader pose.
+    if (libraryFrame.current !== null) {
+      cancelAnimationFrame(libraryFrame.current);
+      libraryFrame.current = null;
+    }
+    openCleanup.current?.();
+    setOpenProgress(1);
+    openingBookRef.current = null;
+    setOpeningBook(null);
+    hideLibrary();
+  }, [hideLibrary]);
+
   const beginOpenTransition = useCallback((book: OpeningBook) => {
     if (reducedMotion) {
       recordDiagnostic("book:navigation-transition-reduced", { documentId: book.id, direction: "open" });
@@ -814,7 +833,8 @@ export function App() {
   }, [beginOpenTransition, openingBook, readyBookId, snapshot.document.id]);
 
   const closeCodexGuide = useCallback(() => {
-    dismissImageHandoff();
+    const request = currentImageHandoff();
+    if (request) dismissImageHandoff(request.requestId);
     setShowCreateGuide(false);
     window.setTimeout(() => createGuideOpener.current?.focus(), 0);
   }, []);
@@ -956,10 +976,14 @@ export function App() {
       if (event.key === "Escape" && showLibrary) {
         // Escape always resolves the shelf. When a cover transition is already
         // running, skip straight to the reader instead of ignoring the key.
-        if (openingBook || libraryMotion !== "idle") {
-          openingBookRef.current = null;
-          setOpeningBook(null);
-          hideLibrary();
+        if (
+          openingBookRef.current
+          || libraryFrame.current !== null
+          || openCleanup.current !== null
+          || openingBook
+          || libraryMotion !== "idle"
+        ) {
+          settleLibraryToReader();
         } else {
           openBookFromLibrary(snapshot.document.id);
         }
@@ -982,12 +1006,19 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeCodexGuide, closeElementAgentGuide, hideLibrary, libraryMotion, openBookFromLibrary, openingBook, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
+  }, [closeCodexGuide, closeElementAgentGuide, libraryMotion, openBookFromLibrary, openingBook, settleLibraryToReader, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
 
   useEffect(() => {
     if (!showLibrary || libraryMotion !== "idle") return;
     window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
   }, [libraryMotion, showLibrary]);
+
+  useLayoutEffect(() => {
+    if (!showLibrary) return;
+    const sheet = librarySheet.current;
+    if (!sheet || sheet.contains(document.activeElement)) return;
+    sheet.querySelector<HTMLElement>("#library-shelf")?.focus();
+  }, [showLibrary]);
 
   // The shelf always opens on the reader's own books - including the first time
   // one exists - so a stale Explore selection never hides what they just made.
@@ -1075,6 +1106,12 @@ export function App() {
     setHandoffRequest(request);
     if (!request) return;
     recordDiagnostic("handoff:requested", { requestId: request.requestId });
+    // A tool call must reveal the drawer it promises to open. Preview and the
+    // other modal surfaces can otherwise keep it hidden, so exit or close them
+    // before showing the reader the Agent's request.
+    bookEngine.setPreview(false);
+    setShowElementAgentGuide(false);
+    setShowPublication(false);
     setShowCreateGuide(true);
     // Photos live behind a mode the reader has to pick first, which makes no
     // sense when the Agent has just asked for one.
@@ -1087,6 +1124,9 @@ export function App() {
 
   const importWorkshopPhotos = async (files: FileList | null) => {
     if (!files?.length) return;
+    // Bind the eventual completion to the request visible when this import
+    // began. A newer Agent request may supersede it while images are decoded.
+    const handoffRequestId = handoffRequest?.requestId ?? null;
     if (!workshopHydrated) {
       setWorkshopImportError("Wait for saved photos to finish restoring before adding new images.");
       return;
@@ -1108,9 +1148,8 @@ export function App() {
         dispatchCreationWorkshop({ type: "append-assets", assets: batch.imported });
         // The pending tool call resolves with real ids, so the Agent resumes
         // immediately instead of waiting to be told the upload finished.
-        if (handoffRequest) {
-          completeImageHandoff(batch.imported.map((asset) => asset.id));
-          recordDiagnostic("handoff:provided", { requestId: handoffRequest.requestId, count: batch.imported.length });
+        if (handoffRequestId && completeImageHandoff(handoffRequestId, batch.imported.map((asset) => asset.id))) {
+          recordDiagnostic("handoff:provided", { requestId: handoffRequestId, count: batch.imported.length });
         }
       } else if (batch.failed > 0) {
         setWorkshopImportError("This browser could not store those images. Free some space, then try again.");
@@ -1327,7 +1366,8 @@ export function App() {
          * that is the entire point of the transition.
          */
         hidden={showLibrary && libraryMotion === "idle" && !showCreateGuide}
-        aria-hidden={(showLibrary && libraryMotion === "idle" && !showCreateGuide) || undefined}
+        aria-hidden={(showLibrary && !showCreateGuide) || undefined}
+        inert={showLibrary && !showCreateGuide ? true : undefined}
         aria-busy={!showCreateGuide && stageIsLoading}
         aria-label={showCreateGuide ? "Blank three-dimensional book workshop" : `${spread.title}. Spread ${snapshot.session.currentSpreadIndex + 1} of ${snapshot.document.spreads.length}`}
       >

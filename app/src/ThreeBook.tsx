@@ -1224,7 +1224,13 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       });
     };
     const initialSpreadIndex = propsRef.current.snapshot.session.currentSpreadIndex;
-    ensureSpreadLoaded(propsRef.current.snapshot.document.spreads[initialSpreadIndex]);
+    const initialSpread = propsRef.current.snapshot.document.spreads[initialSpreadIndex];
+    ensureSpreadLoaded(initialSpread);
+    // Keep resource prewarming from the former hidden render loop without
+    // bringing back any offscreen render passes. Mounting creates invisible
+    // scene nodes and starts texture/IndexedDB resolution; the first visible
+    // frame still owns placement and paint.
+    initialSpread.elements.forEach(mountSceneElement);
 
     /**
      * Framing is what the container asks for; pose is what the cover animation

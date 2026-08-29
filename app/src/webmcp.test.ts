@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTHORING_GUIDE_DETAIL, PROJECT_CONTEXT_DETAILS, SITE_TOOL_NAMES, buildAuthoringGuide } from "./authoringContract";
 import { bookEngine, humanEdit } from "./bookEngine";
+import { completeImageHandoff, currentImageHandoff } from "./imageHandoff";
 import { QUALITY_VISUAL_CRITERION_IDS } from "./qualityContract";
 import { registerWebMcpTools } from "./webmcp";
 
@@ -481,5 +482,56 @@ describe("WebMCP registration", () => {
     expect(registrationSignals.every((signal) => signal.aborted)).toBe(true);
     cleanup();
     expect(statuses).toEqual([false]);
+  });
+
+  it("keeps a superseded handoff isolated from the older execution signal", async () => {
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const cleanup = registerWebMcpTools(() => undefined);
+    await vi.waitFor(() => expect(tools).toHaveLength(7));
+    const handoff = tools.find((tool) => tool.name === "request_image_handoff")!;
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    const first = handoff.execute({ requestId: "handoff-a", reason: "First request." }, { signal: firstController.signal });
+    await vi.waitFor(() => expect(currentImageHandoff()?.requestId).toBe("handoff-a"));
+    const second = handoff.execute({ requestId: "handoff-b", reason: "Second request." }, { signal: secondController.signal });
+    expect(currentImageHandoff()?.requestId).toBe("handoff-b");
+
+    // Abort A before its superseded execution has unwound and removed the old
+    // listener. This is the exact window that used to let A cancel B.
+    const firstCancellation = expect(first).rejects.toMatchObject({ name: "AbortError" });
+    expect(completeImageHandoff("handoff-a", ["asset:from-a"])).toBe(false);
+    firstController.abort();
+    await Promise.resolve();
+    expect(currentImageHandoff()?.requestId).toBe("handoff-b");
+    await firstCancellation;
+    expect(completeImageHandoff("handoff-b", ["asset:for-b"])).toBe(true);
+    await expect(second).resolves.toContain("asset:for-b");
+    cleanup();
+  });
+
+  it("settles an active handoff when its tool registration is removed", async () => {
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const cleanup = registerWebMcpTools(() => undefined);
+    await vi.waitFor(() => expect(tools).toHaveLength(7));
+    const handoff = tools.find((tool) => tool.name === "request_image_handoff")!;
+    const pending = handoff.execute({ requestId: "handoff-cleanup", reason: "Wait for a photo." }, {
+      signal: new AbortController().signal,
+    });
+    await vi.waitFor(() => expect(currentImageHandoff()?.requestId).toBe("handoff-cleanup"));
+
+    cleanup();
+    await expect(pending).resolves.toContain("cancelled before the reader chose");
+    expect(currentImageHandoff()).toBeNull();
   });
 });

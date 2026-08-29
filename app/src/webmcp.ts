@@ -224,6 +224,11 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     registeredCount += 1;
   });
   const sessionResults = new Map<string, unknown>();
+  const activeImageHandoffs = new Map<string, ReturnType<typeof requestImageHandoff>>();
+  const cancelActiveImageHandoffs = () => {
+    activeImageHandoffs.forEach((_, requestId) => abortImageHandoff(requestId));
+    activeImageHandoffs.clear();
+  };
   let authoringGuideRead = false;
 
   const registrations = [
@@ -775,12 +780,18 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           if (prior) return prior;
           const reason = boundedString(input, "reason", 220);
           const signal = options?.signal ?? uncancelledToolSignal;
+          let pendingOutcome = activeImageHandoffs.get(requestId);
+          if (!pendingOutcome) {
+            pendingOutcome = requestImageHandoff({ requestId, reason });
+            activeImageHandoffs.set(requestId, pendingOutcome);
+          }
           // Agent-side cancellation has to reach the drawer, or a cancelled
           // request would leave it open with nothing listening.
-          const onAbort = () => abortImageHandoff();
+          const onAbort = () => abortImageHandoff(requestId);
           signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
           try {
-            const outcome = await requestImageHandoff({ requestId, reason });
+            const outcome = await pendingOutcome;
             const result = outcome.status === "provided"
               ? { status: "provided", assetIds: outcome.assetIds, note: "Refresh get_project_context(detail: \"assets\") before referencing these ids." }
               : { status: "dismissed", reason: outcome.reason };
@@ -788,6 +799,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             return result;
           } finally {
             signal.removeEventListener("abort", onAbort);
+            if (activeImageHandoffs.get(requestId) === pendingOutcome) activeImageHandoffs.delete(requestId);
           }
         }),
       },
@@ -801,6 +813,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     onStatus(true);
   }).catch((error) => {
     if (controller.signal.aborted) return;
+    cancelActiveImageHandoffs();
     controller.abort();
     sessionResults.clear();
     recordDiagnostic("webmcp:registration-failed", {
@@ -811,6 +824,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
   });
   return () => {
     if (controller.signal.aborted) return;
+    cancelActiveImageHandoffs();
     controller.abort();
     sessionResults.clear();
     recordDiagnostic("webmcp:removed", { count: registeredCount });
