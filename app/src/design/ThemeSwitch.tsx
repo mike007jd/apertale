@@ -32,8 +32,11 @@ export function ThemeSwitch({
       onChange={onChange}
       disabled={disabled}
       options={[
-        { value: "paper-atelier", ariaLabel: "Day theme", label: <><Sun size={17} /> Day</> },
-        { value: "midnight-desk", ariaLabel: "Night theme", label: <><Moon size={17} /> Night</> },
+        // The word is wrapped so a phone can drop it and keep the icon. A bare
+        // text node cannot be hidden by a selector, and hiding the whole label
+        // would take the icon with it.
+        { value: "paper-atelier", ariaLabel: "Day theme", label: <><Sun size={17} /> <span>Day</span></> },
+        { value: "midnight-desk", ariaLabel: "Night theme", label: <><Moon size={17} /> <span>Night</span></> },
       ]}
     />
   );

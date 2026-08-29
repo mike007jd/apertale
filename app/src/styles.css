@@ -9,7 +9,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   /* Written every frame by ThreeBook when an element is focused. */
-  --selection-x: 50%;
+  --selection-x: 50vw;
   --selection-y: 42%;
 }
 
@@ -717,7 +717,7 @@ summary:focus-visible,
   position: absolute;
   inset: 0;
   overflow: hidden;
-  --selection-x: 50%;
+  --selection-x: 50vw;
   --selection-y: 40%;
 }
 
@@ -738,6 +738,11 @@ summary:focus-visible,
 
 .fallback-book {
   position: absolute;
+  /* Its own stacking context. The composited layers index themselves by depth
+     up to 100 and the page copy sits at 80, so without this the inside of a
+     flat book outranked the element actions floating over it and the reader
+     read "Ask Codex" through a paragraph. */
+  z-index: 1;
   inset: 14% 7% 13%;
   display: grid;
   place-items: center;
@@ -813,6 +818,11 @@ summary:focus-visible,
   top: var(--selection-y);
   width: 0;
   height: 0;
+  /* The anchor is written by the renderer every frame; it is a position, not
+     an animation. The reduced-motion sheet sets `transition-duration` on every
+     element, and with the default `transition-property: all` the ring would
+     chase the element it is meant to be circling. */
+  transition-property: none;
 }
 
 .selection-ring {
@@ -842,6 +852,11 @@ summary:focus-visible,
 
 .context-menu {
   position: absolute;
+  /* Where a surface sits is not an animation. The reduced-motion sheet sets
+     `transition-duration` on every element, and the default
+     `transition-property: all` would then slide this into place on each new
+     selection rather than putting it there. */
+  transition-property: none;
   top: 82px;
   left: 0;
   display: flex;
@@ -881,6 +896,7 @@ summary:focus-visible,
 
 .element-panel {
   position: absolute;
+  transition-property: none;
   top: 138px;
   left: 0;
   width: 270px;
@@ -1700,20 +1716,48 @@ summary:focus-visible,
   .wordmark { grid-column: 2; justify-self: center; font-size: var(--text-title); }
   .library-button { grid-column: 1; }
   .topbar-actions { grid-column: 3; }
-  .theme-switch span,
+  /* Icon-only on a phone. Scoped to the label's own word because
+     `.theme-switch .switch-label` outranks a plain `.theme-switch span`, which
+     is how "Day" and "Night" ended up rendered at full width, overlapping each
+     other outside their own 34px buttons. */
+  .theme-switch .switch-label > span,
   .preview-button span { display: none; }
   .theme-switch button { padding: 0 9px; }
   .preview-button { width: 44px; padding: 0; justify-content: center; }
   .bottom-controls { grid-template-columns: auto auto auto; gap: 10px; width: max-content; max-width: calc(100% - 28px); }
   .agent-prompt { min-width: 0; max-width: min(300px, 44vw); padding-left: 15px; }
   .selection-ring { width: 120px; height: 100px; }
-  .context-menu { top: 64px; }
+  /* Bounded so the four actions can never be wider than the screen; the rule
+     below then keeps them on it. Wrapping is the last resort and costs one
+     38px row - still cheaper than deleting an action, which is what the old
+     rule did to "Ask Codex". */
+  .context-menu { top: 64px; flex-wrap: wrap; max-width: calc(100vw - 24px); }
   .context-menu.clears-right { top: 64px; }
   .element-panel,
   .element-panel.clears-right,
   .element-panel.clears-left { top: 112px; }
+  /* Both surfaces are anchored to an element that can sit anywhere across the
+     screen, and the stage clips whatever leaves it. The old rule solved that
+     by deleting "Ask Codex" until the menu was narrow enough to fit - an
+     action with no other entry point anywhere in the reading view. They slide
+     back inside the viewport instead, and only as far as they have to.
+     `translate` rather than `transform`, because the panel's entrance
+     animation writes transform inline and the independent property composes
+     with it instead of being overwritten by it. */
+  .context-menu,
+  .context-menu.clears-right,
+  .context-menu.clears-left,
+  .element-panel,
+  .element-panel.clears-right,
+  .element-panel.clears-left {
+    transform: none;
+    translate: clamp(
+      calc(10px - var(--selection-x)),
+      -50%,
+      calc(100vw - 10px - var(--selection-x) - 100%)
+    );
+  }
   .context-menu button { padding-inline: 9px; font-size: var(--text-caption); }
-  .context-menu button:first-child { display: none; }
   .library-sheet { gap: clamp(9px, 1.5vh, 16px); }
   .library-intro { margin-top: clamp(2px, 1.4vh, 16px); }
   .library-gallery { --library-track: 172px; gap: clamp(16px, 3vw, 28px); }
@@ -1748,14 +1792,19 @@ summary:focus-visible,
   .library-cover-frame { width: min(100%, 158px); }
   .demo-disclosure { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .page-arrow { width: 40px; height: 40px; }
-  .outline-button { display: none; }
+  /* The outline was hidden here while .story-outline kept an authored 560px
+     layout that nothing could open. The bar is tightened to make room for the
+     button rather than the button removed to make room for the bar. */
+  .outline-button { padding: 0 13px; }
   .bottom-controls {
     bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
     grid-template-columns: auto minmax(0, auto) auto;
-    gap: 8px;
+    gap: 6px;
     max-width: calc(100% - 24px);
   }
-  .agent-prompt { font-size: var(--text-body); }
+  .bottom-left-actions { gap: 6px; }
+  .publish-button { padding: 0 13px; }
+  .agent-prompt { padding: 0 14px; font-size: var(--text-body); }
   .story-outline { top: 76px; left: 14px; bottom: 14px; width: calc(100% - 28px); }
 }
 
@@ -2035,8 +2084,12 @@ summary:focus-visible,
 }
 
 /* Short mobile viewports need a horizontal composition rather than the
-   desktop's vertically stacked editorial layout. */
-@media (max-height: 520px) and (orientation: landscape) {
+   desktop's vertically stacked editorial layout.
+   Bounded by width as well as height: without it a 1280x500 desktop window -
+   a normal thing to drag a browser into - matched "short and landscape" and
+   was handed the phone score, hiding the intro copy on a screen with room
+   for it. Phone landscape tops out well inside 940px. */
+@media (max-height: 520px) and (orientation: landscape) and (max-width: 940px) {
   .topbar { min-height: 58px; padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); }
   .wordmark { font-size: var(--text-lead); }
   .library-sheet { padding: 10px max(14px, env(safe-area-inset-right)) 8px max(14px, env(safe-area-inset-left)); }
@@ -2257,6 +2310,11 @@ summary:focus-visible,
   border-left: 2px solid rgba(155, 97, 34, .45);
   padding-left: 9px;
 }
+
+/* The overflow line counts what is not shown; it is not itself a finding, so
+   it drops the blocker rule and the emphasis that goes with one. */
+.publication-quality-findings .publication-quality-more { border-left-color: transparent; }
+.publication-quality-findings .publication-quality-more strong { color: var(--muted); font-weight: 400; }
 
 .publication-quality-findings strong { font-size: var(--text-caption); line-height: 1.35; }
 .publication-quality-findings span { color: var(--muted); font-size: var(--text-caption); line-height: 1.4; }
