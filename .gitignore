@@ -39,3 +39,8 @@ playwright-report/
 **/playwright-report/
 blob-report/
 **/blob-report/
+
+# Local production Live Verify workspaces
+# Keep screenshots, generated art, upload fixtures, copied prompts, and browser/WebMCP logs local.
+# Durable release evidence belongs in an explicitly curated QA closeout directory instead.
+docs/qa/*-live-verify-*/
