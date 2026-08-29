@@ -44,6 +44,14 @@ function knowledgeHotspot(draft: HotspotDraft): BookElement {
   };
 }
 
+function groundedHotspot(draft: HotspotDraft): BookElement {
+  const hotspot = knowledgeHotspot(draft);
+  hotspot.transform.scaleX = 0.72;
+  hotspot.transform.scaleY = 0.72;
+  hotspot.motion = undefined;
+  return hotspot;
+}
+
 type VisualLayerDraft = {
   id: string;
   label: string;
@@ -98,14 +106,6 @@ function visualLayer(draft: VisualLayerDraft): BookElement {
   };
 }
 
-function illustrationSpread(draft: IllustrationSpreadDraft, elements: BookElement[] = []): Spread {
-  return {
-    ...draft,
-    textureUrl: `/assets/generated/${draft.image}`,
-    elements,
-  };
-}
-
 function layeredIllustrationSpread(draft: IllustrationSpreadDraft, cleanImage: string, elements: BookElement[]): Spread {
   const sourceAssetId = `/assets/generated/${draft.image}`;
   const cleanPlateAssetId = `/assets/generated/${cleanImage}`;
@@ -117,104 +117,79 @@ function layeredIllustrationSpread(draft: IllustrationSpreadDraft, cleanImage: s
   };
 }
 
-const colosseumSpread: Spread = {
-  ...illustrationSpread({ id: "flavian-amphitheatre", order: 0, image: "wonders-colosseum-clean-v2.png", kicker: "Wonders in paper · Rome, Italy", title: "The Colosseum held a city of voices.", body: "Eighty entrances fed a vast bowl of stone, while corridors below the arena moved people, scenery, and animals out of sight." }),
-  artwork: {
-    sourceAssetId: "/assets/generated/wonders-colosseum.png",
-    cleanPlateAssetId: "/assets/generated/wonders-colosseum-clean-v2.png",
-    separation: "inpainted-clean-plate",
-  },
-  elements: [{
-    id: "colosseum-procession",
-    label: "Procession on the Via Labicana",
-    kind: "lifted",
-    assetId: "/assets/generated/wonders-colosseum-procession-cutout-v2.png",
-    page: "left",
-    transform: { x: 0.52, y: 0.73, scaleX: 1.72, scaleY: 1.28, rotationDeg: -1 },
-    depth: 0.08,
-    locked: false,
-    interaction: {
-      hover: "tilt-toward-pointer",
-      focus: "spotlight",
-      hint: "Follow the city arriving at the arena",
-      reveal: {
-        kind: "fact-card",
-        title: "An arena fed by a city",
-        summary: "Roads, entrances, and numbered arches moved large crowds around the amphitheatre without one single front door.",
-        facts: [{ label: "Flow", value: "A ring of entrances distributed spectators around the building" }],
-      },
+/**
+ * Some architectural source composites already contain the only convincing
+ * terrain contact, perspective, and occlusion for their monuments. Re-layering
+ * those extracted subjects produced detached sticker edges and visibly
+ * floating landmarks. Render the accepted source composite intact and turn
+ * the authored element catalogue into restrained semantic hotspots instead.
+ */
+function groundedCompositeSpread(draft: IllustrationSpreadDraft, cleanImage: string, elements: BookElement[]): Spread {
+  const sourceAssetId = `/assets/generated/${draft.image}`;
+  return {
+    ...draft,
+    textureUrl: sourceAssetId,
+    artwork: {
+      sourceAssetId,
+      cleanPlateAssetId: `/assets/generated/${cleanImage}`,
+      separation: "inpainted-clean-plate",
     },
-    provenance: "sample",
-  }, {
-    id: "colosseum-cypress",
-    label: "Sunlit cypress",
-    kind: "lifted",
-    assetId: "/assets/generated/wonders-colosseum-cypress-cutout-v2.png",
-    page: "right",
-    transform: { x: 0.9, y: 0.52, scaleX: 1.3, scaleY: 1.42, rotationDeg: 1 },
-    depth: 0.12,
-    locked: false,
-    interaction: {
-      hover: "warm-rim",
-      focus: "spotlight",
-      hint: "Catch the last light on the cypress",
-      reveal: {
-        kind: "caption",
-        title: "A living vertical",
-        summary: "The cypress breaks the amphitheatre's horizontal rings and turns the sunset into a small foreground moment.",
-        facts: [],
-      },
-    },
-    provenance: "sample",
-  }, knowledgeHotspot({ id: "colosseum-arena", label: "Arena floor", page: "right", x: 0.55, y: 0.56, color: "amber", hint: "Inspect what moved below the arena", title: "A stage above a machine", summary: "The wooden arena floor concealed lifts, ramps, corridors, and holding rooms in the hypogeum below.", facts: [{ label: "Hidden level", value: "The hypogeum supported scenery and animal lifts" }], motion: "slow-orbit" })],
-};
-const pyramidSpread = layeredIllustrationSpread({ id: "great-pyramid-of-giza", order: 1, image: "wonders-pyramid.png", kicker: "Wonders in paper · Giza, Egypt", title: "A horizon built from stone.", body: "More than two million blocks rise toward a missing capstone, keeping Khufu's monument visible across forty-five centuries." }, "wonders-pyramid-clean-v2.png", [
-  visualLayer({ id: "pyramid-main", label: "Khufu's pyramid", asset: "wonders-pyramid-main-cutout-v2.png", page: "right", x: 0.12, y: 0.5, scaleX: 1.72, scaleY: 1.48, hint: "Lift the pyramid from the desert", title: "A mountain made by hands", summary: "The monument's immense triangular silhouette turns more than two million blocks into one legible form.", facts: [{ label: "Original height", value: "About 146.6 metres" }] }),
-  visualLayer({ id: "pyramid-caravan", label: "Desert caravan", asset: "wonders-pyramid-caravan-cutout-v3.png", page: "left", x: 0.64, y: 0.7, scaleX: 1.08, scaleY: 0.72, rotationDeg: -2, hover: "warm-rim", focus: "spotlight", hint: "Inspect the caravan on the plateau", title: "Scale across the plateau", summary: "The caravan makes the plateau's distance and the monument's size feel immediate while staying anchored to its route." }),
-  visualLayer({ id: "pyramid-sun", label: "Setting sun", asset: "wonders-pyramid-sun-cutout-v2.png", page: "left", x: 0.36, y: 0.36, scaleX: 0.4, motion: "soft-pulse", hover: "warm-rim", focus: "spotlight", hint: "Warm the edge of the desert", title: "Stone changes with the light", summary: "Low sunlight reveals the rhythm of casing blocks and desert ridges." }),
-  knowledgeHotspot({ id: "pyramid-capstone", label: "Missing capstone", page: "right", x: 0.22, y: 0.25, color: "amber", hint: "Trace the pyramid to its missing peak", title: "A vanished summit", summary: "The outer casing and capstone are gone, leaving the stepped core masonry visible today.", facts: [{ label: "Original height", value: "About 146.6 metres" }], motion: "soft-pulse" }),
+    elements,
+  };
+}
+
+const colosseumSpread: Spread = groundedCompositeSpread({ id: "flavian-amphitheatre", order: 0, image: "wonders-colosseum.png", kicker: "Wonders in paper · Rome, Italy", title: "The Colosseum held a city of voices.", body: "Eighty entrances fed a vast bowl of stone, while corridors below the arena moved people, scenery, and animals out of sight." }, "wonders-colosseum-clean-v2.png", [
+  groundedHotspot({ id: "colosseum-procession", label: "Procession on the Via Labicana", page: "left", x: 0.52, y: 0.73, color: "amber", hint: "Follow the city arriving at the arena", title: "An arena fed by a city", summary: "Roads, entrances, and numbered arches moved large crowds around the amphitheatre without one single front door.", facts: [{ label: "Flow", value: "A ring of entrances distributed spectators around the building" }] }),
+  groundedHotspot({ id: "colosseum-cypress", label: "Sunlit cypress", page: "right", x: 0.9, y: 0.52, color: "jade", hint: "Catch the last light on the cypress", title: "A living vertical", summary: "The cypress breaks the amphitheatre's horizontal rings and turns the sunset into a small foreground moment." }),
+  groundedHotspot({ id: "colosseum-arena", label: "Arena floor", page: "right", x: 0.55, y: 0.56, color: "rose", hint: "Inspect what moved below the arena", title: "A stage above a machine", summary: "The wooden arena floor concealed lifts, ramps, corridors, and holding rooms in the hypogeum below.", facts: [{ label: "Hidden level", value: "The hypogeum supported scenery and animal lifts" }] }),
+]);
+const pyramidSpread = groundedCompositeSpread({ id: "great-pyramid-of-giza", order: 1, image: "wonders-pyramid.png", kicker: "Wonders in paper · Giza, Egypt", title: "A horizon built from stone.", body: "More than two million blocks rise toward a missing capstone, keeping Khufu's monument visible across forty-five centuries." }, "wonders-pyramid-clean-v2.png", [
+  groundedHotspot({ id: "pyramid-main", label: "Khufu's pyramid", page: "right", x: 0.12, y: 0.5, color: "amber", hint: "Lift the pyramid from the desert", title: "A mountain made by hands", summary: "The monument's immense triangular silhouette turns more than two million blocks into one legible form.", facts: [{ label: "Original height", value: "About 146.6 metres" }] }),
+  groundedHotspot({ id: "pyramid-caravan", label: "Desert caravan", page: "left", x: 0.64, y: 0.7, color: "jade", hint: "Inspect the caravan on the plateau", title: "Scale across the plateau", summary: "The caravan makes the plateau's distance and the monument's size feel immediate while staying anchored to its route." }),
+  groundedHotspot({ id: "pyramid-sun", label: "Setting sun", page: "left", x: 0.36, y: 0.36, color: "rose", hint: "Warm the edge of the desert", title: "Stone changes with the light", summary: "Low sunlight reveals the rhythm of casing blocks and desert ridges." }),
+  groundedHotspot({ id: "pyramid-capstone", label: "Missing capstone", page: "right", x: 0.22, y: 0.25, color: "aqua", hint: "Trace the pyramid to its missing peak", title: "A vanished summit", summary: "The outer casing and capstone are gone, leaving the stepped core masonry visible today.", facts: [{ label: "Original height", value: "About 146.6 metres" }] }),
 ]);
 
-const greatWallSpread = layeredIllustrationSpread({ id: "great-wall-of-china", order: 2, image: "wonders-great-wall.png", kicker: "Living wonders · Northern China", title: "A wall follows the mountains.", body: "Watchtowers punctuate ridgelines while tamped earth, brick, and stone adapt to each slope, pass, desert, and grassland." }, "wonders-great-wall-clean-v2.png", [
-  visualLayer({ id: "great-wall-ribbon", label: "Winding wall", asset: "wonders-great-wall-ribbon-cutout-v2.png", page: "right", x: 0.46, y: 0.53, scaleX: 1.48, scaleY: 1.55, hint: "Trace the wall over the ridge", title: "Built to follow terrain", summary: "The wall bends with ridgelines instead of forcing one straight geometry across the mountains." }),
-  visualLayer({ id: "great-wall-tower", label: "Nearest watchtower", asset: "wonders-great-wall-tower-cutout-v2.png", page: "right", x: 0.8, y: 0.62, scaleX: 1.02, scaleY: 1.08, focus: "spotlight", hint: "Inspect the nearest watchtower", title: "A node in a long network", summary: "Towers provided shelter, observation and places to relay smoke or fire signals." }),
-  visualLayer({ id: "great-wall-sun", label: "Mountain sun", asset: "wonders-great-wall-sun-cutout-v2.png", page: "left", x: 0.43, y: 0.25, scaleX: 0.34, motion: "soft-pulse", hover: "warm-rim", focus: "spotlight", hint: "Wake the mountain light", title: "A long view", summary: "Warm light separates near forest from the many blue paper ridges beyond." }),
-  knowledgeHotspot({ id: "great-wall-watchtower", label: "Signal route", page: "right", x: 0.61, y: 0.4, color: "amber", hint: "Follow the signal between towers", title: "A line of sight", summary: "Watchtowers gave defenders shelter, observation, and places to relay smoke or fire signals.", facts: [{ label: "Network", value: "Walls, passes, forts, and towers formed one system" }], motion: "soft-pulse" }),
+const greatWallSpread = groundedCompositeSpread({ id: "great-wall-of-china", order: 2, image: "wonders-great-wall.png", kicker: "Living wonders · Northern China", title: "A wall follows the mountains.", body: "Watchtowers punctuate ridgelines while tamped earth, brick, and stone adapt to each slope, pass, desert, and grassland." }, "wonders-great-wall-clean-v2.png", [
+  groundedHotspot({ id: "great-wall-ribbon", label: "Winding wall", page: "right", x: 0.46, y: 0.53, color: "amber", hint: "Trace the wall over the ridge", title: "Built to follow terrain", summary: "The wall bends with ridgelines instead of forcing one straight geometry across the mountains." }),
+  groundedHotspot({ id: "great-wall-tower", label: "Nearest watchtower", page: "right", x: 0.8, y: 0.62, color: "jade", hint: "Inspect the nearest watchtower", title: "A node in a long network", summary: "Towers provided shelter, observation and places to relay smoke or fire signals." }),
+  groundedHotspot({ id: "great-wall-sun", label: "Mountain sun", page: "left", x: 0.43, y: 0.25, color: "rose", hint: "Wake the mountain light", title: "A long view", summary: "Warm light separates near forest from the many blue paper ridges beyond." }),
+  groundedHotspot({ id: "great-wall-watchtower", label: "Signal route", page: "right", x: 0.61, y: 0.4, color: "aqua", hint: "Follow the signal between towers", title: "A line of sight", summary: "Watchtowers gave defenders shelter, observation, and places to relay smoke or fire signals.", facts: [{ label: "Network", value: "Walls, passes, forts, and towers formed one system" }] }),
 ]);
 
-const petraSpread = layeredIllustrationSpread({ id: "petra-treasury", order: 3, image: "wonders-petra.png", kicker: "Living wonders · Petra, Jordan", title: "A façade waits inside the rock.", body: "Beyond the narrow Siq, the Nabataeans carved columns and pediments directly from rose sandstone." }, "wonders-petra-clean-v2.png", [
-  visualLayer({ id: "petra-treasury-facade", label: "The Treasury", asset: "wonders-petra-treasury-cutout-v2.png", page: "right", x: 0.57, y: 0.52, scaleX: 1.35, scaleY: 1.5, focus: "spotlight", hint: "Inspect the carved façade", title: "Carved, not assembled", summary: "The façade was cut downward from one sandstone face rather than built from separate blocks.", facts: [{ label: "Material", value: "Rose-red sandstone" }] }),
-  visualLayer({ id: "petra-sunbeam", label: "Siq sunbeam", asset: "wonders-petra-light-cutout-v2.png", page: "right", x: 0.24, y: 0.34, scaleX: 0.64, scaleY: 1.35, motion: "soft-pulse", hover: "warm-rim", focus: "spotlight", hint: "Catch the light entering the canyon", title: "Light reveals the entrance", summary: "The narrow Siq turns one shaft of sunlight into a dramatic threshold." }),
-  visualLayer({ id: "petra-path-stones", label: "Stones on the path", asset: "wonders-petra-stones-cutout-v2.png", page: "right", x: 0.6, y: 0.78, scaleX: 0.95, scaleY: 0.48, hint: "Disturb the stones before the Treasury", title: "A path through sandstone", summary: "Small foreground stones make the enormous carved opening feel reachable." }),
-  knowledgeHotspot({ id: "petra-urn", label: "Stone urn", page: "right", x: 0.55, y: 0.3, color: "rose", hint: "Inspect the highest carved detail", title: "Carved from the cliff", summary: "The façade was cut downward from a single rock face rather than assembled from blocks.", facts: [{ label: "Material", value: "Rose-red sandstone" }], motion: "soft-pulse" }),
+const petraSpread = groundedCompositeSpread({ id: "petra-treasury", order: 3, image: "wonders-petra.png", kicker: "Living wonders · Petra, Jordan", title: "A façade waits inside the rock.", body: "Beyond the narrow Siq, the Nabataeans carved columns and pediments directly from rose sandstone." }, "wonders-petra-clean-v2.png", [
+  groundedHotspot({ id: "petra-treasury-facade", label: "The Treasury", page: "right", x: 0.57, y: 0.52, color: "amber", hint: "Inspect the carved façade", title: "Carved, not assembled", summary: "The façade was cut downward from one sandstone face rather than built from separate blocks.", facts: [{ label: "Material", value: "Rose-red sandstone" }] }),
+  groundedHotspot({ id: "petra-sunbeam", label: "Siq sunbeam", page: "right", x: 0.24, y: 0.34, color: "jade", hint: "Catch the light entering the canyon", title: "Light reveals the entrance", summary: "The narrow Siq turns one shaft of sunlight into a dramatic threshold." }),
+  groundedHotspot({ id: "petra-path-stones", label: "Stones on the path", page: "right", x: 0.6, y: 0.78, color: "rose", hint: "Disturb the stones before the Treasury", title: "A path through sandstone", summary: "Small foreground stones make the enormous carved opening feel reachable." }),
+  groundedHotspot({ id: "petra-urn", label: "Stone urn", page: "right", x: 0.55, y: 0.3, color: "aqua", hint: "Inspect the highest carved detail", title: "Carved from the cliff", summary: "The façade was cut downward from a single rock face rather than assembled from blocks.", facts: [{ label: "Material", value: "Rose-red sandstone" }] }),
 ]);
 
-const chichenSpread = layeredIllustrationSpread({ id: "chichen-itza", order: 4, image: "wonders-chichen-itza.png", kicker: "Living wonders · Yucatán, Mexico", title: "A calendar climbs in stone.", body: "Four stairways rise toward the temple of Kukulcán, where architecture, astronomy, ritual, and trade meet." }, "wonders-chichen-itza-clean-v2.png", [
-  visualLayer({ id: "chichen-pyramid", label: "El Castillo", asset: "wonders-chichen-itza-pyramid-cutout-v2.png", page: "right", x: 0.45, y: 0.58, scaleX: 1.52, scaleY: 1.34, focus: "spotlight", hint: "Inspect the stairways from the clearing", title: "A calendar in architecture", summary: "Four stairways organise the pyramid around the cardinal directions." }),
-  visualLayer({ id: "chichen-leaves", label: "Yucatán leaves", asset: "wonders-chichen-itza-leaves-cutout-v2.png", page: "right", x: 0.83, y: 0.75, scaleX: 0.9, scaleY: 0.72, hint: "Brush the jungle edge aside", title: "A monument in a living forest", summary: "The foreground canopy keeps the stone pyramid connected to the Yucatán landscape." }),
-  visualLayer({ id: "chichen-sun", label: "Golden disc", asset: "wonders-chichen-itza-sun-cutout-v2.png", page: "right", x: 0.78, y: 0.2, scaleX: 0.34, motion: "soft-pulse", hover: "warm-rim", focus: "spotlight", hint: "Shift the light over the stair", title: "Seasonal light", summary: "Changing sunlight alters how the stepped geometry reads across the year." }),
-  knowledgeHotspot({ id: "chichen-stair", label: "Calendar stair", page: "right", x: 0.52, y: 0.58, color: "amber", hint: "Count the rhythm of the steps", title: "Time made architectural", summary: "The stepped form is often read as a calendar-like composition tied to seasonal observation.", facts: [{ label: "Four sides", value: "Stairways organise the pyramid around the cardinal directions" }], motion: "slow-orbit" }),
+const chichenSpread = groundedCompositeSpread({ id: "chichen-itza", order: 4, image: "wonders-chichen-itza.png", kicker: "Living wonders · Yucatán, Mexico", title: "A calendar climbs in stone.", body: "Four stairways rise toward the temple of Kukulcán, where architecture, astronomy, ritual, and trade meet." }, "wonders-chichen-itza-clean-v2.png", [
+  groundedHotspot({ id: "chichen-pyramid", label: "El Castillo", page: "right", x: 0.45, y: 0.58, color: "amber", hint: "Inspect the stairways from the clearing", title: "A calendar in architecture", summary: "Four stairways organise the pyramid around the cardinal directions." }),
+  groundedHotspot({ id: "chichen-leaves", label: "Yucatán leaves", page: "right", x: 0.83, y: 0.75, color: "jade", hint: "Brush the jungle edge aside", title: "A monument in a living forest", summary: "The foreground canopy keeps the stone pyramid connected to the Yucatán landscape." }),
+  groundedHotspot({ id: "chichen-sun", label: "Golden disc", page: "right", x: 0.78, y: 0.2, color: "rose", hint: "Shift the light over the stair", title: "Seasonal light", summary: "Changing sunlight alters how the stepped geometry reads across the year." }),
+  groundedHotspot({ id: "chichen-stair", label: "Calendar stair", page: "right", x: 0.52, y: 0.58, color: "aqua", hint: "Count the rhythm of the steps", title: "Time made architectural", summary: "The stepped form is often read as a calendar-like composition tied to seasonal observation.", facts: [{ label: "Four sides", value: "Stairways organise the pyramid around the cardinal directions" }] }),
 ]);
 
-const machuSpread = layeredIllustrationSpread({ id: "machu-picchu", order: 5, image: "wonders-machu-picchu.png", kicker: "Living wonders · Andes, Peru", title: "A city balances above the clouds.", body: "Terraces hold steep ground while fitted stone rooms, drains, channels, and ritual spaces step between peaks." }, "wonders-machu-picchu-clean-v2.png", [
-  visualLayer({ id: "machu-citadel", label: "Citadel and peak", asset: "wonders-machu-picchu-citadel-cutout-v2.png", page: "right", x: 0.45, y: 0.58, scaleX: 1.55, scaleY: 1.42, focus: "spotlight", hint: "Inspect the citadel above the valley", title: "Architecture balanced on a ridge", summary: "Terraces, rooms and mountain silhouette lock into one carefully drained composition." }),
-  visualLayer({ id: "machu-leaves", label: "Andean foreground", asset: "wonders-machu-picchu-leaves-cutout-v2.png", page: "right", x: 0.84, y: 0.74, scaleX: 0.82, scaleY: 0.9, hint: "Part the foreground leaves", title: "A living edge", summary: "The plant layer frames the archaeological site as part of an active mountain ecosystem." }),
-  visualLayer({ id: "machu-cloud-bank", label: "Cloud bank", asset: "wonders-machu-picchu-cloud-cutout-v2.png", page: "left", x: 0.42, y: 0.63, scaleX: 1.32, scaleY: 0.92, motion: "fly-across", durationMs: 11000, hint: "Send the clouds through the valley", title: "A city above weather", summary: "Moving cloud reveals and conceals the steep drop beyond the terraces." }),
-  knowledgeHotspot({ id: "machu-terrace", label: "Mountain terrace", page: "right", x: 0.48, y: 0.64, color: "jade", hint: "Follow water through the terraces", title: "A mountain made habitable", summary: "Terraces stabilised slopes, managed water, and created usable ground high in the Andes.", facts: [{ label: "Engineering", value: "Drainage layers protected the settlement from heavy rain" }], motion: "soft-pulse" }),
+const machuSpread = groundedCompositeSpread({ id: "machu-picchu", order: 5, image: "wonders-machu-picchu.png", kicker: "Living wonders · Andes, Peru", title: "A city balances above the clouds.", body: "Terraces hold steep ground while fitted stone rooms, drains, channels, and ritual spaces step between peaks." }, "wonders-machu-picchu-clean-v2.png", [
+  groundedHotspot({ id: "machu-citadel", label: "Citadel and peak", page: "right", x: 0.45, y: 0.58, color: "amber", hint: "Inspect the citadel above the valley", title: "Architecture balanced on a ridge", summary: "Terraces, rooms and mountain silhouette lock into one carefully drained composition." }),
+  groundedHotspot({ id: "machu-leaves", label: "Andean foreground", page: "right", x: 0.84, y: 0.74, color: "jade", hint: "Part the foreground leaves", title: "A living edge", summary: "The plant layer frames the archaeological site as part of an active mountain ecosystem." }),
+  groundedHotspot({ id: "machu-cloud-bank", label: "Cloud bank", page: "left", x: 0.42, y: 0.63, color: "rose", hint: "Send the clouds through the valley", title: "A city above weather", summary: "Moving cloud reveals and conceals the steep drop beyond the terraces." }),
+  groundedHotspot({ id: "machu-terrace", label: "Mountain terrace", page: "right", x: 0.48, y: 0.64, color: "aqua", hint: "Follow water through the terraces", title: "A mountain made habitable", summary: "Terraces stabilised slopes, managed water, and created usable ground high in the Andes.", facts: [{ label: "Engineering", value: "Drainage layers protected the settlement from heavy rain" }] }),
 ]);
 
-const tajSpread = layeredIllustrationSpread({ id: "taj-mahal", order: 6, image: "wonders-taj-mahal.png", kicker: "Living wonders · Agra, India", title: "Marble holds a changing sky.", body: "A white dome, four minarets, gardens, and water align around a precise riverfront axis." }, "wonders-taj-mahal-clean-v2.png", [
-  visualLayer({ id: "taj-monument", label: "Taj Mahal", asset: "wonders-taj-mahal-monument-cutout-v2.png", page: "right", x: 0.38, y: 0.42, scaleX: 1.5, scaleY: 1.22, focus: "spotlight", hint: "Light the marble silhouette", title: "Perfected symmetry", summary: "The dome and four minarets read as one balanced riverfront composition." }),
-  visualLayer({ id: "taj-flowers", label: "Lotus border", asset: "wonders-taj-mahal-flowers-cutout-v2.png", page: "left", x: 0.72, y: 0.78, scaleX: 1.32, scaleY: 0.7, hint: "Wake the paper flowers", title: "A garden at the page edge", summary: "The flower border turns the formal axis into an intimate foreground view." }),
-  visualLayer({ id: "taj-reflection", label: "Reflecting pool", asset: "wonders-taj-mahal-pool-cutout-v2.png", page: "right", x: 0.5, y: 0.72, scaleX: 1.08, scaleY: 0.72, motion: "soft-pulse", hover: "warm-rim", hint: "Ripple the reflection", title: "An axis doubled in water", summary: "The pool extends the monument toward the viewer while reflecting changing sky." }),
-  knowledgeHotspot({ id: "taj-dome", label: "Marble dome", page: "right", x: 0.5, y: 0.34, color: "aqua", hint: "Watch the dome catch the light", title: "A double dome", summary: "The exterior dome creates the monument's high silhouette while an inner shell shapes the chamber below.", facts: [{ label: "Surface", value: "White marble changes character with the light" }], motion: "soft-pulse" }),
+const tajSpread = groundedCompositeSpread({ id: "taj-mahal", order: 6, image: "wonders-taj-mahal.png", kicker: "Living wonders · Agra, India", title: "Marble holds a changing sky.", body: "A white dome, four minarets, gardens, and water align around a precise riverfront axis." }, "wonders-taj-mahal-clean-v2.png", [
+  groundedHotspot({ id: "taj-monument", label: "Taj Mahal", page: "right", x: 0.38, y: 0.42, color: "amber", hint: "Light the marble silhouette", title: "Perfected symmetry", summary: "The dome and four minarets read as one balanced riverfront composition." }),
+  groundedHotspot({ id: "taj-flowers", label: "Lotus border", page: "left", x: 0.72, y: 0.78, color: "jade", hint: "Wake the paper flowers", title: "A garden at the page edge", summary: "The flower border turns the formal axis into an intimate foreground view." }),
+  groundedHotspot({ id: "taj-reflection", label: "Reflecting pool", page: "right", x: 0.5, y: 0.72, color: "rose", hint: "Ripple the reflection", title: "An axis doubled in water", summary: "The pool extends the monument toward the viewer while reflecting changing sky." }),
+  groundedHotspot({ id: "taj-dome", label: "Marble dome", page: "right", x: 0.5, y: 0.34, color: "aqua", hint: "Watch the dome catch the light", title: "A double dome", summary: "The exterior dome creates the monument's high silhouette while an inner shell shapes the chamber below.", facts: [{ label: "Surface", value: "White marble changes character with the light" }] }),
 ]);
 
-const christSpread = layeredIllustrationSpread({ id: "christ-the-redeemer", order: 7, image: "wonders-christ-redeemer.png", kicker: "Living wonders · Rio de Janeiro, Brazil", title: "Open arms above the city.", body: "The Art Deco figure stands on Corcovado while mountain, bay, ocean, and streets unfold below." }, "wonders-christ-redeemer-clean-v2.png", [
-  visualLayer({ id: "corcovado-statue", label: "Christ the Redeemer", asset: "wonders-christ-redeemer-statue-cutout-v2.png", page: "right", x: 0.66, y: 0.43, scaleX: 1.22, scaleY: 1.42, focus: "spotlight", hint: "Light the statue above the bay", title: "A figure made by its horizon", summary: "The open-arm silhouette gains meaning from the vast city, mountains and Atlantic below." }),
-  visualLayer({ id: "sugarloaf-island", label: "Sugarloaf Mountain", asset: "wonders-christ-redeemer-sugarloaf-cutout-v2.png", page: "left", x: 0.76, y: 0.56, scaleX: 1.02, scaleY: 0.74, hint: "Inspect the bay's landmark", title: "A granite landmark in the water", summary: "Sugarloaf gives Rio's bay an unmistakable middle-distance silhouette." }),
-  visualLayer({ id: "rio-foreground-leaves", label: "Tropical foreground", asset: "wonders-christ-redeemer-leaves-cutout-v2.png", page: "right", x: 0.84, y: 0.76, scaleX: 0.9, scaleY: 0.68, hint: "Part the leaves over the city", title: "A viewpoint inside a forest", summary: "Foreground vegetation connects Corcovado to Tijuca National Park." }),
-  knowledgeHotspot({ id: "corcovado-view", label: "Corcovado view", page: "right", x: 0.58, y: 0.38, color: "aqua", hint: "Look beyond the statue to the bay", title: "A landmark made by its horizon", summary: "The elevated viewpoint connects the monument visually with Rio's mountains, bay, and Atlantic coast.", facts: [{ label: "Setting", value: "Corcovado rises within Tijuca National Park" }], motion: "soft-pulse" }),
+const christSpread = groundedCompositeSpread({ id: "christ-the-redeemer", order: 7, image: "wonders-christ-redeemer.png", kicker: "Living wonders · Rio de Janeiro, Brazil", title: "Open arms above the city.", body: "The Art Deco figure stands on Corcovado while mountain, bay, ocean, and streets unfold below." }, "wonders-christ-redeemer-clean-v2.png", [
+  groundedHotspot({ id: "corcovado-statue", label: "Christ the Redeemer", page: "right", x: 0.66, y: 0.43, color: "amber", hint: "Light the statue above the bay", title: "A figure made by its horizon", summary: "The open-arm silhouette gains meaning from the vast city, mountains and Atlantic below." }),
+  groundedHotspot({ id: "sugarloaf-island", label: "Sugarloaf Mountain", page: "left", x: 0.76, y: 0.56, color: "jade", hint: "Inspect the bay's landmark", title: "A granite landmark in the water", summary: "Sugarloaf gives Rio's bay an unmistakable middle-distance silhouette." }),
+  groundedHotspot({ id: "rio-foreground-leaves", label: "Tropical foreground", page: "right", x: 0.84, y: 0.76, color: "rose", hint: "Part the leaves over the city", title: "A viewpoint inside a forest", summary: "Foreground vegetation connects Corcovado to Tijuca National Park." }),
+  groundedHotspot({ id: "corcovado-view", label: "Corcovado view", page: "right", x: 0.58, y: 0.38, color: "aqua", hint: "Look beyond the statue to the bay", title: "A landmark made by its horizon", summary: "The elevated viewpoint connects the monument visually with Rio's mountains, bay, and Atlantic coast.", facts: [{ label: "Setting", value: "Corcovado rises within Tijuca National Park" }] }),
 ]);
 
 const citySpread = layeredIllustrationSpread({ id: "city-for-small-things", order: 0, image: "city-spread.png", title: "We built a city for small things.", body: "Paper towers, leaf gardens, and cloud roads—just the right size for big adventures." }, "story-city-clean-v2.png", [
@@ -391,7 +366,7 @@ const guideSpreads: LayeredSpreadDraft[] = [
 ];
 
 function relayerSpread(spread: LayeredSpreadDraft, source: string, clean: string, elements: BookElement[]): Spread {
-  return { ...spread, textureUrl: `/assets/generated/${clean}`, artwork: { sourceAssetId: `/assets/generated/${source}`, cleanPlateAssetId: `/assets/generated/${clean}`, separation: "inpainted-clean-plate" }, elements };
+  return layeredIllustrationSpread({ ...spread, image: source }, clean, elements);
 }
 
 const lanternLayeredSpreads = [
@@ -410,10 +385,10 @@ const lanternLayeredSpreads = [
     visualLayer({ id: "bridge-stone-lantern", label: "Stone lantern", asset: "lantern-firefly-bridge-stone-lantern-cutout-v2.png", page: "right", x: 0.5, y: 0.5, scaleX: 0.55, scaleY: 0.85, hint: "Wake the lantern at the river", title: "A steady light beside motion", summary: "The stone lantern gives the flickering bridge a fixed endpoint." }),
     visualLayer({ id: "bridge-distant-lights", label: "Distant lanterns", asset: "lantern-firefly-bridge-distant-lanterns-cutout-v2.png", page: "right", x: 0.78, y: 0.42, scaleX: 0.72, motion: "soft-pulse", hover: "warm-rim", hint: "Find the far bank", title: "The destination glows", summary: "A distant cluster makes the crossing feel possible." }),
   ]),
-  relayerSpread(sleepingCitySpread, "lantern-sleeping-city-spread-v2.png", "lantern-sleeping-city-clean-v2.png", [
-    visualLayer({ id: "sleeping-city-moon", label: "City moon", asset: "lantern-sleeping-city-moon-cutout-v2.png", page: "left", x: 0.35, y: 0.2, scaleX: 0.34, hint: "Lift the moon above the roofs", title: "Quiet time over the city", summary: "The moon keeps the skyline readable after the windows dim." }),
-    visualLayer({ id: "sleeping-clocktower-layer", label: "Clocktower", asset: "lantern-sleeping-city-clocktower-cutout-v2.png", page: "right", x: 0.34, y: 0.48, scaleX: 0.65, scaleY: 1.2, focus: "spotlight", hint: "Listen for the last bell", title: "One tower keeps time", summary: "The clocktower remains the city's night landmark." }),
-    visualLayer({ id: "sleeping-warm-lights", label: "Last warm lights", asset: "lantern-sleeping-city-warm-lights-cutout-v2.png", page: "right", x: 0.72, y: 0.6, scaleX: 0.92, motion: "soft-pulse", durationMs: 2800, hover: "warm-rim", hint: "Wake one last window", title: "The city is not entirely asleep", summary: "A few lamps hold a safe route through the dark." }),
+  groundedCompositeSpread({ ...sleepingCitySpread, image: "lantern-sleeping-city-spread-v2.png" }, "lantern-sleeping-city-clean-v2.png", [
+    groundedHotspot({ id: "sleeping-city-moon", label: "City moon", page: "left", x: 0.35, y: 0.2, color: "amber", hint: "Lift the moon above the roofs", title: "Quiet time over the city", summary: "The moon keeps the skyline readable after the windows dim." }),
+    groundedHotspot({ id: "sleeping-clocktower-layer", label: "Clocktower", page: "right", x: 0.34, y: 0.48, color: "jade", hint: "Listen for the last bell", title: "One tower keeps time", summary: "The clocktower remains the city's night landmark." }),
+    groundedHotspot({ id: "sleeping-warm-lights", label: "Last warm lights", page: "right", x: 0.72, y: 0.6, color: "rose", hint: "Wake one last window", title: "The city is not entirely asleep", summary: "A few lamps hold a safe route through the dark." }),
   ]),
   relayerSpread(dawnGardenSpread, "lantern-dawn-garden-spread-v2.png", "lantern-dawn-garden-clean-v2.png", [
     visualLayer({ id: "dawn-lotus", label: "Lantern lotus garden", asset: "lantern-dawn-garden-lotus-cutout-v2.png", page: "left", x: 0.62, y: 0.62, scaleX: 1.22, scaleY: 1.15, hint: "Open the lantern flowers", title: "Night turns into colour", summary: "Warm lamps become luminous paper blossoms at dawn." }),

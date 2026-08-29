@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete, sceneAssetsReadyForEvidence } from "./renderEvidence";
-import type { Spread } from "./types";
+import { isProceduralElement, type Spread } from "./types";
 
 const spread = (): Spread => ({
   id: "opening",
@@ -57,6 +57,16 @@ describe("render evidence readiness", () => {
     const collisionSafeKeys = fallbackImageLoadKeys("revision-4", ["base"]);
     expect(collisionSafeKeys).toEqual(["base:revision-4", "layer:base"]);
     expect(new Set(collisionSafeKeys).size).toBe(2);
+  });
+
+  it("uses an explicitly selected source composite without re-adding detached layers", () => {
+    const grounded = spread();
+    grounded.textureUrl = grounded.artwork!.sourceAssetId;
+    expect(fallbackAssetPlan(grounded).baseAssetId).toBe("/clean.png");
+    grounded.elements = grounded.elements.filter(isProceduralElement);
+    const plan = fallbackAssetPlan(grounded);
+    expect(plan.baseAssetId).toBe("/composite.png");
+    expect(plan.foreground).toEqual([]);
   });
 
   it("rejects WebGL evidence while an expected texture is pending, incomplete, or failed", () => {

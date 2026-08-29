@@ -8,7 +8,7 @@ import {
   skipsPageTurnAnimation,
 } from "./pageTurn";
 import type { TurnDirection, TurnWaitState } from "./pageTurn";
-import type { BookSnapshot, DocumentState, ThemeId, TurnState } from "./types";
+import { spreadBaseAssetId, type BookSnapshot, type DocumentState, type ThemeId, type TurnState } from "./types";
 
 const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: module.ThreeBook })));
 
@@ -217,8 +217,8 @@ export function SharedBookApp() {
           </Suspense>
         ) : (
           <div className="fallback-book" aria-label={`Two-dimensional fallback for ${spread.title}`}>
-            {spread.artwork?.cleanPlateAssetId || spread.textureUrl
-              ? <img src={spread.artwork?.cleanPlateAssetId ?? spread.textureUrl} alt="" role="presentation" />
+            {spreadBaseAssetId(spread)
+              ? <img src={spreadBaseAssetId(spread)} alt="" role="presentation" />
               : <article className="fallback-plate"><h1>{spread.title}</h1><p>{spread.body}</p></article>}
           </div>
         )}

@@ -3,7 +3,7 @@ import { BookEngine } from "./bookEngine";
 import { hasReveal, resolveInteraction } from "./interaction";
 import { evaluateDeterministicQuality, QUALITY_VISUAL_CRITERION_IDS, assertPublishableQuality, type QualityVisualReviewSubmission } from "./qualityContract";
 import { sampleBooks } from "./sampleBook";
-import { THEME_IDS } from "./types";
+import { THEME_IDS, isProceduralElement } from "./types";
 
 const cityEngine = () => {
   const engine = new BookEngine();
@@ -69,11 +69,24 @@ describe("BookEngine document contract", () => {
     });
     sampleBooks.flatMap((book) => book.spreads).forEach((layeredShowcase) => {
       expect(layeredShowcase.artwork, layeredShowcase.title).toMatchObject({ separation: "inpainted-clean-plate" });
-      expect(
-        layeredShowcase.elements.filter((element) => !element.assetId.startsWith("procedural:")).length,
-        `${layeredShowcase.title} should ship multiple real foreground layers`,
-      ).toBeGreaterThanOrEqual(2);
+      const rendersGroundedComposite = layeredShowcase.textureUrl === layeredShowcase.artwork?.sourceAssetId;
+      if (rendersGroundedComposite) {
+        expect(layeredShowcase.elements.length, `${layeredShowcase.title} should retain semantic interactions`).toBeGreaterThanOrEqual(3);
+        expect(layeredShowcase.elements.every(isProceduralElement)).toBe(true);
+      } else {
+        expect(
+          layeredShowcase.elements.filter((element) => !isProceduralElement(element)).length,
+          `${layeredShowcase.title} should ship multiple real foreground layers`,
+        ).toBeGreaterThanOrEqual(2);
+      }
     });
+    const atlas = sampleBooks.find((book) => book.id === "apertale-atlas-of-wonders")!;
+    expect(atlas.spreads.every((spread) => spread.textureUrl === spread.artwork?.sourceAssetId)).toBe(true);
+    expect(atlas.spreads.every((spread) => spread.artwork?.cleanPlateAssetId !== spread.artwork?.sourceAssetId)).toBe(true);
+    expect(atlas.spreads.every((spread) => spread.elements.every(isProceduralElement))).toBe(true);
+    const sleepingCity = sampleBooks.find((book) => book.id === "apertale-lantern-garden")!.spreads[3];
+    expect(sleepingCity.textureUrl).toBe(sleepingCity.artwork?.sourceAssetId);
+    expect(sleepingCity.elements.every(isProceduralElement)).toBe(true);
   });
 
   it("gives every spread authored hover, focus, and click reveal without forcing idle motion", () => {
@@ -95,7 +108,7 @@ describe("BookEngine document contract", () => {
     expect(sampleBooks[3].spreads[4].elements.find((element) => element.id === "warm-window-child")?.motion).toBeUndefined();
     const storyCutouts = sampleBooks[3].spreads
       .flatMap((spread) => spread.elements)
-      .filter((element) => !element.assetId.startsWith("procedural:"));
+      .filter((element) => !isProceduralElement(element));
     expect(storyCutouts).toHaveLength(15);
     expect(storyCutouts.every((element) => element.assetId.endsWith("-cutout-v3.png"))).toBe(true);
     const anchoredIds = ["pyramid-main", "great-wall-tower", "petra-treasury-facade", "chichen-pyramid", "machu-citadel", "taj-monument", "corcovado-statue", "river-hill-home", "cloud-road-towers", "garden-arched-gate", "warm-window-child"];
@@ -111,15 +124,33 @@ describe("BookEngine document contract", () => {
     const documents = structuredClone(sampleBooks);
     const atlas = documents.find((book) => book.id === "apertale-atlas-of-wonders")!;
     atlas.revision = 2;
-    const taj = atlas.spreads.find((item) => item.id === "taj-mahal")!.elements.find((element) => element.id === "taj-monument")!;
+    const tajSpread = atlas.spreads.find((item) => item.id === "taj-mahal")!;
+    tajSpread.textureUrl = tajSpread.artwork!.cleanPlateAssetId;
+    const taj = tajSpread.elements.find((element) => element.id === "taj-monument")!;
+    const dome = tajSpread.elements.find((element) => element.id === "taj-dome")!;
     taj.transform.x = 0.91;
+    taj.transform.scaleX = 1.5;
+    taj.transform.scaleY = 1.22;
+    taj.assetId = "/assets/generated/wonders-taj-mahal-monument-cutout-v2.png";
+    taj.kind = "lifted";
+    taj.locked = false;
     taj.interaction!.focus = "orbit-inspect";
-    localStorage.setItem("apertale.library.v4", JSON.stringify({ activeBookId: atlas.id, documents }));
+    dome.transform.scaleX = 1;
+    dome.transform.scaleY = 1;
+    dome.motion = { preset: "soft-pulse", durationMs: 4200, loop: true };
+    localStorage.setItem("apertale.library.v4", JSON.stringify({ activeBookId: atlas.id, documents, sampleSourceVersion: 3 }));
 
     const migrated = new BookEngine().getSnapshot().document;
-    const migratedTaj = migrated.spreads.find((item) => item.id === "taj-mahal")!.elements.find((element) => element.id === "taj-monument")!;
+    const migratedTajSpread = migrated.spreads.find((item) => item.id === "taj-mahal")!;
+    const migratedTaj = migratedTajSpread.elements.find((element) => element.id === "taj-monument")!;
+    const migratedDome = migratedTajSpread.elements.find((element) => element.id === "taj-dome")!;
     expect(migratedTaj.transform.x).toBe(0.91);
+    expect(migratedTaj.transform).toMatchObject({ scaleX: 0.72, scaleY: 0.72 });
+    expect(migratedTaj).toMatchObject({ kind: "decoration", locked: true, depth: 0.12 });
+    expect(isProceduralElement(migratedTaj)).toBe(true);
     expect(migratedTaj.interaction?.focus).toBe("spotlight");
+    expect(migratedDome.transform).toMatchObject({ scaleX: 0.72, scaleY: 0.72 });
+    expect(migratedDome.motion).toBeUndefined();
   });
 
   it("commits one revision and returns an undo token", () => {
@@ -149,8 +180,8 @@ describe("BookEngine document contract", () => {
     ]));
     expect(context.currentSpread.elements).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "colosseum-arena", label: "Arena floor" }),
-      expect.objectContaining({ id: "colosseum-procession", kind: "lifted" }),
-      expect.objectContaining({ id: "colosseum-cypress", kind: "lifted" }),
+      expect.objectContaining({ id: "colosseum-procession", kind: "decoration", locked: true }),
+      expect.objectContaining({ id: "colosseum-cypress", kind: "decoration", locked: true }),
     ]));
     expect(context.capabilities).toContain("set-book-cover");
     expect(context.capabilities).toContain("full-spread-illustration-stage");
@@ -758,8 +789,8 @@ describe("BookEngine document contract", () => {
       validatedLocalAssetIds: [sourceId],
       operations: [{
         op: "set-background",
-        sourceAssetId: "/assets/generated/wonders-colosseum.png",
-        cleanPlateAssetId: "/assets/generated/wonders-colosseum-clean-v2.png",
+        sourceAssetId: "/assets/generated/city-spread.png",
+        cleanPlateAssetId: "/assets/generated/story-city-clean-v2.png",
         personalSourceAssetId: sourceId,
         separation: "inpainted-clean-plate",
       }, {
@@ -778,8 +809,8 @@ describe("BookEngine document contract", () => {
     }, "agent");
     expect(patched).toMatchObject({ ok: true });
     expect(engine.getSnapshot().document.spreads[0].artwork).toMatchObject({
-      sourceAssetId: "/assets/generated/wonders-colosseum.png",
-      cleanPlateAssetId: "/assets/generated/wonders-colosseum-clean-v2.png",
+      sourceAssetId: "/assets/generated/city-spread.png",
+      cleanPlateAssetId: "/assets/generated/story-city-clean-v2.png",
       personalSourceAssetId: sourceId,
     });
   });

@@ -6,7 +6,7 @@ import {
   type CreationBookType,
   type CreationBriefPayload,
 } from "./authoringContract";
-import { MAX_BOOK_SPREADS, isProceduralElement } from "./types";
+import { MAX_BOOK_SPREADS, isProceduralElement, spreadBaseAssetId } from "./types";
 import type { DocumentState, ThemeId } from "./types";
 
 export const QUALITY_CONTRACT_VERSION = 1 as const;
@@ -468,7 +468,7 @@ export function buildQualityRenderManifest(documentState: DocumentState, pageUrl
       order: spread.order + 1,
       title: spread.title,
       body: spread.body,
-      finalBaseAssetId: spread.artwork?.cleanPlateAssetId ?? null,
+      finalBaseAssetId: spreadBaseAssetId(spread) ?? null,
       separation: spread.artwork?.separation ?? null,
       sourceAssetId: spread.artwork?.sourceAssetId ?? null,
       personalSourceAssetId: spread.artwork?.personalSourceAssetId ?? null,

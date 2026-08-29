@@ -5,7 +5,7 @@ import { recordDiagnostic } from "./diagnostics";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
 import { sceneAssetsReadyForEvidence } from "./renderEvidence";
-import type { BookElement, BookSnapshot, Spread, TurnState } from "./types";
+import { spreadBaseAssetId, type BookElement, type BookSnapshot, type Spread, type TurnState } from "./types";
 
 type Props = {
   snapshot: BookSnapshot;
@@ -153,9 +153,8 @@ async function loadPagePairs(spreads: Spread[], mode: "reader" | "workshop") {
   const entries = await Promise.all(
     spreads.map(async (spread) => {
       let image: HTMLImageElement | null = null;
-      const artworkUrl = spread.artwork?.cleanPlateAssetId
-        ? await resolveAssetUrl(spread.artwork.cleanPlateAssetId)
-        : spread.textureUrl;
+      const baseAssetId = spreadBaseAssetId(spread);
+      const artworkUrl = baseAssetId ? await resolveAssetUrl(baseAssetId) : undefined;
       if (artworkUrl) {
         image = new Image();
         image.decoding = "async";

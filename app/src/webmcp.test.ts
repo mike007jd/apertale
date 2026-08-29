@@ -334,22 +334,22 @@ describe("WebMCP registration", () => {
       spreadId: "1-the-moon-pulls",
       operations: [{
         op: "set-background",
-        cleanPlateAssetId: "/assets/generated/wonders-colosseum-clean-v2.png",
-        sourceAssetId: "/assets/generated/wonders-colosseum.png",
+        cleanPlateAssetId: "/assets/generated/story-city-clean-v2.png",
+        sourceAssetId: "/assets/generated/city-spread.png",
         separation: "inpainted-clean-plate",
       }, {
         op: "add",
         id: "second-layer",
         label: "Second foreground layer",
-        assetId: "/assets/generated/wonders-colosseum-cypress-cutout-v2.png",
+        assetId: "/assets/generated/story-city-boy-cutout-v3.png",
         page: "left",
       }],
     }, { signal: new AbortController().signal })));
     expect(layeredBackground).toMatchObject({ ok: true, changedIds: ["1-the-moon-pulls:background", "second-layer"] });
     expect(bookEngine.getSnapshot().document.spreads[0].artwork).toMatchObject({
       separation: "inpainted-clean-plate",
-      cleanPlateAssetId: "/assets/generated/wonders-colosseum-clean-v2.png",
-      sourceAssetId: "/assets/generated/wonders-colosseum.png",
+      cleanPlateAssetId: "/assets/generated/story-city-clean-v2.png",
+      sourceAssetId: "/assets/generated/city-spread.png",
     });
 
     const qualityContext = JSON.parse(String(await tool("get_project_context").execute({ detail: "quality-review" }, {
