@@ -90,6 +90,12 @@ select:focus-visible {
 }
 
 :root[data-theme="night"] .app-shell::before { opacity: 0; }
+:root[data-theme="night"] .app-shell {
+  background-color: #100d0a;
+  background-image: url("/assets/generated/night-background.png");
+  background-position: center;
+  background-size: cover;
+}
 :root[data-theme="night"] .app-shell::after {
   background-image: url("/assets/generated/night-background.png");
   opacity: 1;
