@@ -131,7 +131,7 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - Palette-optimised the compatibility PNG set after preserving the originals in a recoverable archive. That checkpoint reached roughly 21 MB; later clean plates and independently generated foreground layers expanded the current bundle, so asset-size reduction remains open. A fresh in-app browser run verified the library, Day/Night spreads, transparent lightning frames, knowledge card, and page-turn composition captures with no console warning or error.
 - Current combined reference comparisons are `qa/audit-2026-08-27-rt/final-day-reference-comparison.png` and `qa/audit-2026-08-27-rt/final-night-reference-comparison.png`. The illustrated runtime preserves the reference's book-dominant hierarchy and cinematic theme split while intentionally replacing pop-up content models with full-spread OpenAI illustration.
 
-### Pass 10 — honest open-book loading feedback, current
+### Pass 10 — honest open-book loading feedback, superseded by Pass 17
 
 - P1 found: selecting a different book closed the library before all illustrated spreads decoded and before the replacement WebGL scene produced a complete frame. The resulting silent wait looked like a stalled site.
 - The selected cover now acknowledges the click immediately with a compact `Opening` indicator. Duplicate activations, theme changes, dismissal, and other library actions are unavailable during the transition.
@@ -153,7 +153,7 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - Added content-specific motion/hover/click hotspots to the Guide, all eight Atlas spreads, all six Science spreads, and every story spread. Every one of the 28 shipped spreads now has at least one declarative interactive element; story spreads pair their animated character with a second scene detail.
 - Fresh runtime evidence confirms the storm rest state, a separately composited lightning frame, the updraft fact card, the Night lamp treatment, and an empty warning/error console. Automated interaction and document-contract tests enforce the all-spread coverage and burst/rest timing.
 
-### Pass 13 — reversible book navigation motion, current
+### Pass 13 — reversible book navigation motion, superseded by Pass 17
 
 - Replaced the library's generic mount/unmount with one reversible shared-object sequence. After a selected book is ready, its real cover lifts from its exact library geometry, moves to the reading stage, opens into a two-page silhouette, and hands off to the rendered book. **Books** plays the inverse sequence and lands the closed cover back in that book's own slot.
 - The existing loading state remains authoritative and completes before the opening choreography. While either direction runs, the library reports `aria-busy`, all competing book/theme/create controls are disabled, and rapid repeated selection cannot queue stale transitions.
@@ -174,12 +174,22 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - Slow-motion development audits sampled the cover lift, cover-to-spread handoff, open reveal, and reverse close. Day and Night both kept a single readable book object with no blank page, split texture, mirrored title, or mixed-screen overlap.
 - Normal-speed open/close completed with competing library cards locked and an empty warning/error console. The forced `fallback=1&reducedMotion=1` route performed the same state changes with zero transition overlay. Typecheck, 38 unit tests, production build, and all 7 Sites/artwork-contract tests passed.
 
-### Pass 16 — blank-book Agent workshop, current
+### Pass 16 — blank-book Agent workshop, superseded by Pass 17
 
 - Replaced the form modal with a full-screen blank physical book rendered by the existing Three.js scene. The open pages carry only two bounded choices—4–12 spreads and visual direction—while a compact right rail owns the Agent handoff.
 - Removed duplicate story, audience, and primary photo-upload fields. The starter prompt asks for the request and source images in the user's Agent conversation, identifies the open Apertale page and selected constraints, and tells the Agent to inspect context before creating a new independent book.
 - Kept one quiet **Image handoff** fallback because binary attachment transfer is not yet standardized across WebMCP hosts. It is used only when the current Agent cannot transfer media, stores PNG/JPEG/WebP in the browser-local asset directory, and never asks the user to re-enter their story.
 - Fresh in-app-browser verification covered library and reader entry, length/style selection, copy feedback, return to library, Day/Night, forced 2D/Reduced Motion, one-dialog accessibility state, live six-tool discovery, and an empty warning/error console.
+
+### Pass 17 — closed design scales, four-state controls, and a cased book that really opens, current
+
+- Passes 10, 13 and 16 described behaviour this pass replaced, and they were being read as specification. Pass 10 said the library exits only once `ThreeBook` emits `book:ready`; readiness is now one of two exits, the other being a bounded 2600 ms failsafe, after which the cover swing plays and the shelf leaves at the end of it. Pass 13 described a CSS silhouette sequence that has been deleted. Pass 16 described an **Image handoff** control that never existed in the interface and counted six site tools; the interface says **Photos**, and there are seven.
+- `styles.css` had grown 34 font sizes, 20 radii, 30 shadows and 68 spacing values. One generated token layer now owns 7 type steps, 4 radii, 3 two-layer elevations and 11 spacing steps, and `scripts/check-tokens.mjs` fails the release verify on a single raw `font-size`, `border-radius` or `box-shadow`, or on a second accent action appearing on a screen that already has one.
+- Thirteen surfaces shared one visual rule regardless of job. They now resolve to three: resting, lifted, floating. `backdrop-filter` went from 26 uses to 4. All 63 controls carry rest / hover / active / focus-visible states from one rule built on the independent `scale` property, so a control's own `transform` is never overwritten to animate it.
+- The 2D transition that stood in for opening a book is gone. The case is real geometry: a spine shell, a rear board, a front board on a translating joint, endpapers, squab, and a text block whose depth follows the spread count. The book leaves and returns to its own shelf slot by unprojecting the card's rect against the live camera.
+- **Not visually verified.** The Browser pane in the authoring environment was hidden for this pass, which throttles `requestAnimationFrame`, so the open and close motion has been checked only as arithmetic — continuity of position, velocity and acceleration across the whole curve — and in single frames forced through `?openProgress=`. No one has watched it run. Treat the motion as unreviewed until someone does.
+- Ten defects catalogued during the same investigation are fixed with this pass: the selection ring's frame mismatch on phone portrait and its absence entirely on the 2D fallback; Preview accepting canvas drags into the document; the missing `readOnly` on the reader's book; **Ask Codex** deleted by a media query with no replacement entry point; the outline button hidden while its panel kept an authored layout; a short desktop window matching the phone score; a focus trap installed twice on the shelf; the publish panel printing one fault three times; the case, text blocks, page materials and contact shadow leaking on every scene teardown; and this document.
+- Evidence for this pass is `npm run tokens:check` (4/4), `tsc --noEmit`, and the unit and site-tool suites. There is no fresh browser capture, for the reason recorded above.
 
 ## Primary interactions tested
 
@@ -191,7 +201,7 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - Enter/exit Preview without changing the current spread.
 - Navigate with keyboard arrows and dismiss selection/Preview with Escape.
 - Verify responsive selection and controls at 390 × 844.
-- Verify all six project-level WebMCP definitions, registration signals, compact JSON output, input validation, idempotency, abort cleanup, and field-aware atomic patch undo in automated tests.
+- Verify all seven project-level WebMCP definitions, registration signals, compact JSON output, input validation, idempotency, abort cleanup, and field-aware atomic patch undo in automated tests.
 
 ## Implementation checklist
 
