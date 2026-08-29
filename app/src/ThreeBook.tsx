@@ -12,6 +12,12 @@ type Props = {
   turn: TurnState;
   mode?: "reader" | "workshop";
   readOnly?: boolean;
+  /**
+   * 1 is fully open, 0 is closed with the cover facing the reader. The caller
+   * owns the timing; the renderer only follows, so open and close share one
+   * code path and the pose stays duration-agnostic.
+   */
+  openProgress?: number;
   onSelect: (elementId: string | null) => void;
   onHover: (elementId: string | null) => void;
   onMoveElement: (elementId: string, x: number, y: number) => void;
@@ -38,6 +44,19 @@ type PagePair = {
 const PAGE_W = 4.2;
 const PAGE_H = 5.18;
 const PAGE_THICKNESS = 0.024;
+/**
+ * Case dimensions. BOARD_W x 2 plus the spine reproduces the previous 9.05
+ * cover width for a five-spread book, so the open framing is unchanged; the
+ * fore-edge squab of 0.07 is 1.35% of page height, which is where real
+ * bookbinding puts it (about 3mm on a 210mm trim).
+ */
+const BOARD_W = 4.27;
+const BOARD_H = 5.75;
+const BOARD_T = 0.055;
+/** Endpapers, backbone and headbands, present regardless of extent. */
+const BODY_BASE = 0.2;
+/** The groove between board and spine that lets the cover hinge. */
+const JOINT = 0.028;
 
 function clamp(value: number, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value));
@@ -532,10 +551,10 @@ function buildSceneElement(
   };
 }
 
-export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
+export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, openProgress = 1, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const propsRef = useRef({ snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
-  propsRef.current = { snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
+  const propsRef = useRef({ snapshot, turn, mode, readOnly, openProgress, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
+  propsRef.current = { snapshot, turn, mode, readOnly, openProgress, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
   const sceneStructureKey = JSON.stringify({
     id: snapshot.document.id,
     mode,
@@ -679,18 +698,122 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     book.position.y = 0.25;
     scene.add(book);
 
+    // The case was one rigid slab spanning both boards and the spine, so
+    // nothing could rotate and the book had no closed state at all. It is now
+    // three parts: a spine shell that never moves, a rear board that never
+    // rotates, and a front board on a real joint.
+    //
+    // BOARD_W x 2 + spine reproduces the old 9.05 silhouette exactly for a
+    // five-spread book, so the open pose - and everything framed against it -
+    // is unchanged.
+    const spineWidth = (spreadCount: number) =>
+      (spreadCount + 1) * PAGE_THICKNESS + BODY_BASE + 2 * BOARD_T + 2 * JOINT;
+    const textBlockDepth = (spreadCount: number) => (spreadCount + 1) * PAGE_THICKNESS + BODY_BASE;
+
+    let spineGap = spineWidth(propsRef.current.snapshot.document.spreads.length);
+
     const coverMaterial = new THREE.MeshStandardMaterial({ color: 0x173f39, roughness: 0.52, metalness: 0.03 });
-    const cover = new THREE.Mesh(new THREE.BoxGeometry(9.05, 5.75, 0.22, 2, 2, 1), coverMaterial);
-    cover.position.z = -0.25;
-    cover.castShadow = true;
-    cover.receiveShadow = true;
-    book.add(cover);
+    const spineMaterial = new THREE.MeshStandardMaterial({ color: 0x5e5040, roughness: 0.78 });
+
+    const spineShell = new THREE.Mesh(
+      // Open-ended: the head and tail of a cased spine are covered by the
+      // boards, so capping it only produces two half-discs that catch the key
+      // light below the book.
+      new THREE.CylinderGeometry(spineGap / 2, spineGap / 2, BOARD_H, 18, 1, true, Math.PI / 2, Math.PI),
+      spineMaterial,
+    );
+    spineShell.position.set(0, 0, -(BOARD_T + 0.22) / 2);
+    spineShell.castShadow = true;
+    book.add(spineShell);
+
+    const makeBoard = () => {
+      const board = new THREE.Mesh(new THREE.BoxGeometry(BOARD_W, BOARD_H, BOARD_T, 1, 1, 1), coverMaterial);
+      board.castShadow = false;
+      board.receiveShadow = true;
+      return board;
+    };
+
+    // The rear board is structural: it is what the open spread rests on, and
+    // it never rotates. Keeping it a sibling of the front board rather than a
+    // child is what lets the front board swing without dragging it along.
+    const rearBoardPivot = new THREE.Group();
+    const rearBoard = makeBoard();
+    rearBoard.position.x = BOARD_W / 2;
+    rearBoardPivot.add(rearBoard);
+    rearBoardPivot.position.set(spineGap / 2, 0, -(0.22 + BOARD_T) / 2);
+    rearBoardPivot.rotation.y = 0;
+    book.add(rearBoardPivot);
+
+    /**
+     * The front board's joint must translate as it rotates. A fixed-axis
+     * rotation leaves the two boards misaligned by exactly the spine width at
+     * closure, which reads as the cover floating off its own hinge.
+     */
+    const frontBoardPivot = new THREE.Group();
+    const frontBoard = makeBoard();
+    frontBoard.position.x = BOARD_W / 2;
+    frontBoardPivot.add(frontBoard);
+    book.add(frontBoardPivot);
+
+    /** Cover art rides coplanar with the board so an unresolved cover never pops. */
+    const coverArtMaterial = new THREE.MeshStandardMaterial({
+      roughness: 0.58,
+      metalness: 0.02,
+      transparent: true,
+      opacity: 0,
+    });
+    const coverArt = new THREE.Mesh(new THREE.PlaneGeometry(BOARD_W, BOARD_H), coverArtMaterial);
+    coverArt.position.set(BOARD_W / 2, 0, BOARD_T / 2 + 0.0015);
+    frontBoardPivot.add(coverArt);
+
+    /**
+     * phi = 0 is fully open; phi = PI is closed with the spine on the left and
+     * the cover art facing the reader.
+     *
+     * The pivot translates by the spine width as it rotates. A fixed-axis
+     * rotation is the obvious implementation and it is wrong: it leaves the
+     * two boards offset by exactly the spine at closure, so the cover appears
+     * to float off its own hinge.
+     */
+    let coverPhi = 0;
+    const openBoardZ = -(0.22 + BOARD_T) / 2;
+
+    function applyCover() {
+      const phi = coverPhi;
+      const closure = (1 - Math.cos(phi)) / 2;
+      frontBoardPivot.rotation.y = Math.PI - phi;
+      frontBoardPivot.position.set(
+        -(spineGap / 2) * Math.cos(phi),
+        0,
+        THREE.MathUtils.lerp(openBoardZ, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2 + BOARD_T / 2, closure),
+      );
+      // The open spread is meaningless while the case is shut, and drawing it
+      // through a closing cover is what made the old fake transition necessary.
+      const shut = closure > 0.02;
+      leftPage.visible = rightPage.visible = !shut;
+      leftStack.visible = rightStack.visible = !shut || closure < 0.6;
+      applyCamera();
+    }
 
     const pageBlockMaterial = new THREE.MeshStandardMaterial({ color: 0xe8dcc4, roughness: 0.92 });
-    const leftStack = new THREE.Mesh(new THREE.BoxGeometry(4.32, 5.32, 0.34), pageBlockMaterial);
+    // Unit depth, so the two stacks can be driven by scale as the reader moves
+    // through the book. They used to be fixed at 0.34 each, which meant spread
+    // one and spread twelve had identical thickness on both sides.
+    const leftStack = new THREE.Mesh(new THREE.BoxGeometry(4.32, 5.32, 1), pageBlockMaterial);
     const rightStack = leftStack.clone();
-    leftStack.position.set(-2.16, 0, -0.13);
-    rightStack.position.set(2.16, 0, -0.13);
+    /**
+     * The block's FRONT face stays put at BLOCK_FRONT so the pages always rest
+     * on top of it; only its back face moves as thickness shifts from one side
+     * to the other. Growing the box about its centre instead would push paper
+     * through the spread.
+     */
+    const BLOCK_FRONT = 0.04;
+    const seatStack = (stack: THREE.Mesh, x: number, depth: number) => {
+      stack.scale.z = Math.max(depth, 0.02);
+      stack.position.set(x, 0, BLOCK_FRONT - stack.scale.z / 2);
+    };
+    seatStack(leftStack, -2.16, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2);
+    seatStack(rightStack, 2.16, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2);
     leftStack.castShadow = rightStack.castShadow = true;
     leftStack.receiveShadow = rightStack.receiveShadow = true;
     book.add(leftStack, rightStack);
@@ -737,14 +860,6 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     turnPage.frustumCulled = false;
     turnPage.visible = false;
     book.add(turnPage);
-
-    const spine = new THREE.Mesh(
-      new THREE.BoxGeometry(0.09, 5.22, 0.22),
-      new THREE.MeshStandardMaterial({ color: 0x5e5040, roughness: 0.78 }),
-    );
-    spine.position.z = -0.04;
-    spine.castShadow = true;
-    book.add(spine);
 
     const shadowPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(11, 7),
@@ -919,6 +1034,28 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     const initialSpreadIndex = propsRef.current.snapshot.session.currentSpreadIndex;
     ensureSpreadLoaded(propsRef.current.snapshot.document.spreads[initialSpreadIndex]);
 
+    /**
+     * Framing is what the container asks for; pose is what the cover animation
+     * adds on top. Splitting them is what stops a window nudge mid-open from
+     * snapping the camera back to the open framing - resize() used to write
+     * position and lookAt directly, and a ResizeObserver fires constantly in a
+     * window docked beside a chat pane.
+     */
+    const framing = { aspect: 1.6, z: 12.05, y: -2.169, targetY: -0.08 };
+
+    function applyCamera() {
+      // u rises with how far the board has swung; s peaks at the midpoint,
+      // which is exactly where the swinging board reaches furthest toward the
+      // lens. Every term is zero at phi = 0, so the open pose is byte-identical
+      // to the framing the rest of the scene was built against.
+      const u = (1 - Math.cos(coverPhi)) / 2;
+      const s = Math.sin(coverPhi);
+      const dolly = 1.7 * u + Math.max(0, 14.05 - framing.z) * s;
+      camera.position.set(-0.95 * u, framing.y, framing.z + dolly);
+      camera.lookAt(2.39 * u, framing.targetY + 0.23 * u + 1.45 * s, 0);
+      camera.updateProjectionMatrix();
+    }
+
     function resize() {
       const width = host.clientWidth;
       const height = host.clientHeight;
@@ -926,14 +1063,23 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       camera.aspect = width / Math.max(height, 1);
       const verticalFov = THREE.MathUtils.degToRad(camera.fov);
       const horizontalFit = 9.7 / (2 * Math.tan(verticalFov / 2) * camera.aspect);
-      camera.position.z = Math.max(12.05, horizontalFit);
-      camera.position.y = camera.position.z * -0.18;
-      camera.lookAt(0, camera.aspect < 0.65 ? -1.75 : -0.08, 0);
-      camera.updateProjectionMatrix();
+      framing.aspect = camera.aspect;
+      framing.z = Math.max(12.05, horizontalFit);
+      framing.y = framing.z * -0.18;
+      // The aim used to step 1.67 world units in one frame as a window crossed
+      // aspect 0.65. Smoothstep makes the same decision continuously.
+      const t = THREE.MathUtils.smoothstep(camera.aspect, 0.58, 0.72);
+      framing.targetY = THREE.MathUtils.lerp(-1.75, -0.08, t);
+      applyCamera();
     }
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(host);
     resize();
+    // The joint defaults to its closed transform, so the case has to be placed
+    // once before the first frame or a reader who never triggers an open sees
+    // a shut book.
+    coverPhi = (1 - THREE.MathUtils.clamp(propsRef.current.openProgress, 0, 1)) * Math.PI;
+    applyCover();
 
     function setPointer(event: PointerEvent) {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -1308,6 +1454,23 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
 
       frame += 1;
       if (frame % 60 === 0) renderer.info.reset();
+      // The case follows the caller's progress rather than owning a timeline of
+      // its own, so opening and closing are the same code path read in
+      // opposite directions.
+      const requestedPhi = (1 - THREE.MathUtils.clamp(propsRef.current.openProgress, 0, 1)) * Math.PI;
+      if (Math.abs(requestedPhi - coverPhi) > 1e-4) {
+        coverPhi = requestedPhi;
+        applyCover();
+      }
+
+      // Thickness moves from the right stack to the left as the reader
+      // advances. The sum is conserved, so the book never appears to grow.
+      const spreadTotal = current.document.spreads.length;
+      const blockDepth = textBlockDepth(spreadTotal);
+      const leftShare = (current.session.currentSpreadIndex + 1) / (spreadTotal + 1);
+      seatStack(leftStack, -2.16, THREE.MathUtils.lerp(leftStack.scale.z, blockDepth * leftShare, delta));
+      seatStack(rightStack, 2.16, THREE.MathUtils.lerp(rightStack.scale.z, blockDepth * (1 - leftShare), delta));
+
       renderer.render(scene, camera);
       const expectedSceneElements = spread.elements;
       const sceneAssetsReady = sceneAssetsReadyForEvidence(
