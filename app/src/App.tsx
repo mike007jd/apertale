@@ -72,8 +72,13 @@ const forceFallback = runtimeParams.get("fallback") === "1";
  * range is ignored.
  */
 const forcedOpenProgress = (() => {
-  const raw = Number(runtimeParams.get("openProgress"));
-  return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : null;
+  // URLSearchParams.get returns null when the parameter is absent, and
+  // Number(null) is 0 - not NaN - so a missing parameter used to read as a
+  // valid "freeze the book shut", which froze it for every visitor.
+  const raw = runtimeParams.get("openProgress");
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
 })();
 const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: module.ThreeBook })));
 
