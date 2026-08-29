@@ -24,13 +24,6 @@ const generatedPath = join(appDir, "src", "design", "tokens.generated.css");
 const styles = readFileSync(stylesPath, "utf8");
 const generated = readFileSync(generatedPath, "utf8");
 
-/**
- * The fake open/close transition is scheduled for deletion when the real WebGL
- * cover open lands. Migrating its values first and deleting them second would
- * be wasted work, so it is excluded until the block itself goes away.
- */
-const PENDING_DELETION = /\.book-nav-[\s\S]*?(?=\n\.app-shell\.is-book-nav-active)/;
-
 /** Values a scale legitimately cannot express. Each needs a stated reason. */
 const EXEMPT = {
   radius: new Set([
@@ -62,24 +55,12 @@ function withLines(css) {
   return css.split("\n").map((text, index) => ({ text, line: index + 1 }));
 }
 
-/** Lines inside the pending-deletion block, so offenders there are not counted. */
-function pendingDeletionRange(css) {
-  const match = PENDING_DELETION.exec(css);
-  if (!match) return null;
-  const before = css.slice(0, match.index).split("\n").length;
-  return { from: before, to: before + match[0].split("\n").length - 1 };
-}
-
-const pending = pendingDeletionRange(styles);
-const isPending = (line) => Boolean(pending && line >= pending.from && line <= pending.to);
-
 const source = withLines(stripComments(styles));
 const failures = [];
 
 function scan({ label, pattern, exempt = new Set(), allowVar = true }) {
   const offenders = [];
   for (const { text, line } of source) {
-    if (isPending(line)) continue;
     for (const match of text.matchAll(pattern)) {
       const value = match[1].trim();
       if (allowVar && value.startsWith("var(")) continue;
@@ -174,10 +155,6 @@ console.log(
     `, elevation ${scaleSize("elev", /^\s*--elev-\d:/gm) / 2}` +
     `, space ${scaleSize("space", /^\s*--space-[a-z0-9]+:/gm)}`,
 );
-
-if (pending) {
-  console.log(`     skipped styles.css:${pending.from}-${pending.to} (.book-nav-* — pending deletion with the real 3D open)`);
-}
 
 if (failures.length && !process.argv.includes("--report")) {
   console.error(`\n${failures.length} check${failures.length === 1 ? "" : "s"} failed: ${failures.join(", ")}`);
