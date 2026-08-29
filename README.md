@@ -60,7 +60,7 @@ npm run audit:cutouts
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
-`npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 66 legacy v2 layers require genuine regeneration because visual review found clipped subjects, detached fragments, or contaminated edges. See [`app/qa/RELEASE_GATES_2026-08-27.md`](app/qa/RELEASE_GATES_2026-08-27.md) rather than treating the code/build passes as release completion.
+`npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 41 still-referenced legacy v2 layers require genuine regeneration because visual review found clipped subjects, detached fragments, or contaminated edges. Twenty-five retired v2 cutouts were removed after their sample spreads moved to grounded composite artwork. See the historical snapshot in [`app/qa/RELEASE_GATES_2026-08-27.md`](app/qa/RELEASE_GATES_2026-08-27.md) rather than treating the code/build passes as release completion.
 
 `npm run optimize:assets` is a maintenance command that rewrites checked-in runtime images. Run it only for an intentional asset-optimization change and review the resulting diff.
 
