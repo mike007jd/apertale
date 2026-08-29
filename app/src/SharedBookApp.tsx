@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Moon, Sun, X } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, X } from "@phosphor-icons/react";
+import { ThemeSwitch } from "./design/ThemeSwitch";
 import { hasReveal, resolveInteraction } from "./interaction";
 import {
   canTurnPage,
@@ -181,10 +182,7 @@ export function SharedBookApp() {
       <header className="topbar">
         <span className="wordmark" aria-label="Apertale shared book">Apertale</span>
         <div className="topbar-actions">
-          <div className="theme-switch" role="group" aria-label="Scene theme">
-            <button className={theme === "paper-atelier" ? "is-active" : ""} onClick={() => setTheme("paper-atelier")} aria-pressed={theme === "paper-atelier"}><Sun size={17} /> <span>Day</span></button>
-            <button className={theme === "midnight-desk" ? "is-active" : ""} onClick={() => setTheme("midnight-desk")} aria-pressed={theme === "midnight-desk"}><Moon size={17} /> <span>Night</span></button>
-          </div>
+          <ThemeSwitch theme={theme} onChange={setTheme} groupLabel="Scene theme" />
           <span className="preview-button">Read only</span>
         </div>
       </header>

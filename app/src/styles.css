@@ -34,10 +34,63 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Four states for every control, in one rule.
+ *
+ * Before this, 8 of 63 controls had any transition, 9 changed on hover with
+ * none declared so the change snapped, and 16 had no hover, press or focus
+ * state at all. That was structural, not an oversight: there was no shared
+ * place to put it, so each control either got hand-written states or got none.
+ *
+ * Press uses the independent `scale` property rather than `transform`, which
+ * is what makes one global rule possible — `scale` composes with the rotations
+ * and translations the shelf cards and page arrows already own, instead of
+ * overwriting them. */
+button,
+select,
+summary,
+[role="button"] {
+  transition:
+    scale var(--motion-feedback) var(--ease-object),
+    box-shadow var(--motion-feedback) var(--ease-info),
+    background-color var(--motion-feedback) var(--ease-info),
+    border-color var(--motion-feedback) var(--ease-info),
+    color var(--motion-feedback) var(--ease-info),
+    opacity var(--motion-feedback) var(--ease-info),
+    filter var(--motion-feedback) var(--ease-info);
+}
+
+button:hover:not(:disabled),
+[role="button"]:hover:not([aria-disabled="true"]) {
+  scale: 1.015;
+}
+
+/* A control sinks quickly and returns on the object easing, the way a physical
+   key does. Symmetric timing reads as a light switch, not as a press. */
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]) {
+  scale: .965;
+  transition-duration: 60ms;
+}
+
+button:disabled,
+select:disabled,
+[aria-disabled="true"] {
+  opacity: .48;
+  cursor: not-allowed;
+}
+
 button:focus-visible,
-select:focus-visible {
-  outline: 3px solid var(--accent-soft);
-  outline-offset: 3px;
+select:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button, select, summary, [role="button"] { transition-duration: 1ms; }
+  button:hover:not(:disabled), button:active:not(:disabled),
+  [role="button"]:hover, [role="button"]:active { scale: 1; }
 }
 
 .app-shell {
@@ -763,19 +816,20 @@ select:focus-visible {
 
 .theme-switch {
   display: flex;
-  padding: 4px;
+  padding: var(--space-1);
   border-radius: var(--radius-pill);
 }
 
 .theme-switch button {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   min-height: 35px;
   border: 0;
   border-radius: var(--radius-pill);
-  padding: 0 12px;
-  color: var(--muted);
+  padding: 0 var(--space-3);
+  color: var(--ink-3);
   background: transparent;
   cursor: pointer;
   transition:
@@ -787,10 +841,26 @@ select:focus-visible {
 
 .theme-switch button:active { transform: scale(.93); }
 
-.theme-switch button.is-active {
-  color: var(--ink);
+.theme-switch button.is-active { color: var(--ink); }
+
+/* The travelling thumb. Motion measures both option positions and animates the
+   real distance, so the selection reads as movement rather than as a colour
+   that changed while you were not looking. */
+.theme-switch .switch-thumb {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: var(--radius-pill);
   background: var(--surface-strong);
   box-shadow: var(--elev-1);
+}
+
+.theme-switch .switch-label {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .preview-button {

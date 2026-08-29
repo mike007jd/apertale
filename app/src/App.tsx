@@ -15,14 +15,12 @@ import {
   EyeSlash,
   Lock,
   LockOpen,
-  Moon,
   Minus,
   Plus,
   ImageSquare,
   LinkSimple,
   Sparkle,
   SpinnerGap,
-  Sun,
   UploadSimple,
   WarningCircle,
   X,
@@ -42,6 +40,9 @@ import {
   reduceCreationWorkshop,
   restoreCreationWorkshopAssets,
 } from "./creationWorkshop";
+import { AnimatePresence } from "motion/react";
+import { Panel, Toast } from "./design/primitives";
+import { ThemeSwitch } from "./design/ThemeSwitch";
 import { recordDiagnostic } from "./diagnostics";
 import { useFocusTrap } from "./focusTrap";
 import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete } from "./renderEvidence";
@@ -1104,10 +1105,7 @@ export function App() {
         {!snapshot.session.preview && <button className="library-button" onClick={openLibrary} aria-label="Open book library"><Books size={18} /> <span>Books</span></button>}
         <button className="wordmark" onClick={() => { bookEngine.setPreview(false); openLibrary(); }} aria-label="Open book library">Apertale</button>
         <div className="topbar-actions">
-          <div className="theme-switch" role="group" aria-label="Scene theme">
-            <button className={!isNight ? "is-active" : ""} onClick={() => setTheme("paper-atelier")} aria-label="Day theme" aria-pressed={!isNight}><Sun size={17} weight="regular" /> <span>Day</span></button>
-            <button className={isNight ? "is-active" : ""} onClick={() => setTheme("midnight-desk")} aria-label="Night theme" aria-pressed={isNight}><Moon size={17} weight="regular" /> <span>Night</span></button>
-          </div>
+          <ThemeSwitch theme={snapshot.session.sceneThemeId} onChange={setTheme} groupLabel="Scene theme" />
           <button className="preview-button" onClick={() => bookEngine.setPreview(!snapshot.session.preview)} aria-label={snapshot.session.preview ? "Exit preview" : "Preview book"}>
             {snapshot.session.preview ? <EyeSlash size={18} /> : <Eye size={18} />}
             <span>{snapshot.session.preview ? "Exit preview" : "Preview"}</span>
@@ -1129,10 +1127,7 @@ export function App() {
             <header className="library-topbar">
               <button className="library-wordmark" onClick={(event) => openBookFromLibrary("apertale-field-guide", event.currentTarget)} disabled={libraryBusy}><BookOpenText size={19} /> Apertale</button>
               <div className="library-topbar-actions">
-                <div className="theme-switch" role="group" aria-label="Library theme">
-                  <button className={!isNight ? "is-active" : ""} onClick={() => setTheme("paper-atelier")} aria-label="Day theme" aria-pressed={!isNight} disabled={libraryBusy}><Sun size={17} /><span>Day</span></button>
-                  <button className={isNight ? "is-active" : ""} onClick={() => setTheme("midnight-desk")} aria-label="Night theme" aria-pressed={isNight} disabled={libraryBusy}><Moon size={17} /><span>Night</span></button>
-                </div>
+                <ThemeSwitch theme={snapshot.session.sceneThemeId} onChange={setTheme} groupLabel="Library theme" disabled={libraryBusy} />
                 <button className="library-close" autoFocus onClick={() => openBookFromLibrary(snapshot.document.id)} aria-label="Return to open book" disabled={libraryBusy}><X size={20} /></button>
               </div>
             </header>
@@ -1330,8 +1325,9 @@ export function App() {
               <button onClick={toggleLock}>{selected.locked ? <Lock size={17} /> : <LockOpen size={17} />} {selected.locked ? "Unlock" : "Lock"}</button>
               <button className="icon-button" onClick={() => setShowMore(!showMore)} aria-label="More element controls"><DotsThree size={21} weight="bold" /></button>
             </div>
+            <AnimatePresence>
             {showMore && (
-              <div className={`element-panel ${selected.page === "right" ? "clears-right" : "clears-left"}`}>
+              <Panel key="element-panel" from="scale" className={`element-panel ${selected.page === "right" ? "clears-right" : "clears-left"}`}>
                 <div><span>Scale</span><button onClick={() => adjustSelected("scale", -0.1)} aria-label="Scale down" disabled={selected.locked}><Minus size={14} /></button><output>{Math.round(selected.transform.scaleX * 100)}%</output><button onClick={() => adjustSelected("scale", 0.1)} aria-label="Scale up" disabled={selected.locked}><Plus size={14} /></button></div>
                 <div><span>Rotate</span><button onClick={() => adjustSelected("rotate", -8)} aria-label="Rotate counter-clockwise" disabled={selected.locked}><ArrowCounterClockwise size={14} /></button><output>{Math.round(selected.transform.rotationDeg)}°</output><button onClick={() => adjustSelected("rotate", 8)} aria-label="Rotate clockwise" disabled={selected.locked}><ArrowClockwise size={14} /></button></div>
                 <label>
@@ -1361,8 +1357,9 @@ export function App() {
                     <option value="slow-orbit">Slow orbit</option>
                   </select>
                 </label>
-              </div>
+              </Panel>
             )}
+            </AnimatePresence>
           </div>
         )}
 
@@ -1424,13 +1421,17 @@ export function App() {
           </aside>
         )}
 
-        {snapshot.lastAction && !showCreateGuide && (
-          <div className={`agent-action agent-action-${snapshot.lastAction.phase}`} role="status">
-            {snapshot.lastAction.phase === "success" ? <Check size={16} weight="bold" /> : <Sparkle size={16} />}
-            <span>{snapshot.lastAction.summary}</span>
-            {snapshot.lastAction.undoToken && <button onClick={undoLastAction}>Undo</button>}
-          </div>
-        )}
+        {/* Status used to appear and vanish on a class toggle, so a reader who
+            looked away never learned that anything had happened. Presence
+            animation is the whole point of routing it through Toast. */}
+        <Toast
+          open={Boolean(snapshot.lastAction) && !showCreateGuide}
+          className={`agent-action agent-action-${snapshot.lastAction?.phase ?? "success"}`}
+        >
+          {snapshot.lastAction?.phase === "success" ? <Check size={16} weight="bold" /> : <Sparkle size={16} />}
+          <span>{snapshot.lastAction?.summary}</span>
+          {snapshot.lastAction?.undoToken && <button onClick={undoLastAction}>Undo</button>}
+        </Toast>
       </section>
 
       {!snapshot.session.preview && !showCreateGuide && (
@@ -1456,8 +1457,9 @@ export function App() {
         </footer>
       )}
 
+      <AnimatePresence>
       {showOutline && !snapshot.session.preview && !showCreateGuide && (
-        <aside className="story-outline" aria-label="Book outline">
+        <Panel key="story-outline" from="left" className="story-outline" aria-label="Book outline" role="complementary">
           <div className="outline-head"><div><span>Story outline</span><small>Revision {snapshot.document.revision}</small></div><button onClick={() => setShowOutline(false)} aria-label="Close outline"><X size={18} /></button></div>
           <ol>
             {snapshot.document.spreads.map((item, index) => (
@@ -1471,8 +1473,9 @@ export function App() {
             ><i /> {webMcpAvailable ? "WebMCP connected" : "WebMCP ready"}</span>
             {activeLibraryBook?.sample && <button onClick={confirmReset}><ArrowCounterClockwise size={15} /> Reset sample</button>}
           </div>
-        </aside>
+        </Panel>
       )}
+      </AnimatePresence>
 
       {showCreateGuide && !snapshot.session.preview && (
         <section className="creation-workshop" role="dialog" aria-modal="true" aria-labelledby="codex-guide-title">
