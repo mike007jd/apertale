@@ -23,6 +23,13 @@ type Props = {
    * current value itself.
    */
   openProgress?: { readonly current: number };
+  /**
+   * Where this book sits on the shelf, in viewport CSS pixels, or null
+   * when there is no slot to travel from. The renderer unprojects it so the
+   * case starts the open in the slot the reader clicked and lands back in it
+   * on the way home.
+   */
+  handoffRect?: { readonly current: { x: number; y: number; width: number; height: number } | null };
   onSelect: (elementId: string | null) => void;
   onHover: (elementId: string | null) => void;
   onMoveElement: (elementId: string, x: number, y: number) => void;
@@ -48,6 +55,8 @@ type PagePair = {
 
 /** Surfaces that never animate the case hold it fully open. */
 const STATIC_OPEN = { current: 1 } as const;
+/** Surfaces with no shelf behind them open in place. */
+const NO_HANDOFF = { current: null } as const;
 
 const PAGE_W = 4.2;
 const PAGE_H = 5.18;
@@ -610,10 +619,10 @@ function buildSceneElement(
   };
 }
 
-export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, openProgress = STATIC_OPEN, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
+export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, openProgress = STATIC_OPEN, handoffRect = NO_HANDOFF, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const propsRef = useRef({ snapshot, turn, mode, readOnly, openProgress, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
-  propsRef.current = { snapshot, turn, mode, readOnly, openProgress, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
+  const propsRef = useRef({ snapshot, turn, mode, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
+  propsRef.current = { snapshot, turn, mode, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
   const sceneStructureKey = JSON.stringify({
     id: snapshot.document.id,
     mode,
@@ -884,6 +893,40 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
      */
     let coverPhi = 0;
     let coverArtFadeIn = false;
+
+    const bookRestY = book.position.y;
+    const anchorPoint = new THREE.Vector3();
+
+    /**
+     * Turns the shelf card's screen rect into the world pose that would put the
+     * closed case exactly there, against the CURRENT camera - which matters
+     * because the camera pans and dollies through the same transition, so a
+     * pose computed once would drift away from the card it is meant to sit in.
+     *
+     * Returns null when there is no slot, in which case the case opens in place.
+     */
+    function shelfAnchor() {
+      const rect = propsRef.current.handoffRect?.current;
+      if (!rect) return null;
+      const box = host.getBoundingClientRect();
+      const width = box.width;
+      const height = box.height;
+      if (width < 2 || height < 2) return null;
+
+      const ndcX = ((rect.x + rect.width / 2 - box.left) / width) * 2 - 1;
+      const ndcY = -(((rect.y + rect.height / 2 - box.top) / height) * 2 - 1);
+      camera.updateMatrixWorld();
+      anchorPoint.set(ndcX, ndcY, 0.5).unproject(camera).sub(camera.position);
+      // Walk the ray out to the plane the book stands on.
+      if (Math.abs(anchorPoint.z) < 1e-6) return null;
+      const travel = -camera.position.z / anchorPoint.z;
+      const x = camera.position.x + anchorPoint.x * travel;
+      const y = camera.position.y + anchorPoint.y * travel;
+
+      const visibleHeight = 2 * Math.abs(camera.position.z) * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+      const worldPerPixel = visibleHeight / height;
+      return { x, y, scale: (rect.height * worldPerPixel) / BOARD_H };
+    }
     const openBoardZ = -(0.22 + BOARD_T) / 2;
 
     function applyCover() {
@@ -1158,14 +1201,18 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       // which is exactly where the swinging board reaches furthest toward the
       // lens. Every term is zero at phi = 0, so the open pose is byte-identical
       // to the framing the rest of the scene was built against.
-      const u = (1 - Math.cos(coverPhi)) / 2;
+      // Every offset is keyed to sin(phi), which is zero at both ends and peaks
+      // mid-swing. The closed pose therefore matches the shelf card exactly -
+      // face-on, normal framing - so the handoff has nothing to jump across,
+      // and the three-quarter view exists only while there is a moving board
+      // that needs it.
       const s = Math.sin(coverPhi);
       // The aim-up term was derived against a taller board and pushed the case
       // off the bottom of the frame at mid-swing; the dolly carries that work
       // instead, which keeps the whole book in view without tilting the desk.
-      const dolly = 1.7 * u + 4.2 * s;
-      camera.position.set(-3.2 * u, framing.y, framing.z + dolly);
-      camera.lookAt(2.05 * u, framing.targetY + 0.23 * u + 0.42 * s, 0);
+      const dolly = 4.2 * s;
+      camera.position.set(-3.2 * s, framing.y, framing.z + dolly);
+      camera.lookAt(2.05 * s, framing.targetY + 0.42 * s, 0);
       camera.updateProjectionMatrix();
     }
 
@@ -1591,6 +1638,24 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       if (Math.abs(requestedPhi - coverPhi) > 1e-4) {
         coverPhi = requestedPhi;
         applyCover();
+      }
+
+      // The case travels from its shelf slot to the reading position on the
+      // same progress that swings it open, so picking a book up is one gesture
+      // instead of a cut followed by an animation.
+      const settled = requestedOpen >= 0.999;
+      const anchor = settled ? null : shelfAnchor();
+      if (anchor) {
+        const t = THREE.MathUtils.clamp(requestedOpen, 0, 1);
+        // Arrive slightly ahead of the swing, so the last of the cover motion
+        // happens where the book has come to rest.
+        const travel = Math.min(1, t / 0.82);
+        book.position.x = THREE.MathUtils.lerp(anchor.x, 0, travel);
+        book.position.y = THREE.MathUtils.lerp(anchor.y, bookRestY, travel);
+        book.scale.setScalar(THREE.MathUtils.lerp(anchor.scale, 1, travel));
+      } else if (book.scale.x !== 1 || book.position.x !== 0) {
+        book.position.set(0, bookRestY, 0);
+        book.scale.setScalar(1);
       }
 
       // Thickness moves from the right stack to the left as the reader

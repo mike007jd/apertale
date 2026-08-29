@@ -695,6 +695,28 @@ export function App() {
     });
   }, [animateCase, hideLibrary, reducedMotion]);
 
+  /**
+   * Where the book sits on the shelf, in stage-relative CSS pixels.
+   *
+   * The renderer unprojects this so the case can start the open from the exact
+   * slot the reader clicked and land back in it on the way home. Without it the
+   * book opens in the middle of the screen with no relationship to the shelf,
+   * which reads as a cut rather than as picking a book up.
+   */
+  const handoffRect = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  const measureShelfCard = useCallback((bookId: string) => {
+    const card = librarySheet.current?.querySelector(`[data-book-id="${bookId}"] .library-cover-frame`);
+    if (!card) return null;
+    const c = card.getBoundingClientRect();
+    if (c.width < 2 || c.height < 2) return null;
+    // Viewport coordinates, not stage-relative: the stage is display:none at
+    // the moment the reader clicks, so its own rect is all zeros and any
+    // subtraction here would silently be against nothing. The renderer
+    // converts against the canvas it is actually drawing into.
+    return { x: c.left, y: c.top, width: c.width, height: c.height };
+  }, []);
+
   const openLibrary = useCallback(() => {
     if (showLibrary || openingBookRef.current) return;
     libraryOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -706,15 +728,26 @@ export function App() {
       recordDiagnostic("book:navigation-transition-reduced", { documentId: snapshot.document.id, direction: "close" });
       return;
     }
-    // The shelf is already mounted over the scene, so the case closes behind it
-    // and the reader sees the cover come back rather than a card being redrawn.
-    recordDiagnostic("book:cover-close-started", { documentId: snapshot.document.id });
-    animateCase(0, () => {
-      setLibraryMotion("idle");
-      recordDiagnostic("book:cover-close-settled", { documentId: snapshot.document.id });
-      window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
+    // The destination slot does not exist until the shelf has laid out, so the
+    // close waits two frames for a real rect before it starts travelling. A
+    // book that shuts in mid-air and then cuts to the shelf is the thing this
+    // is here to avoid.
+    libraryFrame.current = window.requestAnimationFrame(() => {
+      libraryFrame.current = window.requestAnimationFrame(() => {
+        libraryFrame.current = null;
+        handoffRect.current = measureShelfCard(snapshot.document.id);
+        recordDiagnostic("book:cover-close-started", {
+          documentId: snapshot.document.id,
+          anchored: Boolean(handoffRect.current),
+        });
+        animateCase(0, () => {
+          setLibraryMotion("idle");
+          recordDiagnostic("book:cover-close-settled", { documentId: snapshot.document.id });
+          window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
+        });
+      });
     });
-  }, [animateCase, reducedMotion, showLibrary, snapshot.document.id]);
+  }, [animateCase, measureShelfCard, reducedMotion, showLibrary, snapshot.document.id]);
 
   const handleBookLoading = useCallback((documentId: string) => {
     setSceneLoadingBookId(documentId);
@@ -824,6 +857,7 @@ export function App() {
     if (openingBookRef.current) return;
     const book = library.books.find((candidate) => candidate.id === bookId);
     if (!book) return;
+    handoffRect.current = measureShelfCard(bookId);
     // The three stages track real work: the renderer chunk arriving, this
     // spread's artwork decoding, and the scene being composed from both.
     const warm = prewarmReader(bookId);
@@ -1307,6 +1341,7 @@ export function App() {
               turn={showCreateGuide ? null : turn}
               mode={showCreateGuide ? "workshop" : "reader"}
               openProgress={openProgress}
+              handoffRect={handoffRect}
               onSelect={showCreateGuide ? () => undefined : (elementId) => { bookEngine.setSelection(elementId); setShowMore(false); }}
               onHover={showCreateGuide ? () => undefined : setHoveredId}
               onMoveElement={showCreateGuide ? () => undefined : (elementId, x, y) => humanEdit(elementId, { x, y })}
