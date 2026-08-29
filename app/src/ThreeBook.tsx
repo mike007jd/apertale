@@ -688,10 +688,13 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     // half of the same texture, including its interactive cut-paper layers.
     const stageScene = new THREE.Scene();
     const stageFlatScene = new THREE.Scene();
-    const stageFlatCamera = new THREE.OrthographicCamera(-PAGE_W, PAGE_W, PAGE_H / 2, -PAGE_H / 2, 0.1, 30);
-    stageFlatCamera.position.set(0, 0, 12);
-    const stageWorldCamera = new THREE.OrthographicCamera(-PAGE_W, PAGE_W, PAGE_H / 2, -PAGE_H / 2, 0.1, 30);
-    stageWorldCamera.position.set(0, 0, 12);
+    // One projection, not two. A three.js camera is not owned by a scene, and
+    // these were built with the same frustum, placed at the same point, never
+    // rotated and re-projected together in a single loop - so "keep these two
+    // identical" was a standing invariant a reader had to check eight sites to
+    // discover was never violated.
+    const stageCamera = new THREE.OrthographicCamera(-PAGE_W, PAGE_W, PAGE_H / 2, -PAGE_H / 2, 0.1, 30);
+    stageCamera.position.set(0, 0, 12);
     const stageBackgroundMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const stageBackgroundGeometry = new THREE.PlaneGeometry(PAGE_W * 2, PAGE_H);
     const stageBackground = new THREE.Mesh(stageBackgroundGeometry, stageBackgroundMaterial);
@@ -1109,13 +1112,11 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
 
     let lastTurnCaptureKey = "";
     const setStageCameraView = (view: "full" | "left" | "right") => {
-      [stageFlatCamera, stageWorldCamera].forEach((camera) => {
-        camera.left = view === "right" ? 0 : -PAGE_W;
-        camera.right = view === "left" ? 0 : PAGE_W;
-        camera.top = PAGE_H / 2;
-        camera.bottom = -PAGE_H / 2;
-        camera.updateProjectionMatrix();
-      });
+      stageCamera.left = view === "right" ? 0 : -PAGE_W;
+      stageCamera.right = view === "left" ? 0 : PAGE_W;
+      stageCamera.top = PAGE_H / 2;
+      stageCamera.bottom = -PAGE_H / 2;
+      stageCamera.updateProjectionMatrix();
     };
 
     const clearColorScratch = new THREE.Color();
@@ -1151,13 +1152,13 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       renderer.clear(true, true, true);
       stageBackground.visible = true;
       stageOverlay.visible = false;
-      renderer.render(stageFlatScene, stageFlatCamera);
+      renderer.render(stageFlatScene, stageCamera);
       renderer.clearDepth();
-      renderer.render(stageScene, stageWorldCamera);
+      renderer.render(stageScene, stageCamera);
       renderer.clearDepth();
       stageBackground.visible = false;
       stageOverlay.visible = true;
-      renderer.render(stageFlatScene, stageFlatCamera);
+      renderer.render(stageFlatScene, stageCamera);
       stageBackground.visible = true;
       stageOverlay.visible = true;
       renderer.setRenderTarget(priorTarget);
@@ -1331,7 +1332,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     }
 
     function pickElement() {
-      raycaster.setFromCamera(stagePointer, stageWorldCamera);
+      raycaster.setFromCamera(stagePointer, stageCamera);
       const roots = currentSpread()
         .elements.map((element) => sceneElements.get(element.id))
         .filter((item): item is SceneElement => Boolean(item) && Boolean(item?.root.visible))
