@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ArrowCounterClockwise,
@@ -386,6 +386,7 @@ export function App() {
   const reducedMotionRef = useRef(reducedMotion);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const addPhotoButton = useRef<HTMLButtonElement | null>(null);
+  const stage = useRef<HTMLElement | null>(null);
   const librarySheet = useRef<HTMLDivElement | null>(null);
   const libraryOpener = useRef<HTMLElement | null>(null);
   const createGuideCard = useRef<HTMLDivElement | null>(null);
@@ -595,6 +596,47 @@ export function App() {
     : null;
   const selectedInteraction = selected ? resolveInteraction(selected) : null;
   const hovered = hoveredId ? spread.elements.find((element) => element.id === hoveredId) ?? null : null;
+
+  /**
+   * Anchor the selection ring when there is no renderer to anchor it.
+   *
+   * The WebGL scene projects the focused element every frame into
+   * --selection-x/y. On the flat fallback nobody writes them, so a selection
+   * made from the element rail left the ring parked at its CSS default,
+   * circling whatever happened to sit near the middle of the stage.
+   *
+   * The composited fallback places its own layers at a percentage of the
+   * book's padding box, so reusing that arithmetic puts the ring exactly on
+   * the layer it belongs to rather than approximately near it.
+   */
+  useLayoutEffect(() => {
+    const host = stage.current;
+    // Left untouched while the renderer owns these properties: it writes them
+    // every frame, and clearing them here would blank the ring for one frame
+    // on every selection change.
+    if (!host || renderWebGl || !selected) return undefined;
+    const place = () => {
+      const book = host.querySelector<HTMLElement>(".fallback-book.is-composited");
+      if (!book) return;
+      const hostBox = host.getBoundingClientRect();
+      const bookBox = book.getBoundingClientRect();
+      // clientLeft/clientTop are the border widths, and the layers are
+      // positioned against the padding box the border encloses.
+      const left = bookBox.left - hostBox.left + book.clientLeft;
+      const top = bookBox.top - hostBox.top + book.clientTop;
+      const acrossSpread = (selected.page === "right" ? 0.5 : 0) + selected.transform.x * 0.5;
+      host.style.setProperty("--selection-x", `${left + acrossSpread * book.clientWidth}px`);
+      host.style.setProperty("--selection-y", `${top + selected.transform.y * book.clientHeight}px`);
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(host);
+    return () => {
+      observer.disconnect();
+      host.style.removeProperty("--selection-x");
+      host.style.removeProperty("--selection-y");
+    };
+  }, [renderWebGl, selected]);
   const isNight = snapshot.session.sceneThemeId === "midnight-desk";
   const pageTurnNav = pageTurnNavDisabled(
     turn,
@@ -963,29 +1005,6 @@ export function App() {
   }, [closeCodexGuide, closeElementAgentGuide, hideLibrary, libraryMotion, openBookFromLibrary, openingBook, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
 
   useEffect(() => {
-    if (!showLibrary) return undefined;
-    const sheet = librarySheet.current;
-    if (!sheet) return undefined;
-    const keepFocusInside = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const controls = [...sheet.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-        .filter((control) => !control.hasAttribute("disabled"));
-      if (controls.length === 0) return;
-      const first = controls[0];
-      const last = controls.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    sheet.addEventListener("keydown", keepFocusInside);
-    return () => sheet.removeEventListener("keydown", keepFocusInside);
-  }, [showLibrary]);
-
-  useEffect(() => {
     if (!showLibrary || libraryMotion !== "idle") return;
     window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
   }, [libraryMotion, showLibrary]);
@@ -1312,6 +1331,7 @@ export function App() {
 
 
       <section
+        ref={stage}
         className={`stage ${showCreateGuide ? "is-creation-workshop" : ""}`}
         /**
          * Hidden only while the shelf is SETTLED over it. `hidden` applies
@@ -1335,6 +1355,10 @@ export function App() {
               snapshot={showCreateGuide ? workshopSnapshot : snapshot}
               turn={showCreateGuide ? null : turn}
               mode={showCreateGuide ? "workshop" : "reader"}
+              // Preview is a reader's view, and the workshop book is a prop.
+              // Neither may be dragged, and on a phone the canvas is the only
+              // surface large enough that a stray drag reaches it at all.
+              readOnly={snapshot.session.preview || showCreateGuide}
               openProgress={openProgress}
               handoffRect={handoffRect}
               onSelect={showCreateGuide ? () => undefined : (elementId) => { bookEngine.setSelection(elementId); setShowMore(false); }}

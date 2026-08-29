@@ -1019,10 +1019,9 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     turnPage.visible = false;
     book.add(turnPage);
 
-    const shadowPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(11, 7),
-      new THREE.ShadowMaterial({ color: 0x130d08, opacity: 0.22 }),
-    );
+    const shadowPlaneGeometry = new THREE.PlaneGeometry(11, 7);
+    const shadowPlaneMaterial = new THREE.ShadowMaterial({ color: 0x130d08, opacity: 0.22 });
+    const shadowPlane = new THREE.Mesh(shadowPlaneGeometry, shadowPlaneMaterial);
     shadowPlane.position.z = -0.39;
     shadowPlane.receiveShadow = true;
     book.add(shadowPlane);
@@ -1235,6 +1234,19 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       camera.updateProjectionMatrix();
     }
 
+    /**
+     * Where the canvas sits inside the stage, in CSS pixels.
+     *
+     * The selection ring is positioned against the stage, but the projection
+     * that drives it is measured against the canvas. On a desktop the two
+     * share a frame, so the difference was invisible; phone portrait insets
+     * the scene below a 62px reading band, and the ring landed exactly that
+     * far above the element it was supposed to circle. Cached rather than read
+     * per frame because the offset can only change when the host's box does,
+     * which is precisely when the observer below fires.
+     */
+    const sceneOffset = { x: 0, y: 0 };
+
     function resize() {
       const width = host.clientWidth;
       const height = host.clientHeight;
@@ -1243,6 +1255,12 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       // infinite camera distance, which then survives the next real resize as
       // NaN. Keep the last good framing until the element has a size.
       if (width < 2 || height < 2) return;
+      // Guarded on offsetParent so a future layout that repositions the scene
+      // against something other than the stage degrades to "no offset" rather
+      // than to a confidently wrong one.
+      const framed = host.offsetParent === host.parentElement;
+      sceneOffset.x = framed ? host.offsetLeft : 0;
+      sceneOffset.y = framed ? host.offsetTop : 0;
       renderer.setSize(width, height, false);
       camera.aspect = width / Math.max(height, 1);
       const verticalFov = THREE.MathUtils.degToRad(camera.fov);
@@ -1577,8 +1595,8 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
           anchorWorld.set(anchorWorld.x, anchorWorld.y, 0.42);
           book.localToWorld(anchorWorld);
           anchorWorld.project(camera);
-          const screenX = (anchorWorld.x * 0.5 + 0.5) * host.clientWidth;
-          const screenY = (-anchorWorld.y * 0.5 + 0.5) * host.clientHeight;
+          const screenX = sceneOffset.x + (anchorWorld.x * 0.5 + 0.5) * host.clientWidth;
+          const screenY = sceneOffset.y + (-anchorWorld.y * 0.5 + 0.5) * host.clientHeight;
           host.parentElement?.style.setProperty("--selection-x", `${screenX}px`);
           host.parentElement?.style.setProperty("--selection-y", `${screenY}px`);
         }
@@ -1741,8 +1759,28 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         overlay.dispose();
       });
       sceneElements.forEach((sceneElement) => sceneElement.dispose());
+      // The case, the two text blocks and the contact shadow are built once per
+      // scene and were never released, so every trip out to the shelf and back
+      // left one more copy of them resident on the GPU. Meshes that share a
+      // buffer are freed once: the right stack is a clone of the left, and both
+      // boards paint from the same cover and endpaper materials.
       leftGeometry.dispose();
       rightGeometry.dispose();
+      leftMaterial.dispose();
+      rightMaterial.dispose();
+      spineShell.geometry.dispose();
+      spineMaterial.dispose();
+      rearBoard.geometry.dispose();
+      frontBoard.geometry.dispose();
+      coverMaterial.dispose();
+      endpaperMaterial.dispose();
+      coverArt.geometry.dispose();
+      coverArtMaterial.map?.dispose();
+      coverArtMaterial.dispose();
+      leftStack.geometry.dispose();
+      pageBlockMaterial.dispose();
+      shadowPlaneGeometry.dispose();
+      shadowPlaneMaterial.dispose();
       turnLeaf.geometry.dispose();
       turnFrontMaterial.dispose();
       turnBackMaterial.dispose();
