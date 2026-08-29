@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import worker, { handleRequest } from "../worker/index.js";
 
@@ -87,8 +87,15 @@ test("emits the files required by Sites packaging", async () => {
   await access(new URL("../dist/client/apertale-manifest.json", import.meta.url));
   await access(new URL("../dist/server/index.js", import.meta.url));
   await access(new URL("../dist/server/bookShareApi.js", import.meta.url));
+  await access(new URL("../dist/server/bundledAssetCatalog.js", import.meta.url));
   await access(new URL("../dist/server/bundledAssetCatalog.json", import.meta.url));
+  await access(new URL("../dist/server/qualityRubric.js", import.meta.url));
   await access(new URL("../dist/server/qualityRubric.json", import.meta.url));
   await access(new URL("../dist/server/d1BookRepository.js", import.meta.url));
   await access(new URL("../dist/.openai/hosting.json", import.meta.url));
+
+  const workerSource = await readFile(new URL("../dist/server/bookShareApi.js", import.meta.url), "utf8");
+  assert.doesNotMatch(workerSource, /\bwith\s*\{\s*type\s*:/);
+  assert.match(workerSource, /from "\.\/bundledAssetCatalog\.js"/);
+  assert.match(workerSource, /from "\.\/qualityRubric\.js"/);
 });
