@@ -1,0 +1,504 @@
+{
+  "ok": true,
+  "currentRevision": 13,
+  "qualityReport": {
+    "contractVersion": 1,
+    "rubricVersion": 1,
+    "documentId": "book-the-starlight-stitch-ed11916a",
+    "reviewedRevision": 13,
+    "round": 1,
+    "maxRounds": 2,
+    "creationBrief": {
+      "audience": "Families with children ages six and up",
+      "bookType": "illustrated-storybook",
+      "contractVersion": 2,
+      "premise": "A tiny star and two friends mend a path of light home.",
+      "sourceAssets": [],
+      "spreadCount": 1,
+      "visualDirection": "Premium tactile cut-paper storybook with midnight blue, coral, and warm gold"
+    },
+    "status": "blocked",
+    "checks": [
+      {
+        "criterionId": "missing-or-fallback-assets",
+        "outcome": "pass",
+        "message": "A dedicated cover asset is present.",
+        "evidence": [
+          {
+            "scope": "cover",
+            "locator": "[data-book-id] .library-cover-frame img",
+            "description": "Creator shelf cover"
+          }
+        ]
+      },
+      {
+        "criterionId": "missing-or-fallback-assets",
+        "outcome": "pass",
+        "message": "Spread 1 has a final base.",
+        "evidence": [
+          {
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window",
+            "locator": ".book-scene canvas",
+            "description": "Rendered spread 1: A Star at the Window"
+          }
+        ]
+      },
+      {
+        "criterionId": "layered-spread-contract",
+        "outcome": "pass",
+        "message": "Spread 1 has one final base and 2 foreground layers.",
+        "evidence": [
+          {
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window",
+            "locator": ".book-scene canvas",
+            "description": "Rendered spread 1: A Star at the Window"
+          }
+        ]
+      },
+      {
+        "criterionId": "meaningful-interaction",
+        "outcome": "pass",
+        "message": "Spread 1 has an authored interaction.",
+        "evidence": [
+          {
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window",
+            "locator": ".book-scene canvas",
+            "description": "Rendered spread 1: A Star at the Window"
+          }
+        ]
+      },
+      {
+        "criterionId": "text-safety-readability",
+        "outcome": "pass",
+        "message": "Spread 1 copy is within the authoring bounds.",
+        "evidence": [
+          {
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window",
+            "locator": ".book-scene canvas",
+            "description": "Rendered spread 1: A Star at the Window"
+          }
+        ]
+      },
+      {
+        "criterionId": "creation-asset-policy",
+        "outcome": "pass",
+        "message": "Every spread follows the ready creation asset policy.",
+        "evidence": [
+          {
+            "scope": "book",
+            "locator": ".book-app",
+            "description": "Creation brief and final spread asset policy"
+          }
+        ]
+      },
+      {
+        "criterionId": "render-evidence-completeness",
+        "outcome": "pass",
+        "message": "The current revision has rendered cover and spread evidence.",
+        "evidence": [
+          {
+            "scope": "cover",
+            "locator": "[data-book-id] .library-cover-frame img",
+            "description": "Creator shelf cover"
+          }
+        ]
+      },
+      {
+        "criterionId": "cover-appeal",
+        "evidence": [
+          {
+            "description": "04-created-book-shelf-cover.png",
+            "locator": "[data-book-id=\"book-the-starlight-stitch-ed11916a\"] .library-cover-frame img",
+            "scope": "cover"
+          }
+        ],
+        "message": "The dedicated portrait cover is legible and shelf-ready.",
+        "outcome": "pass"
+      },
+      {
+        "criterionId": "spread-composition",
+        "evidence": [
+          {
+            "description": "03-story-render-before-critique.png",
+            "locator": ".book-scene canvas",
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window"
+          }
+        ],
+        "message": "The foreground characters duplicate characters already painted into the final base, creating collisions and inconsistent scale.",
+        "outcome": "blocker",
+        "suggestedPatch": "Remove the duplicate character layers and replace them with restrained native-alpha light or atmosphere layers; render again."
+      },
+      {
+        "criterionId": "text-safety-readability",
+        "evidence": [
+          {
+            "description": "03-story-render-before-critique.png",
+            "locator": ".book-scene canvas",
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window"
+          }
+        ],
+        "message": "text-safety-readability was inspected in the actual rendered spread.",
+        "outcome": "pass"
+      },
+      {
+        "criterionId": "visual-character-consistency",
+        "evidence": [
+          {
+            "description": "03-story-render-before-critique.png",
+            "locator": ".book-scene canvas",
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window"
+          }
+        ],
+        "message": "visual-character-consistency was inspected in the actual rendered spread.",
+        "outcome": "pass"
+      },
+      {
+        "criterionId": "photo-fidelity-integration",
+        "evidence": [
+          {
+            "description": "03-story-render-before-critique.png",
+            "locator": ".book-scene canvas",
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window"
+          }
+        ],
+        "message": "photo-fidelity-integration was inspected in the actual rendered spread.",
+        "outcome": "pass"
+      },
+      {
+        "criterionId": "crop-skew-occlusion-scale",
+        "evidence": [
+          {
+            "description": "03-story-render-before-critique.png",
+            "locator": ".book-scene canvas",
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window"
+          }
+        ],
+        "message": "The foreground characters duplicate characters already painted into the final base, creating collisions and inconsistent scale.",
+        "outcome": "blocker",
+        "suggestedPatch": "Remove the duplicate character layers and replace them with restrained native-alpha light or atmosphere layers; render again."
+      },
+      {
+        "criterionId": "alpha-edge-matte",
+        "evidence": [
+          {
+            "description": "03-story-render-before-critique.png",
+            "locator": ".book-scene canvas",
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window"
+          }
+        ],
+        "message": "alpha-edge-matte was inspected in the actual rendered spread.",
+        "outcome": "pass"
+      },
+      {
+        "criterionId": "narrative-coherence",
+        "evidence": [
+          {
+            "description": "03-story-render-before-critique.png",
+            "locator": ".book-scene canvas",
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window"
+          }
+        ],
+        "message": "narrative-coherence was inspected in the actual rendered spread.",
+        "outcome": "pass"
+      },
+      {
+        "criterionId": "meaningful-interaction",
+        "evidence": [
+          {
+            "description": "03-story-render-before-critique.png",
+            "locator": ".book-scene canvas",
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window"
+          }
+        ],
+        "message": "meaningful-interaction was inspected in the actual rendered spread.",
+        "outcome": "pass"
+      },
+      {
+        "criterionId": "premium-sample-value",
+        "evidence": [
+          {
+            "description": "03-story-render-before-critique.png",
+            "locator": ".book-scene canvas",
+            "scope": "spread",
+            "spreadId": "1-a-star-at-the-window"
+          }
+        ],
+        "message": "The foreground characters duplicate characters already painted into the final base, creating collisions and inconsistent scale.",
+        "outcome": "blocker",
+        "suggestedPatch": "Remove the duplicate character layers and replace them with restrained native-alpha light or atmosphere layers; render again."
+      }
+    ],
+    "blockerCount": 3,
+    "warningCount": 0,
+    "noteCount": 0,
+    "warningsRecorded": true,
+    "sampleReady": false,
+    "publishAllowed": false,
+    "summary": "The base and cover are strong, but duplicated character layers make the spread unfit for promotion."
+  },
+  "qualityGate": {
+    "status": "blocked",
+    "message": "Quality blockers must be fixed before publishing.",
+    "report": {
+      "contractVersion": 1,
+      "rubricVersion": 1,
+      "documentId": "book-the-starlight-stitch-ed11916a",
+      "reviewedRevision": 13,
+      "round": 1,
+      "maxRounds": 2,
+      "creationBrief": {
+        "audience": "Families with children ages six and up",
+        "bookType": "illustrated-storybook",
+        "contractVersion": 2,
+        "premise": "A tiny star and two friends mend a path of light home.",
+        "sourceAssets": [],
+        "spreadCount": 1,
+        "visualDirection": "Premium tactile cut-paper storybook with midnight blue, coral, and warm gold"
+      },
+      "status": "blocked",
+      "checks": [
+        {
+          "criterionId": "missing-or-fallback-assets",
+          "outcome": "pass",
+          "message": "A dedicated cover asset is present.",
+          "evidence": [
+            {
+              "scope": "cover",
+              "locator": "[data-book-id] .library-cover-frame img",
+              "description": "Creator shelf cover"
+            }
+          ]
+        },
+        {
+          "criterionId": "missing-or-fallback-assets",
+          "outcome": "pass",
+          "message": "Spread 1 has a final base.",
+          "evidence": [
+            {
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window",
+              "locator": ".book-scene canvas",
+              "description": "Rendered spread 1: A Star at the Window"
+            }
+          ]
+        },
+        {
+          "criterionId": "layered-spread-contract",
+          "outcome": "pass",
+          "message": "Spread 1 has one final base and 2 foreground layers.",
+          "evidence": [
+            {
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window",
+              "locator": ".book-scene canvas",
+              "description": "Rendered spread 1: A Star at the Window"
+            }
+          ]
+        },
+        {
+          "criterionId": "meaningful-interaction",
+          "outcome": "pass",
+          "message": "Spread 1 has an authored interaction.",
+          "evidence": [
+            {
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window",
+              "locator": ".book-scene canvas",
+              "description": "Rendered spread 1: A Star at the Window"
+            }
+          ]
+        },
+        {
+          "criterionId": "text-safety-readability",
+          "outcome": "pass",
+          "message": "Spread 1 copy is within the authoring bounds.",
+          "evidence": [
+            {
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window",
+              "locator": ".book-scene canvas",
+              "description": "Rendered spread 1: A Star at the Window"
+            }
+          ]
+        },
+        {
+          "criterionId": "creation-asset-policy",
+          "outcome": "pass",
+          "message": "Every spread follows the ready creation asset policy.",
+          "evidence": [
+            {
+              "scope": "book",
+              "locator": ".book-app",
+              "description": "Creation brief and final spread asset policy"
+            }
+          ]
+        },
+        {
+          "criterionId": "render-evidence-completeness",
+          "outcome": "pass",
+          "message": "The current revision has rendered cover and spread evidence.",
+          "evidence": [
+            {
+              "scope": "cover",
+              "locator": "[data-book-id] .library-cover-frame img",
+              "description": "Creator shelf cover"
+            }
+          ]
+        },
+        {
+          "criterionId": "cover-appeal",
+          "evidence": [
+            {
+              "description": "04-created-book-shelf-cover.png",
+              "locator": "[data-book-id=\"book-the-starlight-stitch-ed11916a\"] .library-cover-frame img",
+              "scope": "cover"
+            }
+          ],
+          "message": "The dedicated portrait cover is legible and shelf-ready.",
+          "outcome": "pass"
+        },
+        {
+          "criterionId": "spread-composition",
+          "evidence": [
+            {
+              "description": "03-story-render-before-critique.png",
+              "locator": ".book-scene canvas",
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window"
+            }
+          ],
+          "message": "The foreground characters duplicate characters already painted into the final base, creating collisions and inconsistent scale.",
+          "outcome": "blocker",
+          "suggestedPatch": "Remove the duplicate character layers and replace them with restrained native-alpha light or atmosphere layers; render again."
+        },
+        {
+          "criterionId": "text-safety-readability",
+          "evidence": [
+            {
+              "description": "03-story-render-before-critique.png",
+              "locator": ".book-scene canvas",
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window"
+            }
+          ],
+          "message": "text-safety-readability was inspected in the actual rendered spread.",
+          "outcome": "pass"
+        },
+        {
+          "criterionId": "visual-character-consistency",
+          "evidence": [
+            {
+              "description": "03-story-render-before-critique.png",
+              "locator": ".book-scene canvas",
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window"
+            }
+          ],
+          "message": "visual-character-consistency was inspected in the actual rendered spread.",
+          "outcome": "pass"
+        },
+        {
+          "criterionId": "photo-fidelity-integration",
+          "evidence": [
+            {
+              "description": "03-story-render-before-critique.png",
+              "locator": ".book-scene canvas",
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window"
+            }
+          ],
+          "message": "photo-fidelity-integration was inspected in the actual rendered spread.",
+          "outcome": "pass"
+        },
+        {
+          "criterionId": "crop-skew-occlusion-scale",
+          "evidence": [
+            {
+              "description": "03-story-render-before-critique.png",
+              "locator": ".book-scene canvas",
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window"
+            }
+          ],
+          "message": "The foreground characters duplicate characters already painted into the final base, creating collisions and inconsistent scale.",
+          "outcome": "blocker",
+          "suggestedPatch": "Remove the duplicate character layers and replace them with restrained native-alpha light or atmosphere layers; render again."
+        },
+        {
+          "criterionId": "alpha-edge-matte",
+          "evidence": [
+            {
+              "description": "03-story-render-before-critique.png",
+              "locator": ".book-scene canvas",
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window"
+            }
+          ],
+          "message": "alpha-edge-matte was inspected in the actual rendered spread.",
+          "outcome": "pass"
+        },
+        {
+          "criterionId": "narrative-coherence",
+          "evidence": [
+            {
+              "description": "03-story-render-before-critique.png",
+              "locator": ".book-scene canvas",
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window"
+            }
+          ],
+          "message": "narrative-coherence was inspected in the actual rendered spread.",
+          "outcome": "pass"
+        },
+        {
+          "criterionId": "meaningful-interaction",
+          "evidence": [
+            {
+              "description": "03-story-render-before-critique.png",
+              "locator": ".book-scene canvas",
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window"
+            }
+          ],
+          "message": "meaningful-interaction was inspected in the actual rendered spread.",
+          "outcome": "pass"
+        },
+        {
+          "criterionId": "premium-sample-value",
+          "evidence": [
+            {
+              "description": "03-story-render-before-critique.png",
+              "locator": ".book-scene canvas",
+              "scope": "spread",
+              "spreadId": "1-a-star-at-the-window"
+            }
+          ],
+          "message": "The foreground characters duplicate characters already painted into the final base, creating collisions and inconsistent scale.",
+          "outcome": "blocker",
+          "suggestedPatch": "Remove the duplicate character layers and replace them with restrained native-alpha light or atmosphere layers; render again."
+        }
+      ],
+      "blockerCount": 3,
+      "warningCount": 0,
+      "noteCount": 0,
+      "warningsRecorded": true,
+      "sampleReady": false,
+      "publishAllowed": false,
+      "summary": "The base and cover are strong, but duplicated character layers make the spread unfit for promotion."
+    },
+    "nextRound": 2,
+    "remainingRounds": 1
+  }
+}

@@ -18,6 +18,8 @@ WebMCP is agent-neutral, not universally callable. Any Agent whose browser or ho
 - IndexedDB Blob storage for user-imported PNG/JPEG/WebP assets, with browser-local resize/compression from source files up to 12 MB to stored assets no larger than 1.5 MB, a cross-book local asset directory, stable IDs, and reload-safe object URL resolution.
 - A persistent multi-book library; Sample Books are independent projects rather than unrelated spreads in one document. Curated illustrations are labeled as samples.
 - Shared human/WebMCP command engine with revision checks, idempotency, visible provenance, and exact undo tokens.
+- A versioned creation-readiness gate that returns blocking fields and direct questions, validates real source assets/identity constraints, and is enforced again by create.
+- A shared quality rubric with deterministic checks, real-render evidence, explicit AI visual critique, a two-round repair ceiling, and fail-closed Share/Publish.
 - Responsive desktop/mobile layouts, reduced-motion behavior, and 2D fallback.
 
 ## WebMCP tool surface
@@ -33,7 +35,9 @@ The page registers exactly six project-level tools through `document.modelContex
 
 Mutating tools require a `requestId` and the current `expectedRevision`. Tool callbacks return compact JSON strings, and successful document mutations include an exact `undoToken`.
 
-`get_project_context` defaults to a compact response and accepts focused `selected-reveal`, `assets`, or `authoring-guide` detail when the Agent needs the full knowledge card, reusable local-import directory, or the site-native two-phase create-quality contract. Create flows must read and obey `authoring-guide` before `manage_book` create; the registration session rejects create until that preflight succeeds. `manage_book` opens and creates independent books and assigns the active book a validated browser-local portrait cover. `apply_scene_patch` covers Lift, transform, structured reveal, motion, interaction, add/remove, and ordering through one bounded atomic contract. A local `asset:` ID is accepted only after the IndexedDB adapter proves that it exists. Internal fine-grained commands remain shared with the human UI but are not exposed as additional WebMCP tools.
+`get_project_context` defaults to a compact response. Focused details add `authoring-guide`, structured `creation-readiness`, local `assets`, a selected reveal, or the versioned `quality-review` rubric/render manifest. Create reads the guide, checks readiness, asks every blocking question, and reuses the same brief; the command runs that gate again and fails closed. A legacy personal book can use the one-time, revision-bound `adopt-creation-brief` action with the same gate; samples and books that already own a brief cannot be reclassified. After real rendering, `manage_book` explicitly begins and records at most two critique rounds. `manage_book` also opens books and assigns a validated browser-local portrait cover. `apply_scene_patch` covers Lift, transform, structured reveal, motion, interaction, add/remove, and ordering through one bounded atomic contract. A local `asset:` ID is accepted only after the IndexedDB adapter proves that it exists. Internal fine-grained commands remain shared with the human UI but are not exposed as additional WebMCP tools.
+
+Deterministic checks prove structural facts such as cover/final-base presence, an original-composite reference, separate personal-photo provenance, 2–4 foreground layers, meaningful interaction, text bounds, and current-revision render events. WebGL waits for the exact spread asset/texture set; the 2D fallback composes the same final base and non-procedural foregrounds, and neither path records evidence after a load failure. These checks do not claim aesthetic quality. The Agent must inspect real cover/spread frames for composition, readability, consistency, photo fidelity, alpha edges, and promotional value, then submit evidence-backed blocker/warn/note results. Blockers close Share; recorded warnings may proceed only in a sample-ready report. The Worker accepts checked-in `/assets/...` references only from the generated bundled-asset catalog and revalidates the same brief/provenance policy.
 
 The six registration promises are treated as one fail-closed set. One registration failure aborts the shared lifecycle signal and removes any partial registration. Both Vite and the deployment Worker send `Origin-Agent-Cluster: ?1` and `Permissions-Policy: tools=(self)`.
 
@@ -50,6 +54,8 @@ npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
 `npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 66 legacy v2 layers need regeneration rather than padding-only repair. The code, unit, build, and Sites checks remain independently green.
+
+`npm run audit:cutouts` and `npm run optimize:assets` shell out to the ImageMagick 7 CLI, so they require a `magick` executable on `PATH` (install ImageMagick 7, for example with `brew install imagemagick` on macOS); without it the audit reports an ImageMagick inspection failure for every file.
 
 `npm run optimize:assets` is a maintenance command that rewrites checked-in runtime images. Use it only for a deliberate asset-optimization batch and review the generated diff.
 
@@ -69,6 +75,8 @@ The production build is emitted as a host-portable bundle:
 - `src/bookEngine.ts` — authoritative document/session state, persistence, revision checks, idempotency, and exact undo.
 - `src/pageTurn.ts` — shared editor/reader page-turn session lifecycle and physical-page geometry helpers.
 - `src/creationWorkshop.ts` — creation setup state, ordered local-asset restoration, and brief materialization.
+- `src/authoringContract.ts` and `src/creationBrief.ts` — versioned readiness ownership, direct questions, and site-native Agent instructions.
+- `src/qualityContract.ts` and `worker/qualityRubric.json` — shared rubric, deterministic/visual boundary, render manifest, report validation, and publish gate.
 - `src/projectArtifact.ts` — location-aware traversal of every asset-bearing project field.
 - `src/webmcp.ts` — WebMCP registrations backed by the shared command engine.
 - `src/App.tsx` — accessible React editor, knowledge cards, themes, selection tools, outline, and responsive controls.

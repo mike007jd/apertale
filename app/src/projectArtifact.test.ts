@@ -17,6 +17,7 @@ describe("Project artifact asset traversal", () => {
         artwork: {
           cleanPlateAssetId: "asset:clean",
           sourceAssetId: "asset:source",
+          personalSourceAssetId: "asset:personal-source",
           separation: "inpainted-clean-plate",
         },
         title: "Opening",
@@ -42,6 +43,7 @@ describe("Project artifact asset traversal", () => {
       { assetId: "asset:texture", location: { kind: "spread", spreadId: "opening", field: "textureUrl" } },
       { assetId: "asset:clean", location: { kind: "spread", spreadId: "opening", field: "cleanPlateAssetId" } },
       { assetId: "asset:source", location: { kind: "spread", spreadId: "opening", field: "sourceAssetId" } },
+      { assetId: "asset:personal-source", location: { kind: "spread", spreadId: "opening", field: "personalSourceAssetId" } },
       { assetId: "asset:subject", location: { kind: "element", spreadId: "opening", elementId: "subject", field: "assetId" } },
       { assetId: "asset:frame-1", location: { kind: "element", spreadId: "opening", elementId: "subject", field: "frameAssetId", frameIndex: 0 } },
       { assetId: "asset:frame-2", location: { kind: "element", spreadId: "opening", elementId: "subject", field: "frameAssetId", frameIndex: 1 } },

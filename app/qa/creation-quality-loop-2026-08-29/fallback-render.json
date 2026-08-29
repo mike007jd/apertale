@@ -1,0 +1,23 @@
+{
+  "url": "http://127.0.0.1:5173/?fallback=1",
+  "documentId": "book-the-starlight-stitch-ed11916a",
+  "revision": 15,
+  "spreadId": "1-a-star-at-the-window",
+  "surface": "fallback",
+  "renderEvidence": {
+    "documentId": "book-the-starlight-stitch-ed11916a",
+    "revision": 15,
+    "scope": "spread",
+    "spreadId": "1-a-star-at-the-window",
+    "theme": "paper-atelier",
+    "surface": "fallback",
+    "locator": ".fallback-book.is-composited",
+    "renderedAt": "2026-08-28T13:40:57.634Z"
+  },
+  "compositedImageCount": 3,
+  "images": [
+    { "className": "fallback-composite-base", "complete": true, "naturalWidth": 1774, "naturalHeight": 887 },
+    { "className": "fallback-composite-layer", "complete": true, "naturalWidth": 402, "naturalHeight": 492 },
+    { "className": "fallback-composite-layer", "complete": true, "naturalWidth": 768, "naturalHeight": 1024 }
+  ]
+}

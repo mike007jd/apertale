@@ -14,6 +14,11 @@ export const CREATION_SOURCES = [
   { id: "photos", label: "Photos" },
   { id: "both", label: "Idea + photos" },
 ] as const;
+export const CREATION_PHOTO_USES = [
+  { id: "illustrated-keepsake", label: "Illustrated keepsake" },
+  { id: "preserve-originals", label: "Keep original photos" },
+] as const;
+export type CreationPhotoUse = (typeof CREATION_PHOTO_USES)[number]["id"];
 
 /** One source image per spread covers a full book without overloading the horizontal strip. */
 export const MAX_WORKSHOP_ASSETS = 12;
@@ -26,6 +31,7 @@ export type CreationWorkshopState = {
   mode: AuthoringMode;
   spreadCount: number;
   visualDirection: CreationStyle;
+  photoUse: CreationPhotoUse | null;
   assets: WorkshopAsset[];
 };
 
@@ -33,6 +39,7 @@ export const INITIAL_CREATION_WORKSHOP: CreationWorkshopState = {
   mode: "idea",
   spreadCount: 6,
   visualDirection: "Paper collage",
+  photoUse: null,
   assets: [],
 };
 
@@ -40,6 +47,7 @@ export type CreationWorkshopAction =
   | { type: "set-mode"; mode: AuthoringMode }
   | { type: "set-spread-count"; spreadCount: number }
   | { type: "set-visual-direction"; visualDirection: CreationStyle }
+  | { type: "set-photo-use"; photoUse: CreationPhotoUse }
   | { type: "restore-assets"; assets: WorkshopAsset[] }
   | { type: "append-assets"; assets: WorkshopAsset[] }
   | { type: "move-asset"; index: number; direction: -1 | 1 }
@@ -65,6 +73,7 @@ export function reduceCreationWorkshop(
       : state;
   }
   if (action.type === "set-visual-direction") return { ...state, visualDirection: action.visualDirection };
+  if (action.type === "set-photo-use") return { ...state, photoUse: action.photoUse };
   if (action.type === "restore-assets") {
     return { ...state, assets: uniqueAssets([...action.assets, ...state.assets]) };
   }
@@ -142,10 +151,28 @@ export async function importCreationWorkshopAssets(files: Iterable<File>, limit:
 }
 
 export function buildCreationWorkshopBrief(state: CreationWorkshopState): CreationBrief {
+  const usesPhotos = state.mode !== "idea";
+  const bookType = !usesPhotos
+    ? "illustrated-storybook"
+    : state.photoUse === "illustrated-keepsake"
+      ? "photo-led-keepsake"
+      : state.photoUse === "preserve-originals"
+        ? "preserved-photo-album"
+        : undefined;
+  // Every workshop photo was stored or restored through the trusted asset
+  // adapter, so it is already verified: passing the ids as validated stops the
+  // readiness gate from asking a false Image-handoff question.
   return buildCreationBrief({
     mode: state.mode,
     spreadCount: state.spreadCount,
     visualDirection: state.visualDirection,
     sourceAssets: (state.mode === "idea" ? [] : state.assets).map(({ id, name }) => ({ id, name })),
+    validatedSourceAssetIds: state.assets.map(({ id }) => id),
+    bookType,
+    photoPolicy: state.photoUse === "illustrated-keepsake"
+      ? { sourceUse: "reference-and-compose", preserveIdentity: true, allowFaceChanges: false }
+      : state.photoUse === "preserve-originals"
+        ? { sourceUse: "preserve-original-layout", preserveIdentity: true, allowFaceChanges: false }
+        : undefined,
   });
 }

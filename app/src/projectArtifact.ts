@@ -3,7 +3,7 @@ import type { DocumentState } from "./types";
 
 type ProjectAssetLocation =
   | { kind: "cover"; field: "coverAssetId" | "coverTextureUrl" }
-  | { kind: "spread"; spreadId: string; field: "textureUrl" | "cleanPlateAssetId" | "sourceAssetId" }
+  | { kind: "spread"; spreadId: string; field: "textureUrl" | "cleanPlateAssetId" | "sourceAssetId" | "personalSourceAssetId" }
   | { kind: "element"; spreadId: string; elementId: string; field: "assetId" | "frameAssetId"; frameIndex?: number };
 
 export type ProjectAssetReference = {
@@ -28,6 +28,7 @@ export function listProjectAssetReferences(documentState: DocumentState): Projec
     add(spread.textureUrl, { kind: "spread", spreadId: spread.id, field: "textureUrl" });
     add(spread.artwork?.cleanPlateAssetId, { kind: "spread", spreadId: spread.id, field: "cleanPlateAssetId" });
     add(spread.artwork?.sourceAssetId, { kind: "spread", spreadId: spread.id, field: "sourceAssetId" });
+    add(spread.artwork?.personalSourceAssetId, { kind: "spread", spreadId: spread.id, field: "personalSourceAssetId" });
     for (const element of spread.elements) {
       add(element.assetId, { kind: "element", spreadId: spread.id, elementId: element.id, field: "assetId" });
       element.frameAssetIds?.forEach((assetId, frameIndex) => {

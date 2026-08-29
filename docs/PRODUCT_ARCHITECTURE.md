@@ -4,7 +4,7 @@
 >
 > Version: 1.1 consolidated
 >
-> Checked: 2026-08-28 NZST
+> Checked: 2026-08-29 NZST
 > Working brand: **Apertale — Open a page. Enter a world.**
 
 This document consolidates the user-approved Challenge build and later multi-book scope. Earlier LivingBook-branded documents remain historical delivery evidence and do not override this specification.
@@ -26,7 +26,7 @@ The user's ChatGPT/Codex supplies the intelligence. Apertale does not proxy ever
 
 ### Implementation snapshot
 
-Implemented in the current build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the six-tool project surface; a repository-level Codex authoring skill; a typed host-side creation-brief contract that requires story planning and generated art before WebMCP layout; IndexedDB-backed local image import; durable D1/R2 publication; and an anonymous read-only share reader.
+Implemented in the current build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the six-tool project surface; a repository-level Codex authoring skill; a versioned creation-brief readiness gate shared by context and create; distinct illustrated-story, photo-led keepsake, and preserved-photo album contracts; IndexedDB-backed local image import; a versioned deterministic plus AI-visual quality rubric with current-render evidence and a two-round repair ceiling; fail-closed client/Worker publication; durable D1/R2 publication; and an anonymous read-only share reader.
 
 The supporting-host tool run, public Site, and anonymous share lifecycle passed with the disclosures recorded in [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md). External delivery still open is the explicitly approved public repository, demo video, and Devpost submission. Direct host attachment transfer remains a post-v1.1 expansion rather than a hidden release dependency.
 
@@ -64,15 +64,18 @@ If a supported host later exposes a verified attachment/file bridge, it can impl
 ## 3. Core experience
 
 1. The user opens Apertale and lands on a clean editorial library, not furniture-like shelf geometry or an editor with a fake prompt box.
-2. The Field Guide and **Create Your Own** action open a full-screen blank-book workshop that explains authoring happens in the conversation beside the built-in browser. The typed creation-brief contract accepts authoring mode (idea, photos, or both), exact spread count, visual direction, and ordered selected source assets so the starter prompt can force story planning and generated art before layout.
+2. The Field Guide and **Create Your Own** action open a full-screen blank-book workshop that explains authoring happens in the conversation beside the built-in browser. The workshop captures only choices it can truthfully own and sends the user to the Agent for the premise, audience, source-photo treatment, and identity boundaries. It never promises a locally unreachable ready state.
 3. In that real Codex/ChatGPT input, the user asks for a book, for example: “Use my travel photos to build a moonlit pop-up atlas. Give every landmark a different hover and click interaction.”
-4. The Agent follows a two-phase host-side contract in the current conversation: inspect sources and the user prompt; define audience or assumption and a complete story arc; plan title, dedicated generated cover, every spread, and ordered provenance; then use host ImageGen/image editing to make a portrait cover and purpose-built full-spread artwork for every spread. Source photos are references and story truth, not a lazy right-page placement unless the user explicitly chose a literal photo-album treatment.
-5. Only after that asset plan and art set exist does the Agent create or patch the book through WebMCP, importing exact assets through supported transfer or the explicit Image handoff. It never claims generation or import succeeded without evidence.
-6. Each committed step appears immediately in the same page, identifies its source, and is undoable.
-7. The user turns pages, hovers, clicks, drags, adjusts, switches Day/Night, and previews directly.
-8. The Agent can continue editing from the resulting live state.
+4. The Agent reads the versioned readiness contract. Blocking omissions return machine-readable fields plus short questions; meaningful defaults remain recommendations. Real source-asset existence, source use, and identity risk are checked even if the submitted book-type label says illustrated storybook.
+5. A ready illustrated/photo-led brief plans one dedicated generated cover and one purpose-built full-spread illustration per spread. A ready preserved-photo album plans one generated cover and source-true 2:1 layouts with no generated interior, under explicit crop/colour/identity rules. The create command reruns the same readiness gate before mutation.
+6. Only after the applicable asset plan exists does the Agent create or patch the book through WebMCP, importing exact assets through supported transfer or the explicit Image handoff. It never claims generation or import succeeded without evidence.
+7. The Agent renders the shelf cover and every spread, reads deterministic findings and a render manifest, then inspects the actual frames for visual criteria. It records blocker/warn/note evidence, patches and re-checks at most twice, and stops for source material or a decision if blockers remain.
+8. Share/Publish revalidates the current-revision report in the client and Worker. Warnings can proceed only when recorded in a sample-ready report; blockers fail closed. Existing public revisions and curated samples remain readable.
+9. Each committed step appears immediately in the same page, identifies its source, and is undoable.
+10. The user turns pages, hovers, clicks, drags, adjusts, switches Day/Night, and previews directly.
+11. The Agent can continue editing from the resulting live state.
 
-The bottom page surface is an explicit **Create Your Own** action. It opens a full-screen blank-book workshop where the user chooses authoring mode, length, visual direction, and ordered source images; a clearly labeled action copies the resulting starter prompt for the real Agent conversation. That prompt is a two-phase host-side contract: inspect and plan a story, generate a dedicated portrait cover plus original full-spread artwork for every spread, then—and only then—create the book through the six Site Tools. A secondary **Image handoff** accepts chosen images only when direct host media transfer is unavailable and exposes ordered local asset ids. No copy action is styled as an editable input and the webpage never pretends to send a model request itself.
+The bottom page surface is an explicit **Create Your Own** action. It opens a full-screen blank-book workshop where the user chooses authoring mode, length, visual direction, photo treatment, and ordered source images; a clearly labeled action copies the resulting starter prompt for the real Agent conversation. The workshop says **Finish the brief in Codex** because premise and audience are resolved by the Agent readiness loop. The prompt branches between generated illustrated interiors and approved source-true preserved layouts, then requires actual rendering and critique before publish. A secondary **Image handoff** accepts chosen images only when direct host media transfer is unavailable and exposes ordered local asset ids. No copy action is styled as an editable input and the webpage never pretends to send a model request itself.
 
 ## 4. Architecture
 
@@ -87,6 +90,12 @@ flowchart LR
     Commands --> Project[Revisioned project]
     Assets --> Project
     Project --> Render[Three.js and HTML renderer]
+    Render --> Evidence[Current-revision render evidence]
+    Project --> Deterministic[Deterministic quality checks]
+    Evidence --> Visual[Agent visual critique]
+    Deterministic --> Gate[Quality report]
+    Visual --> Gate
+    Gate --> Publish[Client and Worker publish gate]
     Project --> Persist[localStorage project adapter]
     Assets --> AssetPersist[IndexedDB asset adapter]
     Render --> User
@@ -124,9 +133,12 @@ interface SpreadSpec {
   body: string;
   textureUrl?: string;
   artwork?: {
+    /** Original full-spread composite reference. */
     sourceAssetId?: string;
+    /** Declared user photo governed by identity/source-use policy. */
+    personalSourceAssetId?: string;
     cleanPlateAssetId: string;
-    separation: "inpainted-clean-plate";
+    separation: "inpainted-clean-plate" | "preserved-photo-layout";
   };
   elements: SceneElement[];
 }
@@ -172,14 +184,14 @@ Security boundary:
 
 Keep tools semantic and small enough for an Agent to select reliably. The target surface is:
 
-1. `get_project_context` — current book, library, spread, selection, assets, capabilities, and revision.
-2. `manage_book` — open a library book, create a validated independent book, or assign the active book a validated local cover.
+1. `get_project_context` — current book, library, spread, selection, assets, capabilities, versioned readiness, quality rubric/render manifest, and revision.
+2. `manage_book` — open a library book, create a readiness-validated independent book, adopt one readiness-passed brief for a legacy personal book, assign a validated local cover, explicitly begin critique, or record a structured critique.
 3. `compose_spread` — replace bounded spread text while preserving its structured scene.
 4. `apply_scene_patch` — Lift, animate, add, update, remove, or reorder a bounded list of scene elements and interactions.
 5. `set_presentation` — Day/Night and Preview state without corrupting content history.
 6. `undo_project_change` — undo an exact returned token while preserving non-overlapping later edits.
 
-`get_project_context` is compact by default. `detail: "selected-reveal"` returns the selected element's complete structured knowledge card; `detail: "assets"` lists up to 24 reusable local imports from the browser-wide IndexedDB asset directory; `detail: "authoring-guide"` returns the site-native two-phase create-quality contract so a Site Tools conversation can author without an installed skill. The WebMCP registration session records that preflight and rejects `manage_book(action: "create")` until it has succeeded. Fine-grained commands remain internal engine adapters for the human UI and do not register as Agent-discoverable tools.
+`get_project_context` is compact by default. Focused details expose the selected reveal, reusable local assets, the authoring guide, `creation-readiness`, or `quality-review`. Readiness produces `ready`, blocking fields, recommendations, direct questions, asset needs, and photo boundaries. Create reuses the same brief and fails closed under the same assessment. A legacy personal book without lifecycle metadata can adopt that brief once at the inspected revision; curated samples and books with an existing brief cannot be reclassified. Quality review returns the single-source rubric, deterministic checks, current-revision render events, and locators/URL for real browser inspection; it does not pretend schema can judge aesthetics. Critique begins through an explicit mutating action and is recorded with evidence and suggested patches. A blocker/patch cycle stops after two rounds; an edit made after an approved report invalidates that report and starts a fresh bounded cycle for the new revision, so no action can advertise a round three. Fine-grained commands remain internal engine adapters for the human UI and do not register as Agent-discoverable tools.
 
 Every mutation accepts `requestId` and `expectedRevision`, commits atomically, returns a compact summary plus `undoToken`, and preserves idempotency.
 
@@ -194,8 +206,10 @@ The runtime exposes exactly these six tools. The scene patch applies up to 24 op
 - Blob storage and metadata in a browser-wide IndexedDB directory; stable IDs may be referenced from any local book.
 - Alpha images become cutouts; flat photos remain image layers until a derived asset is imported.
 - The Agent can discover reusable local assets, then arrange, light, animate, and attach interactions. A scene patch accepts an `asset:` ID only after the trusted storage adapter proves it exists.
-- Full-spread illustrations, transparent cutouts, and 2–6 frame sequences are generated or selected in the user's current Codex/ChatGPT conversation, then imported explicitly into browser-local storage.
-- Uploaded source photos are references and story truth. They are not a finished right-page placement unless the user explicitly chose a literal photo-album treatment.
+- Full-spread illustrations, transparent cutouts, and 2–6 frame sequences are generated or selected in the user's current Codex/ChatGPT conversation, then imported explicitly into browser-local storage. Preserved-photo albums instead keep an approved source-true final base per spread and add only restrained layers.
+- Uploaded source photos are references and story truth for illustrated/photo-led books. They become preserved final layouts only after the user explicitly chooses that treatment and authorizes crop, colour, and identity boundaries.
+- `sourceAssetId` always retains the original composite used to derive a spread; `personalSourceAssetId` separately retains declared photo provenance. Client mutation, deterministic review, publish client, and Worker validate the same distinction.
+- Checked-in `/assets/...` references are admitted by a build-checked Worker catalog generated from `public/assets`; arbitrary but syntactically plausible paths fail closed.
 - The runtime ships no GLB/model payload and requires no external model-generation service or site-owner generation credential.
 
 ### Planned asset expansion
@@ -205,7 +219,7 @@ The runtime exposes exactly these six tools. The scene patch applies up to 24 op
 
 ### Host-side complete-book authoring
 
-Host-side prompt/photo-to-complete-book authoring is a required product path, not a deferred extra. The user asks ChatGPT/Codex in the current conversation to inspect sources, plan a coherent story arc, and generate a dedicated portrait cover plus original full-spread artwork for every spread using their own supported model capabilities. Only after that art set exists does the Agent lay the book out through the six Site Tools. Until direct attachment transfer is verified, Apertale presents a clear Image handoff step and resumes Agent composition immediately after import. In-page owner-funded generation remains out of scope and must not silently fall back to the product owner's model key.
+Host-side prompt/photo-to-complete-book authoring is a required product path, not a deferred extra. The user asks ChatGPT/Codex in the current conversation to assess readiness, inspect sources, and plan a coherent story or album. Illustrated/photo-led work generates a dedicated portrait cover plus original full-spread artwork; an explicitly selected preserved-photo album keeps one source-true layout per spread and generates no interior replacement. Only after the applicable asset set exists does the Agent lay the book out through the six Site Tools, render every surface, and complete the bounded critique loop. Until direct attachment transfer is verified, Apertale presents a clear Image handoff step and resumes Agent composition immediately after import. In-page owner-funded generation remains out of scope and must not silently fall back to the product owner's model key.
 
 ### Later adapters
 

@@ -1,6 +1,13 @@
 # Apertale quality bar
 
-Complete these checks before calling a book finished.
+Use the versioned rubric returned by `get_project_context(detail: "quality-review")` before calling a book finished.
+
+## Evidence boundary
+
+- Apertale computes deterministic checks for the dedicated cover, original-composite/final-base provenance, separately declared personal-photo sources, 2–4 non-procedural layers per spread, bounded copy, meaningful interaction, and current-revision render evidence.
+- The Agent uses actual browser screenshots or visible rendered frames for aesthetic judgments. A manifest or successful tool call does not prove composition, readability, identity fidelity, or sample-level appeal.
+- Record blocker/warn/note results with the cover or spread location and a concrete patch. Recorded warnings may proceed. Blockers keep Share closed.
+- Complete at most two critique → patch → re-check rounds. After round two, stop and request the missing source material or user decision.
 
 ## Narrative and content
 
@@ -9,8 +16,9 @@ Complete these checks before calling a book finished.
 - The sequence has a clear opening, progression, and ending.
 - Text is readable at the default camera and does not compete with the focal scene.
 - Factual reveals name a source when appropriate.
-- Generated-art counts are complete: 1 dedicated portrait cover and 1 original full-spread artwork per spread.
+- Final asset counts are complete: 1 dedicated portrait cover plus one generated illustration or preserved source-true layout per spread, according to book type.
 - Ordered provenance exists for the cover and every spread, distinguishing user photo, generated art, and curated sample.
+- Each image-led spread keeps its original composite in `sourceAssetId`; a personal source appears only in `personalSourceAssetId` and must match the readiness-passed brief.
 - Photo-led work does not use an uploaded source photo as the finished right-page or interior artwork unless the user explicitly chose a literal photo-album treatment.
 
 ## Visual system
@@ -19,8 +27,11 @@ Complete these checks before calling a book finished.
 - Interior spreads have varied but coherent composition.
 - Full-spread environments cross the gutter cleanly, focal subjects use the available stage, and essential copy/faces do not disappear into the fold.
 - User images are not stretched, accidentally cropped, or misrepresented, and they are not treated as a lazy right-page placement.
-- Generated, curated, and user-supplied material remain distinguishable in the final provenance report, with generated cover count 1 and generated full-spread count equal to the spread count.
+- Generated, curated, and user-supplied material remain distinguishable in the final provenance report. Generated cover count is 1; generated full-spread count equals the spread count for illustrated/photo-led books and is 0 for a preserved-photo album.
 - Day and Night each feel intentionally lit; they are not simple brightness inversions.
+- Crop, skew, occlusion, anatomy, and relative scale remain natural.
+- Transparent subjects have clean native-alpha edges without a rectangular matte or halo.
+- The whole book is credible beside The Starlight Stitch and The Blue Road Home as a promotional sample.
 
 ## Interaction and motion
 
@@ -40,4 +51,4 @@ Complete these checks before calling a book finished.
 - Reversible changes have retained undo tokens.
 - No arbitrary URL, executable payload, hidden owner credential, deployment, or publication was introduced.
 
-Stop when these checks pass or when a clearly reported unsupported handoff remains.
+Stop when the current report allows publication, or when round two identifies a clearly reported material/user-decision blocker.

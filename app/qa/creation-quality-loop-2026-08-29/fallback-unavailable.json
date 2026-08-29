@@ -1,0 +1,11 @@
+{
+  "url": "http://127.0.0.1:5173/?fallback=1",
+  "documentId": "book-fallback-unavailable-qa-2026-08-29-e477c8f5",
+  "revision": 16,
+  "spreadId": "1-waiting-for-art",
+  "reason": "The intentionally incomplete draft has no final spread base.",
+  "loadingOverlayCount": 0,
+  "visualReviewUnavailableCount": 1,
+  "spreadRenderEvidenceCount": 0,
+  "observedCopy": "One or more final scene assets could not be loaded. Re-import the missing asset before critique."
+}

@@ -28,7 +28,7 @@ This check proves the deployed artifact and document policy. It does not claim t
    - `set_presentation`
    - `undo_project_change`
 
-Create flows must call `get_project_context` with `detail: "authoring-guide"` and obey the returned two-phase quality contract. That detail is not a seventh tool. The site fails closed: `manage_book(action: "create")` is rejected until the guide has been read in the current Site Tools registration session.
+Create flows must call `get_project_context` with `detail: "authoring-guide"`, then `detail: "creation-readiness"`. Blocking results are user questions, not permission to generate; create must reuse the same ready brief and reruns the same gate. After actual rendering, the Agent reads `detail: "quality-review"`, explicitly calls `manage_book(action: "begin-critique")`, inspects real frames, and records the critique. Those details and actions remain inside the existing six-tool catalog. Share stays closed until the current revision's report allows publication.
 
 If the arrow is absent, first verify that the selected account and model have Site Tools access; then refresh the page after enabling the permission. Do not reinterpret ordinary browser automation as a passing WebMCP run.
 
@@ -48,11 +48,32 @@ Required evidence:
 - `manage_book` opens the Atlas shelf item.
 - The same visible page changes immediately and reports an Agent-authored action.
 
+### Readiness must ask, then pass
+
+First prompt:
+
+> I want a keepsake from some family photos. Start creating it now.
+
+Required evidence:
+
+- `creation-readiness` returns `ready: false`, blocking fields, and direct questions covering the missing premise/audience, photo treatment, source assets, and identity policy as applicable.
+- `manage_book(action: "create")` with the incomplete brief returns `creation_not_ready` and does not change the library or revision.
+- The Agent asks the returned questions naturally instead of inventing decisive defaults.
+
+Then answer with a complete brief. For the illustrated path, explicitly choose generated scenes that preserve identity; for the preserved-photo path, explicitly choose source-true layouts, face changes disabled, and the permitted crop/colour policy. Required evidence:
+
+- readiness becomes true only after every actual source asset exists in the browser registry;
+- changing the label to `illustrated-storybook` cannot bypass missing assets, `sourceUse`, or identity checks;
+- the returned asset needs distinguish generated interiors from preserved original-photo layouts.
+- every finished spread retains an original composite in `sourceAssetId`, while declared user-photo provenance uses the separate `personalSourceAssetId` identity gate.
+
+For a personal draft created before lifecycle metadata existed, run the same readiness check and call `manage_book(action: "adopt-creation-brief")` at the current revision. The action must pass once, reject a second adoption, reject curated samples, and allow the normal render → critique → publish-ready path without guessing photo policy.
+
 ### Compose and patch
 
 Prompt:
 
-> Create a temporary book called Site Tools Acceptance with one spread called The Observatory. Compose a concise explanation of how a telescope gathers light. Use a browser-local ImageGen cutout imported through the workshop's Image handoff as a lifted right-page element, give it a gentle float, warm hover rim, spotlight focus, and a fact card. Use the current revision for every mutation.
+> Using the same brief that just passed readiness, create a temporary illustrated book called Site Tools Acceptance with one spread called The Observatory. Compose a concise explanation of how a telescope gathers light. Use a dedicated portrait cover, an original 2:1 composite reference, its purpose-built clean plate, and two browser-local native-alpha layers imported through Image handoff. Give one layer a gentle float, warm hover rim, spotlight focus, and a fact card. Use the current revision for every mutation.
 
 Required evidence:
 
@@ -61,6 +82,20 @@ Required evidence:
 - `compose_spread` updates the visible spread using its stable ID.
 - `apply_scene_patch` commits one bounded atomic patch using the validated browser-local image asset id; no URL, model reference, script, HTML, GLSL, or executable expression is accepted.
 - Hover and click produce visible renderer behavior and a structured fact card.
+
+### Render, critique, patch, and publish gate
+
+Prompt:
+
+> Render the shelf cover and every spread. Read Apertale's quality review, inspect the actual frames, record evidence for every visual criterion, fix blockers, and re-check. Stop after two rounds if you need material or a decision. Do not publish; tell me whether this revision is publish-ready.
+
+Required evidence:
+
+- Shelf cover and every current spread emit render evidence, and the returned manifest identifies their URL/locators.
+- Deterministic results cover structural facts; the Agent uses visible frames or screenshots for cover appeal, 2:1 composition, readability, consistency, photo fidelity, crop/skew/occlusion/scale, alpha edges, coherence, and promotional value.
+- `begin-critique` visibly enters checking state. `record-critique` returns blocker/warn/note results with evidence and suggested patches.
+- A blocker disables Share/Publish. After a patch changes the revision, one final review round is available; no third round is accepted.
+- A sample-ready report with no blocker enables Share/Publish. Recorded warnings may remain. This acceptance stops at publish-ready and does not deploy or create public content.
 
 ### Human correction and exact undo
 
@@ -100,6 +135,8 @@ Record all of the following before declaring the host gate passed:
 - ChatGPT desktop app version, account/workspace class, and selected model.
 - Screenshot of the address-bar list with exactly six tools.
 - Screen recording containing the prompts, visible tool activity, resulting book changes, human drag, exact undo, and presentation switch.
+- Screenshots of the incomplete readiness questions, checking/blocked state, every visually inspected cover/spread, and final publish-ready or needs-material state.
+- Structured readiness response, quality render manifest, both critique round results when a repair was needed, and final quality report.
 - JSON from `window.apertaleDiagnostics()` showing `webmcp:registered` with `registered: 6` plus tool start/success events.
 - Console warning/error count after a fresh reload.
 

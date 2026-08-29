@@ -18,7 +18,7 @@ for (const file of [index, worker, hosting]) {
 mkdirSync(path.join(dist, "server"), { recursive: true });
 mkdirSync(path.join(dist, ".openai"), { recursive: true });
 for (const entry of readdirSync(workerDirectory, { withFileTypes: true })) {
-  if (entry.isFile() && entry.name.endsWith(".js")) {
+  if (entry.isFile() && (entry.name.endsWith(".js") || entry.name.endsWith(".json"))) {
     copyFileSync(path.join(workerDirectory, entry.name), path.join(dist, "server", entry.name));
   }
 }

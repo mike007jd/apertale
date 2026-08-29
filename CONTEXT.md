@@ -28,6 +28,32 @@ direction, and ordered source-image membership for one creation brief. It owns
 session restoration and brief materialization while the App Adapter owns UI,
 clipboard, file-picker, focus, and feedback behavior.
 
+## Creation brief readiness
+
+Creation brief readiness is the versioned pre-mutation decision contract for
+illustrated stories, photo-led keepsakes, and preserved-photo albums. The
+contract owns blocking fields, concise user questions, recommendations, asset
+needs, and photo/identity boundaries. Both context inspection and the create
+command consume the same assessment; source-asset existence and identity risk
+are derived from the actual source list rather than trusted book-type labels.
+
+## Authoring quality lifecycle
+
+The Authoring quality lifecycle is browser-local workflow state beside a
+personal Project artifact. It records the exact creation brief, current-revision
+render evidence, no more than two explicit critique rounds, and the structured
+quality report. The shared rubric separates deterministic document/render
+checks from Agent visual judgment over actual browser frames. Publishing
+revalidates the attestation on both the client and Worker; existing public
+revisions remain readable and recoverable.
+
+Image-led spread provenance keeps two meanings separate: `sourceAssetId` is
+the original full-spread composite used to derive a clean plate, while
+`personalSourceAssetId` records a declared user photo governed by identity and
+source-use policy. A legacy personal Project without lifecycle metadata may
+adopt one readiness-passed brief at its inspected revision; curated samples and
+books that already own a brief cannot be reclassified.
+
 ## Project artifact
 
 A Project artifact is the revisioned book document consumed by the editor,

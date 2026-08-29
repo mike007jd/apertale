@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-08-28T12:44:16Z",
+  "target": "http://127.0.0.1:5173/",
+  "dataMode": "sanitized-local",
+  "protectedActions": ["public-publish", "production-deploy", "delete-existing-qa-books"],
+  "evidence": [
+    { "path": "01-library-baseline.png", "kind": "screenshot", "proves": "Existing personal books and samples before the run" },
+    { "path": "02-workshop-incomplete.png", "kind": "screenshot", "proves": "Honest Finish the brief in Codex state with direct questions" },
+    { "path": "readiness-fail-closed.json", "kind": "tool-result", "proves": "Incomplete brief questions plus create failure without state change" },
+    { "path": "complete-create.json", "kind": "tool-result", "proves": "Ready brief and successful independent personal-book create" },
+    { "path": "04-created-book-shelf-cover.png", "kind": "screenshot", "proves": "Dedicated created-book cover on the real shelf" },
+    { "path": "03-story-render-before-critique.png", "kind": "screenshot", "proves": "Actual duplicated-character visual blocker at revision 13" },
+    { "path": "05-quality-checking-round-1.png", "kind": "screenshot", "proves": "Explicit checking state before critique submission" },
+    { "path": "critique-round-1.json", "kind": "tool-result", "proves": "Three evidence-backed blockers and one remaining round" },
+    { "path": "06-quality-blocked-round-1.png", "kind": "screenshot", "proves": "Publish fail-closed on the visual blockers" },
+    { "path": "starlight-clean-plate.png", "kind": "generated-asset", "proves": "Accepted precise-object ImageGen clean plate used by the repair" },
+    { "path": "07-story-render-after-patch.png", "kind": "screenshot", "proves": "Revision-15 repaired spread with clean base, safe text, and two layers" },
+    { "path": "07b-current-revision-cover.png", "kind": "screenshot", "proves": "Current-revision shelf cover render evidence" },
+    { "path": "critique-round-2.json", "kind": "tool-result", "proves": "Final sample-ready report with no blocker and one warning" },
+    { "path": "08-publish-ready.png", "kind": "screenshot", "proves": "Ready with notes UI and enabled publish button without publishing" },
+    { "path": "quality-final.json", "kind": "tool-result", "proves": "Final rubric, manifest, evidence, stored brief, and ready gate" },
+    { "path": "quality-persisted-after-reload.json", "kind": "tool-result", "proves": "Ready report survives a real app reload" },
+    { "path": "09-fallback-render.jpg", "kind": "screenshot", "proves": "Forced 2D fallback faithfully composites the final clean plate, two foreground layers, and readable copy" },
+    { "path": "fallback-render.json", "kind": "browser-state", "proves": "All three fallback images completed with non-zero natural dimensions and quality-review returned current-revision fallback evidence" },
+    { "path": "10-fallback-unavailable.jpg", "kind": "screenshot", "proves": "A missing final base terminates loading and exposes the visual-review-unavailable state" },
+    { "path": "fallback-unavailable.json", "kind": "browser-state", "proves": "Failure leaves no loading overlay and records no spread evidence" }
+  ]
+}

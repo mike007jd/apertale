@@ -25,6 +25,15 @@ Hard rejection: placing an uploaded source photo on the right page, or using a r
 7. Refresh the asset list and bind exact asset ids to cover and spreads. Preserve the person's identity and source truth in provenance.
 8. Use interaction to reveal captions, memories, dates, places, or facts—not to obscure the original photograph when a photo is cited as story truth.
 
+## Preserved-photo album
+
+1. Use `preserved-photo-album` and `photoPolicy.sourceUse: "preserve-original-layout"` only after the user explicitly chooses that treatment.
+2. Confirm identity preservation, face changes disabled, and explicit crop and colour-correction permissions.
+3. Keep the user's source-photo order. Prepare one source-true 2:1 layout per spread and one generated portrait cover; generated interior count is zero.
+4. Set each final base with `separation: "preserved-photo-layout"`; keep the full layout/composite in `sourceAssetId`, the rendered base in `cleanPlateAssetId`, and the declared original photo provenance in `personalSourceAssetId` (these may intentionally refer to the same approved original for a preserved layout).
+5. Add 2–4 restrained native-alpha foreground or interactive layers without reillustrating people or covering defining photo content.
+6. Use captions, dates, places, and non-destructive overlays to create meaning. Verify identity, crop, geometry, and chronology in the actual rendered frame.
+
 ## Illustration-led book
 
 1. Generate one coherent 2:1 image for each spread; do not crop a contact sheet or stretch a portrait asset.

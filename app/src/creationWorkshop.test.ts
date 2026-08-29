@@ -82,6 +82,28 @@ describe("creation workshop session", () => {
     expect(buildCreationWorkshopBrief(ideaOnly).sourceAssets).toEqual([]);
   });
 
+  it("maps the user's explicit photo treatment to one consistent book contract", () => {
+    const withPhoto = reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
+      type: "append-assets",
+      assets: [workshopAsset(1)],
+    });
+    const illustrated = buildCreationWorkshopBrief(reduceCreationWorkshop(withPhoto, {
+      type: "set-photo-use",
+      photoUse: "illustrated-keepsake",
+    }));
+    expect(illustrated.prompt).toContain("Book type: photo-led-keepsake");
+    expect(illustrated.prompt).toContain("generated full-spread count 6");
+
+    const preserved = buildCreationWorkshopBrief(reduceCreationWorkshop(withPhoto, {
+      type: "set-photo-use",
+      photoUse: "preserve-originals",
+    }));
+    expect(preserved.prompt).toContain("Book type: preserved-photo-album");
+    expect(preserved.prompt).toContain("generated full-spread count 0");
+    expect(preserved.prompt).toContain("preserved original-photo layout count 6");
+    expect(preserved.prompt).not.toContain("purpose-built full-spread artwork for every spread");
+  });
+
   it("keeps restored order when a new import reaches the reducer first", () => {
     const importedFirst = reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
       type: "append-assets",
@@ -93,5 +115,26 @@ describe("creation workshop session", () => {
     });
 
     expect(restored.assets.map((asset) => asset.id)).toEqual([id(1), id(2), id(3)]);
+  });
+
+  it("treats stored workshop photos as verified sources instead of asking for Image handoff", () => {
+    const withPhotos = reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
+      type: "append-assets",
+      assets: [workshopAsset(1), workshopAsset(2)],
+    });
+    const brief = buildCreationWorkshopBrief(reduceCreationWorkshop(withPhotos, {
+      type: "set-photo-use",
+      photoUse: "illustrated-keepsake",
+    }));
+
+    expect(brief.readiness.blockingMissingFields.some((blocker) => blocker.reason.includes("has not verified"))).toBe(false);
+    expect(brief.readiness.questions).not.toContain(
+      "Please use Image handoff for the missing photos, then ask me to check readiness again.",
+    );
+    // Premise and audience still belong to the Agent conversation.
+    expect(brief.readiness.questions).toEqual(expect.arrayContaining([
+      expect.stringContaining("What is the book about"),
+      expect.stringContaining("Who is this book for?"),
+    ]));
   });
 });

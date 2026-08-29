@@ -4,6 +4,7 @@ import { isStoredAssetId, resolveAssetUrl } from "./assetStore";
 import { recordDiagnostic } from "./diagnostics";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
+import { sceneAssetsReadyForEvidence } from "./renderEvidence";
 import type { BookElement, BookSnapshot, Spread, TurnState } from "./types";
 
 type Props = {
@@ -18,6 +19,14 @@ type Props = {
   onPageTurnReady?: (direction: "forward" | "backward", ready: boolean) => void;
   onLoading: (documentId: string) => void;
   onReady: (documentId: string) => void;
+  onRendered?: (evidence: {
+    documentId: string;
+    revision: number;
+    spreadId: string;
+    theme: BookSnapshot["session"]["sceneThemeId"];
+    surface: "webgl";
+    locator: string;
+  }) => void;
   onFailure: () => void;
 };
 
@@ -29,7 +38,6 @@ type PagePair = {
 const PAGE_W = 4.2;
 const PAGE_H = 5.18;
 const PAGE_THICKNESS = 0.024;
-/** How far a pop-up leans out of the page, in radians. */
 
 function clamp(value: number, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value));
@@ -373,6 +381,7 @@ type SceneElement = {
   anchor: THREE.Object3D;
   materials: THREE.MeshStandardMaterial[];
   frameTextures: THREE.Texture[];
+  loadedFrameIndices: Set<number>;
   frameIndex: number;
   seenFrameIndices: Set<number>;
   hoverAmount: number;
@@ -388,6 +397,7 @@ function buildSceneElement(
   textureLoader: THREE.TextureLoader,
   resolvedAssetUrl = element.assetId,
   resolvedFrameUrls = element.frameAssetIds ?? [],
+  onTextureError?: (frameIndex: number) => void,
 ): SceneElement {
   const root = new THREE.Group();
   const tilt = new THREE.Group();
@@ -442,6 +452,7 @@ function buildSceneElement(
       anchor,
       materials: [ringMaterial, coreMaterial],
       frameTextures: [],
+      loadedFrameIndices: new Set([0]),
       frameIndex: 0,
       seenFrameIndices: new Set([0]),
       hoverAmount: 0,
@@ -468,8 +479,17 @@ function buildSceneElement(
     const aspect = width / Math.max(1, height);
     mesh.scale.set(aspect >= 1 ? 1 : aspect, aspect >= 1 ? 1 / aspect : 1, 1);
   };
+  const loadedFrameIndices = new Set<number>();
   const frameTextures = frameUrls.map((url, index) => {
-    const frameTexture = textureLoader.load(url, index === 0 ? fitTextureAspect : undefined);
+    const frameTexture = textureLoader.load(
+      url,
+      (texture) => {
+        loadedFrameIndices.add(index);
+        if (index === 0) fitTextureAspect(texture);
+      },
+      undefined,
+      () => onTextureError?.(index),
+    );
     frameTexture.colorSpace = THREE.SRGBColorSpace;
     return frameTexture;
   });
@@ -497,6 +517,7 @@ function buildSceneElement(
     anchor,
     materials: [material],
     frameTextures,
+    loadedFrameIndices,
     frameIndex: 0,
     seenFrameIndices: new Set([0]),
     hoverAmount: 0,
@@ -512,10 +533,10 @@ function buildSceneElement(
   };
 }
 
-export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onFailure }: Props) {
+export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const propsRef = useRef({ snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onFailure });
-  propsRef.current = { snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onFailure };
+  const propsRef = useRef({ snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
+  propsRef.current = { snapshot, turn, mode, readOnly, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
   const sceneStructureKey = JSON.stringify({
     id: snapshot.document.id,
     mode,
@@ -737,12 +758,22 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     const textureLoader = new THREE.TextureLoader();
     const sceneElements = new Map<string, SceneElement>();
     const pendingAssets = new Set<string>();
+    const failedSceneAssets = new Set<string>();
     let disposed = false;
     const mountSceneElement = (element: BookElement) => {
       if (sceneElements.has(element.id) || pendingAssets.has(element.id)) return;
       const assetIds = [element.assetId, ...(element.frameAssetIds ?? [])];
+      const buildElement = (assetUrl: string, frameUrls: string[]) => {
+        [...failedSceneAssets].forEach((key) => {
+          if (key.startsWith(`${element.id}:`)) failedSceneAssets.delete(key);
+        });
+        return buildSceneElement(element, textureLoader, assetUrl, frameUrls, (frameIndex) => {
+          failedSceneAssets.add(`${element.id}:texture:${frameIndex}`);
+          recordDiagnostic("asset:texture-load-failed", { elementId: element.id, frameIndex });
+        });
+      };
       if (!assetIds.some(isStoredAssetId)) {
-        const sceneElement = buildSceneElement(element, textureLoader, element.assetId, element.frameAssetIds);
+        const sceneElement = buildElement(element.assetId, element.frameAssetIds ?? []);
         stageScene.add(sceneElement.root);
         sceneElements.set(element.id, sceneElement);
         return;
@@ -753,11 +784,12 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         if (disposed || sceneElements.has(element.id)) return;
         const stillExists = propsRef.current.snapshot.document.spreads.some((spread) => spread.elements.some((item) => item.id === element.id));
         if (!stillExists) return;
-        const sceneElement = buildSceneElement(element, textureLoader, assetUrl, frameUrls);
+        const sceneElement = buildElement(assetUrl, frameUrls);
         stageScene.add(sceneElement.root);
         sceneElements.set(element.id, sceneElement);
       }).catch(() => {
         pendingAssets.delete(element.id);
+        failedSceneAssets.add(`${element.id}:resolve`);
         recordDiagnostic("asset:resolve-failed", { elementId: element.id });
       });
     };
@@ -1028,6 +1060,9 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     let frame = 0;
     let raf = 0;
     let lastSpreadId = "";
+    let renderedEvidenceKey = "";
+    let renderedEvidenceCandidate = "";
+    let renderedEvidenceFrames = 0;
     let lastPrefetchedSpreadIndex = -1;
     const lastPageTurnReadiness: Record<"forward" | "backward", boolean | null> = {
       forward: null,
@@ -1169,8 +1204,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
           1 + (hover.scale - 1) * sceneElement.hoverAmount + (focus.scale - 1) * sceneElement.focusAmount;
         sceneElement.root.position.set(x, y, element.depth + rise);
         sceneElement.root.rotation.z = THREE.MathUtils.degToRad(-element.transform.rotationDeg);
-        const stageScale = 1;
-        const appliedScale = scale * interactionScale * stageScale;
+        const appliedScale = scale * interactionScale;
         sceneElement.root.scale.set(appliedScale, element.transform.scaleY * (appliedScale / element.transform.scaleX), appliedScale);
 
         // Hover lean follows the live pointer; focus orbit is a named response.
@@ -1276,6 +1310,39 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       frame += 1;
       if (frame % 60 === 0) renderer.info.reset();
       renderer.render(scene, camera);
+      const expectedSceneElements = spread.elements;
+      const sceneAssetsReady = sceneAssetsReadyForEvidence(
+        expectedSceneElements.map((element) => element.id),
+        pendingAssets,
+        failedSceneAssets,
+        new Map(expectedSceneElements.flatMap((element) => {
+          const mounted = sceneElements.get(element.id);
+          return mounted ? [[element.id, { loaded: mounted.loadedFrameIndices.size, total: mounted.frameTextures.length }]] : [];
+        })),
+      );
+      if (pagePair && sceneAssetsReady && !currentTurn && mode === "reader") {
+        const evidenceKey = `${current.document.id}:${current.document.revision}:${spread.id}:${current.session.sceneThemeId}`;
+        if (evidenceKey !== renderedEvidenceCandidate) {
+          renderedEvidenceCandidate = evidenceKey;
+          renderedEvidenceFrames = 0;
+        } else {
+          renderedEvidenceFrames += 1;
+        }
+        if (renderedEvidenceFrames >= 8 && renderedEvidenceKey !== evidenceKey) {
+          renderedEvidenceKey = evidenceKey;
+          propsRef.current.onRendered?.({
+            documentId: current.document.id,
+            revision: current.document.revision,
+            spreadId: spread.id,
+            theme: current.session.sceneThemeId,
+            surface: "webgl",
+            locator: ".book-scene canvas",
+          });
+        }
+      } else {
+        renderedEvidenceCandidate = "";
+        renderedEvidenceFrames = 0;
+      }
       if (pagePair && !readySent) {
         readySent = true;
         propsRef.current.onReady(loadingDocumentId);

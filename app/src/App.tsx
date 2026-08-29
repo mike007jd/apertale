@@ -31,6 +31,7 @@ import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine
 import { releaseAssetUrls, resolveAssetUrl } from "./assetStore";
 import {
   CREATION_LENGTHS,
+  CREATION_PHOTO_USES,
   CREATION_SOURCES,
   CREATION_STYLES,
   INITIAL_CREATION_WORKSHOP,
@@ -42,6 +43,8 @@ import {
   restoreCreationWorkshopAssets,
 } from "./creationWorkshop";
 import { recordDiagnostic } from "./diagnostics";
+import { useFocusTrap } from "./focusTrap";
+import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete } from "./renderEvidence";
 import {
   FOCUS_LABELS,
   FOCUS_RESPONSES,
@@ -54,7 +57,7 @@ import { canTurnPage, createPageTurnSession, pageTurnNavDisabled } from "./pageT
 import { PublicationPanel } from "./PublicationPanel";
 import { getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
-import type { BookSnapshot, FocusResponse, HoverResponse, MotionPreset, ThemeId, TurnState } from "./types";
+import type { BookSnapshot, FocusResponse, HoverResponse, MotionPreset, Spread, ThemeId, TurnState } from "./types";
 import { registerWebMcpTools } from "./webmcp";
 
 const runtimeParams = new URLSearchParams(window.location.search);
@@ -252,6 +255,159 @@ function supportsWebGl2() {
   }
 }
 
+type FallbackLayer = {
+  id: string;
+  url: string;
+  element: Spread["elements"][number];
+};
+
+function FallbackBook({ snapshot, spread, onReady, onUnavailable, onRendered }: {
+  snapshot: BookSnapshot;
+  spread: Spread;
+  onReady: (documentId: string) => void;
+  onUnavailable: (documentId: string) => void;
+  onRendered: (evidence: {
+    documentId: string;
+    revision: number;
+    spreadId: string;
+    theme: ThemeId;
+    surface: "fallback";
+    locator: string;
+  }) => void;
+}) {
+  const evidenceKey = `${snapshot.document.id}:${snapshot.document.revision}:${spread.id}:${snapshot.session.sceneThemeId}`;
+  const [resolved, setResolved] = useState<{ key: string; baseUrl: string; layers: FallbackLayer[] } | null>(null);
+  const [loadedIds, setLoadedIds] = useState<Set<string>>(() => new Set());
+  const [failed, setFailed] = useState(false);
+  const reportedKey = useRef("");
+
+  useEffect(() => {
+    let canceled = false;
+    const { baseAssetId, foreground } = fallbackAssetPlan(spread);
+    setResolved(null);
+    setLoadedIds(new Set());
+    setFailed(false);
+    if (!baseAssetId) {
+      setFailed(true);
+      onUnavailable(snapshot.document.id);
+      recordDiagnostic("fallback:final-base-missing", {
+        documentId: snapshot.document.id,
+        revision: snapshot.document.revision,
+        spreadId: spread.id,
+      });
+      return () => { canceled = true; };
+    }
+    void Promise.all([
+      resolveAssetUrl(baseAssetId),
+      ...foreground.map(async (element): Promise<FallbackLayer> => ({
+        id: element.id,
+        url: await resolveAssetUrl(element.assetId),
+        element,
+      })),
+    ]).then(([baseUrl, ...layers]) => {
+      if (!canceled) setResolved({ key: evidenceKey, baseUrl, layers });
+    }).catch(() => {
+      if (canceled) return;
+      setFailed(true);
+      onUnavailable(snapshot.document.id);
+      recordDiagnostic("fallback:asset-resolve-failed", {
+        documentId: snapshot.document.id,
+        revision: snapshot.document.revision,
+        spreadId: spread.id,
+      });
+    });
+    return () => { canceled = true; };
+  }, [evidenceKey, onUnavailable, snapshot.document.id, snapshot.document.revision, spread]);
+
+  const loadKeys = resolved
+    ? fallbackImageLoadKeys(resolved.key, resolved.layers.map((layer) => layer.id))
+    : [];
+  const expectedCount = loadKeys.length;
+  useEffect(() => {
+    if (
+      !resolved
+      || !fallbackRenderComplete(expectedCount, loadedIds, failed)
+      || reportedKey.current === resolved.key
+    ) return;
+    reportedKey.current = resolved.key;
+    onReady(snapshot.document.id);
+    onRendered({
+      documentId: snapshot.document.id,
+      revision: snapshot.document.revision,
+      spreadId: spread.id,
+      theme: snapshot.session.sceneThemeId,
+      surface: "fallback",
+      locator: ".fallback-book.is-composited",
+    });
+  }, [expectedCount, failed, loadedIds, onReady, onRendered, resolved, snapshot.document.id, snapshot.document.revision, snapshot.session.sceneThemeId, spread.id]);
+
+  const markLoaded = (id: string) => setLoadedIds((current) => {
+    if (current.has(id)) return current;
+    return new Set([...current, id]);
+  });
+  const markFailed = (id: string) => {
+    setFailed(true);
+    onUnavailable(snapshot.document.id);
+    recordDiagnostic("fallback:asset-load-failed", {
+      documentId: snapshot.document.id,
+      revision: snapshot.document.revision,
+      spreadId: spread.id,
+      asset: id,
+    });
+  };
+
+  if (failed) {
+    return (
+      <div className="fallback-book" aria-label={`Two-dimensional fallback for ${spread.title}`}>
+        <article className="fallback-plate" role="status">
+          <h2>Visual review unavailable</h2>
+          <p>One or more final scene assets could not be loaded. Re-import the missing asset before critique.</p>
+        </article>
+      </div>
+    );
+  }
+  if (!resolved) return <div className="fallback-book is-loading" aria-label={`Loading two-dimensional fallback for ${spread.title}`} />;
+
+  return (
+    <div className="fallback-book is-composited" aria-label={`Two-dimensional fallback for ${spread.title}`}>
+      <img
+        className="fallback-composite-base"
+        src={resolved.baseUrl}
+        alt=""
+        role="presentation"
+        onLoad={() => markLoaded(loadKeys[0])}
+        onError={() => markFailed(loadKeys[0])}
+      />
+      {resolved.layers.map(({ id, url, element }, index) => {
+        const x = ((element.page === "right" ? 0.5 : 0) + element.transform.x * 0.5) * 100;
+        const style = {
+          left: `${x}%`,
+          top: `${element.transform.y * 100}%`,
+          zIndex: Math.max(1, Math.round(element.depth * 100)),
+          transform: `translate(-50%, -50%) rotate(${element.transform.rotationDeg}deg) scale(${element.transform.scaleX}, ${element.transform.scaleY})`,
+        } satisfies CSSProperties;
+        return (
+          <img
+            key={id}
+            className="fallback-composite-layer"
+            src={url}
+            alt=""
+            role="presentation"
+            style={style}
+            onLoad={() => markLoaded(loadKeys[index + 1])}
+            onError={() => markFailed(loadKeys[index + 1])}
+          />
+        );
+      })}
+      <article className="fallback-composite-copy">
+        {spread.kicker && <p>{spread.kicker}</p>}
+        <h2>{spread.title}</h2>
+        <p>{spread.body}</p>
+      </article>
+    </div>
+  );
+}
+
 function createRequestId() {
   return crypto.randomUUID();
 }
@@ -290,6 +446,7 @@ export function App() {
   const creationSpreadCount = creationWorkshop.spreadCount;
   const creationStyle = creationWorkshop.visualDirection;
   const creationSource = creationWorkshop.mode;
+  const creationPhotoUse = creationWorkshop.photoUse;
   const workshopAssets = creationWorkshop.assets;
   const pageTurnIndexRef = useRef(snapshot.session.currentSpreadIndex);
   const pageTurnCountRef = useRef(snapshot.document.spreads.length);
@@ -393,16 +550,21 @@ export function App() {
 
   useEffect(() => {
     let canceled = false;
+    // Only a successfully resolved dedicated cover earns an entry. A missing or
+    // unresolvable cover keeps the bundled placeholder visible but must not
+    // satisfy the deterministic cover-evidence blocker.
     Promise.all(library.books.map(async (book) => {
-      if (!book.coverAssetId) return [book.id, book.coverTextureUrl] as const;
+      if (!book.coverAssetId) return null;
       try {
         return [book.id, await resolveAssetUrl(book.coverAssetId)] as const;
       } catch {
         recordDiagnostic("asset:cover-resolve-failed", { bookId: book.id });
-        return [book.id, book.coverTextureUrl] as const;
+        return null;
       }
     })).then((entries) => {
-      if (!canceled) setResolvedCoverUrls(Object.fromEntries(entries));
+      if (!canceled) {
+        setResolvedCoverUrls(Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry !== null)));
+      }
     });
     return () => { canceled = true; };
   }, [library]);
@@ -423,6 +585,7 @@ export function App() {
   const libraryBusy = Boolean(openingBook || bookTransition || libraryMotion !== "idle");
 
   const isCreatorBook = Boolean(activeLibraryBook) && activeLibraryBook?.sample === false;
+  const qualityGate = bookEngine.getQualityGate();
 
   /**
    * The mobile reader sheet scrolls its own copy. Turning the page swaps the
@@ -585,6 +748,12 @@ export function App() {
     setLoadStage("warming");
     setSceneLoadingBookId((current) => current === documentId ? null : current);
     recordDiagnostic("book:ready", { documentId });
+  }, []);
+
+  const handleBookUnavailable = useCallback((documentId: string) => {
+    setReadyBookId(documentId);
+    setSceneLoadingBookId((current) => current === documentId ? null : current);
+    recordDiagnostic("book:visual-review-unavailable", { documentId });
   }, []);
 
   useEffect(() => {
@@ -798,51 +967,9 @@ export function App() {
     if (showLibrary) setLibraryTab("yours");
   }, [showLibrary]);
 
-  useEffect(() => {
-    if (!showCreateGuide) return undefined;
-    const card = createGuideCard.current;
-    if (!card) return undefined;
-    const keepFocusInside = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const controls = [...card.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
-        .filter((control) => !control.hasAttribute("disabled") && !control.hasAttribute("hidden"));
-      if (controls.length === 0) return;
-      const first = controls[0];
-      const last = controls.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    card.addEventListener("keydown", keepFocusInside);
-    return () => card.removeEventListener("keydown", keepFocusInside);
-  }, [showCreateGuide]);
-
-  useEffect(() => {
-    if (!showElementAgentGuide) return undefined;
-    const card = elementAgentCard.current;
-    if (!card) return undefined;
-    const keepFocusInside = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
-      const controls = [...card.querySelectorAll<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])')]
-        .filter((control) => !control.hasAttribute("disabled"));
-      if (controls.length === 0) return;
-      const first = controls[0];
-      const last = controls.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    card.addEventListener("keydown", keepFocusInside);
-    return () => card.removeEventListener("keydown", keepFocusInside);
-  }, [showElementAgentGuide]);
+  useFocusTrap(librarySheet, showLibrary);
+  useFocusTrap(createGuideCard, showCreateGuide);
+  useFocusTrap(elementAgentCard, showElementAgentGuide);
 
   useEffect(() => () => {
     if (openingFrame.current) cancelAnimationFrame(openingFrame.current);
@@ -1075,11 +1202,23 @@ export function App() {
                         loading={index < 4 ? "eager" : "lazy"}
                         decoding="async"
                         fetchPriority={index === 0 ? "high" : "auto"}
+                        onLoad={() => {
+                          if (dedicatedCoverRendered(book, resolvedCoverUrls[book.id])) {
+                            bookEngine.recordRenderEvidence({
+                              documentId: book.id,
+                              revision: book.revision,
+                              scope: "cover",
+                              theme: snapshot.session.sceneThemeId,
+                              surface: "shelf",
+                              locator: `[data-book-id="${book.id}"] .library-cover-frame img`,
+                            });
+                          }
+                        }}
                       />
                       {openingBook?.id === book.id && <span className="library-opening-badge" aria-hidden="true"><SpinnerGap size={15} weight="bold" /> Opening</span>}
                     </span>
                     <span className="library-card-copy">
-                      <small>{book.id === "apertale-field-guide" ? "Start here" : book.sample ? "Curated demo" : "Your book"} · {book.spreadCount} spreads</small>
+                      <small>{book.id === "apertale-field-guide" ? "Start here" : book.sample ? "Curated demo" : "Your book"} · {book.spreadCount} {book.spreadCount === 1 ? "spread" : "spreads"}</small>
                       <strong>{book.title}</strong>
                     </span>
                   </button>
@@ -1115,37 +1254,40 @@ export function App() {
               onPageGesture={showCreateGuide ? () => undefined : onPageGesture}
               onLoading={showCreateGuide ? () => undefined : handleBookLoading}
               onReady={showCreateGuide ? () => undefined : handleBookReady}
+              onRendered={showCreateGuide ? undefined : (evidence) => {
+                bookEngine.recordRenderEvidence({
+                  documentId: evidence.documentId,
+                  revision: evidence.revision,
+                  scope: "spread",
+                  spreadId: evidence.spreadId,
+                  theme: evidence.theme,
+                  surface: evidence.surface,
+                  locator: evidence.locator,
+                });
+              }}
               onFailure={() => setSceneFailed(true)}
             />
           </Suspense>
         ) : showCreateGuide ? (
           <div className="fallback-book workshop-blank-fallback" aria-label="Blank two-dimensional book workshop" />
         ) : (
-          <div className="fallback-book" aria-label={`Two-dimensional fallback for ${spread.title}`}>
-            {spread.textureUrl ? (
-              <img src={spread.textureUrl} alt="" role="presentation" onLoad={() => handleBookReady(snapshot.document.id)} />
-            ) : (
-              <article className="fallback-plate">
-                {spread.kicker && <p className="fallback-kicker">{spread.kicker}</p>}
-                <h2>{spread.title}</h2>
-                <p>{spread.body}</p>
-                {spread.elements.map((element) => {
-                  const reveal = resolveInteraction(element).reveal;
-                  if (reveal.kind !== "fact-card") return null;
-                  return (
-                    <dl key={element.id}>
-                      {reveal.facts.map((fact) => (
-                        <div key={fact.label}>
-                          <dt>{fact.label}</dt>
-                          <dd>{fact.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  );
-                })}
-              </article>
-            )}
-          </div>
+          <FallbackBook
+            snapshot={snapshot}
+            spread={spread}
+            onReady={handleBookReady}
+            onUnavailable={handleBookUnavailable}
+            onRendered={(evidence) => {
+              bookEngine.recordRenderEvidence({
+                documentId: evidence.documentId,
+                revision: evidence.revision,
+                scope: "spread",
+                spreadId: evidence.spreadId,
+                theme: evidence.theme,
+                surface: evidence.surface,
+                locator: evidence.locator,
+              });
+            }}
+          />
         )}
 
         {stageIsLoading && !showLibrary && !showCreateGuide && <BookLoadingFeedback title={openingBook?.title ?? snapshot.document.title} placement="stage" stage={loadStage} reducedMotion={reducedMotion} />}
@@ -1348,6 +1490,14 @@ export function App() {
                   <span>{webMcpAvailable ? "Ready beside Codex" : "Read here. Open in Codex (ChatGPT desktop) to create."}</span>
                 </p>
 
+                <div className="workshop-readiness is-incomplete" role="status">
+                  <WarningCircle size={16} weight="fill" />
+                  <div>
+                    <strong>Finish the brief in Codex</strong>
+                    <span>{creationBrief.readiness.questions.slice(0, 3).join(" ")}</span>
+                  </div>
+                </div>
+
                 <fieldset className="workshop-field">
                   <legend>Start from</legend>
                   <div className="workshop-segment">
@@ -1362,6 +1512,23 @@ export function App() {
                     ))}
                   </div>
                 </fieldset>
+
+                {usesPhotos && (
+                  <fieldset className="workshop-field">
+                    <legend>Photo use</legend>
+                    <div className="workshop-segment workshop-photo-use">
+                      {CREATION_PHOTO_USES.map((choice) => (
+                        <button
+                          type="button"
+                          key={choice.id}
+                          className={`workshop-option ${creationPhotoUse === choice.id ? "is-selected" : ""}`}
+                          onClick={() => dispatchCreationWorkshop({ type: "set-photo-use", photoUse: choice.id })}
+                          aria-pressed={creationPhotoUse === choice.id}
+                        >{choice.label}</button>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
 
                 <fieldset className="workshop-field">
                   <legend>Spreads</legend>
@@ -1461,7 +1628,7 @@ export function App() {
                 </p>
                 <button className="copy-starter-button" onClick={() => void copyPrompt()}>
                   {copied ? <Check size={18} weight="bold" /> : <Copy size={18} weight="bold" />}
-                  {copied ? "Copied — paste beside this page" : webMcpAvailable ? "Copy brief for Codex" : "Copy creation brief"}
+                  {copied ? "Copied — paste beside this page" : "Copy questions for Codex"}
                 </button>
                 {copyError && (
                   <div className="copy-fallback" role="alert">
@@ -1513,6 +1680,7 @@ export function App() {
         <PublicationPanel
           document={snapshot.document}
           record={publicationRecord}
+          qualityGate={qualityGate}
           onRecordChange={setPublicationRecord}
           onClose={closePublication}
         />

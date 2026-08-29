@@ -6,7 +6,7 @@ Before making substantial visual changes, use the Product Design plugin's `get-c
 
 When implementing from a selected generated mock, treat that image as the source of truth for layout, component anatomy, density, spacing, color, typography, visible content, and hierarchy.
 
-Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts/prepare-sites-build.mjs`, and `tests/sites-worker.test.mjs` intact so the same local prototype can be handed to Sites. Before a Sites handoff, run `npm run build` and `npm run test:sites`; verify that the build leaves `dist/client/app-shell`, `dist/server/index.js`, `dist/.openai/hosting.json`, and the numbered migrations under `dist/.openai/drizzle/`.
+Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts/prepare-sites-build.mjs`, and `tests/sites-worker.test.mjs` intact so the same local prototype can be handed to Sites. Before a Sites handoff, run `npm run test:sites` (it performs the production build first, so no separate `npm run build` is needed) and verify that the build leaves `dist/client/app-shell`, `dist/server/index.js`, `dist/.openai/hosting.json`, and the numbered migrations under `dist/.openai/drizzle/`.
 
 ## Apertale product decisions
 

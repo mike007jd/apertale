@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getStoredAssetBlob } from "./assetStore";
 import { listStoredProjectAssetIds } from "./projectArtifact";
+import { QUALITY_RUBRIC, type QualityReport } from "./qualityContract";
 import {
   deletePublication,
   getPublicationRecord,
@@ -21,7 +22,6 @@ const getBlob = vi.mocked(getStoredAssetBlob);
 const COVER_ID = "asset:12345678-1234-4234-8234-123456789abc";
 const TEXTURE_ID = "asset:22345678-1234-4234-8234-123456789abc";
 const CLEAN_ID = "asset:32345678-1234-4234-8234-123456789abc";
-const SOURCE_ID = "asset:42345678-1234-4234-8234-123456789abc";
 const ELEMENT_ID = "asset:52345678-1234-4234-8234-123456789abc";
 const FRAME_A_ID = "asset:62345678-1234-4234-8234-123456789abc";
 const FRAME_B_ID = "asset:72345678-1234-4234-8234-123456789abc";
@@ -49,7 +49,7 @@ function documentState(overrides: Partial<DocumentState> = {}): DocumentState {
       textureUrl: TEXTURE_ID,
       artwork: {
         cleanPlateAssetId: CLEAN_ID,
-        sourceAssetId: SOURCE_ID,
+        sourceAssetId: TEXTURE_ID,
         separation: "inpainted-clean-plate",
       },
       title: "Home",
@@ -65,10 +65,70 @@ function documentState(overrides: Partial<DocumentState> = {}): DocumentState {
         depth: 0.1,
         locked: false,
         provenance: "human",
+        interaction: {
+          hover: "lift-glow",
+          focus: "spotlight",
+          reveal: { kind: "caption", title: "Home", summary: "A remembered afternoon.", facts: [] },
+        },
+      }, {
+        id: "caption-frame",
+        label: "Caption frame",
+        kind: "decoration",
+        assetId: "/assets/generated/story-city-clouds-cutout-v3.png",
+        page: "left",
+        transform: { x: 0.4, y: 0.5, scaleX: 0.8, scaleY: 0.8, rotationDeg: 0 },
+        depth: 0.05,
+        locked: false,
+        provenance: "agent",
       }],
     }],
     ...overrides,
   };
+}
+
+function qualityReport(document: DocumentState, warning = false): QualityReport {
+  const checks = QUALITY_RUBRIC.criteria.map((criterion, index) => ({
+    criterionId: criterion.id,
+    outcome: warning && index === 0 ? "warn" as const : "pass" as const,
+    message: `${criterion.label} was checked against the rendered revision.`,
+    evidence: [{
+      scope: criterion.id === "cover-appeal" ? "cover" as const : "spread" as const,
+      ...(criterion.id === "cover-appeal" ? {} : { spreadId: document.spreads[0].id }),
+      locator: criterion.id === "cover-appeal" ? "[data-book-id] img" : ".book-scene canvas",
+      description: "Rendered publication evidence",
+    }],
+    ...(warning && index === 0 ? { suggestedPatch: "Keep this warning recorded for publication." } : {}),
+  }));
+  return {
+    contractVersion: 1,
+    rubricVersion: 1,
+    documentId: document.id,
+    reviewedRevision: document.revision,
+    round: 1,
+    maxRounds: 2,
+    creationBrief: {
+      contractVersion: 2,
+      bookType: "illustrated-storybook",
+      premise: "A warm afternoon becomes a short illustrated story.",
+      audience: "Families",
+      spreadCount: document.spreads.length,
+      visualDirection: "Warm paper collage",
+      sourceAssets: [],
+    },
+    status: "ready",
+    checks,
+    blockerCount: 0,
+    warningCount: warning ? 1 : 0,
+    noteCount: 0,
+    warningsRecorded: true,
+    sampleReady: true,
+    publishAllowed: true,
+    summary: warning ? "Ready with one recorded warning." : "Ready to publish.",
+  };
+}
+
+function publishReady(document: DocumentState, onProgress?: (progress: PublicationProgress) => void) {
+  return publishDocument(document, qualityReport(document), onProgress);
 }
 
 function createMemoryStorage() {
@@ -233,7 +293,7 @@ describe("publishing client", () => {
   it("creates a draft, uploads each local blob once, publishes the exact manifest, and persists the creator record", async () => {
     const api = installShareApi();
     const progress: PublicationProgress[] = [];
-    const record = await publishDocument(documentState(), (item) => progress.push(item));
+    const record = await publishReady(documentState(), (item) => progress.push(item));
 
     expect(record.status).toBe("published");
     expect(record.shareUrl).toMatch(/^https:\/\/apertale\.test\/share\/[A-Za-z0-9_-]{43}$/);
@@ -252,14 +312,13 @@ describe("publishing client", () => {
       "uploading",
       "uploading",
       "uploading",
-      "uploading",
       "publishing",
       "publishing",
     ]);
 
     const methods = api.requests.map((request) => `${request.method} ${new URL(request.url, "https://apertale.test").pathname}`);
     expect(methods[0]).toBe("POST /api/books");
-    expect(methods.filter((item) => item.startsWith("PUT "))).toHaveLength(7);
+    expect(methods.filter((item) => item.startsWith("PUT "))).toHaveLength(6);
     expect(methods.at(-1)).toBe(`POST /api/books/${record.bookId}/publish`);
     expect(api.fetchMock.mock.calls.every(([, init]) => init?.cache === "no-store")).toBe(true);
     expect(api.requests.every((request) => !request.url.includes(record.manageToken))).toBe(true);
@@ -267,9 +326,10 @@ describe("publishing client", () => {
     expect(api.requests[1].headers.get("authorization")).toBe(`Bearer ${record.manageToken}`);
     expect(api.requests[1].headers.get("content-type")).toBe("image/png");
     const publishRequest = api.requests.at(-1)!;
-    const publishBody = await publishRequest.json() as { manifest: DocumentState; shareToken: string };
+    const publishBody = await publishRequest.json() as { manifest: DocumentState; shareToken: string; quality: QualityReport };
     expect(publishBody.manifest).toEqual(documentState());
     expect(publishBody.shareToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(publishBody.quality).toEqual(qualityReport(documentState()));
     expect(record.shareUrl).toBe(`https://apertale.test/share/${publishBody.shareToken}`);
     const stored = JSON.parse(localStorage.getItem(`apertale.publication.v1:${record.documentId}`) ?? "null") as {
       manageToken?: string;
@@ -278,17 +338,17 @@ describe("publishing client", () => {
     };
     expect(stored.manageToken).toBe(record.manageToken);
     expect(stored.shareToken).toBe(publishBody.shareToken);
-    expect(stored.uploadedAssetIds).toHaveLength(7);
+    expect(stored.uploadedAssetIds).toHaveLength(6);
     expect(getPublicationRecord(record.documentId)).not.toHaveProperty("uploadedAssetIds");
     expect(getPublicationRecord(record.documentId)).not.toHaveProperty("shareToken");
   });
 
   it("returns the existing share link when the published revision is unchanged", async () => {
     const api = installShareApi();
-    const first = await publishDocument(documentState());
+    const first = await publishReady(documentState());
     api.fetchMock.mockClear();
     getBlob.mockClear();
-    const second = await publishDocument(documentState());
+    const second = await publishDocument(documentState(), null);
     expect(second).toEqual(first);
     expect(api.fetchMock).not.toHaveBeenCalled();
     expect(getBlob).not.toHaveBeenCalled();
@@ -296,10 +356,10 @@ describe("publishing client", () => {
 
   it("rejects a changed revision until the live share link is revoked", async () => {
     const api = installShareApi();
-    const published = await publishDocument(documentState());
+    const published = await publishReady(documentState());
     api.fetchMock.mockClear();
     getBlob.mockClear();
-    const revisionError = await publishDocument(documentState({ revision: 5 })).catch((error: unknown) => error);
+    const revisionError = await publishDocument(documentState({ revision: 5 }), null).catch((error: unknown) => error);
     expect(revisionError).toBeInstanceOf(PublicationError);
     expect(revisionError).toMatchObject({ code: "revision_changed" });
     expect(getPublicationRecord("warm-photo-story")?.shareUrl).toBe(published.shareUrl);
@@ -309,7 +369,7 @@ describe("publishing client", () => {
 
   it("revokes the share URL, keeps the capability, and republishes without re-uploading immutable assets", async () => {
     const api = installShareApi();
-    const published = await publishDocument(documentState());
+    const published = await publishReady(documentState());
     const revoked = await revokePublication("warm-photo-story");
     expect(revoked.status).toBe("revoked");
     expect(revoked.shareUrl).toBeUndefined();
@@ -320,7 +380,7 @@ describe("publishing client", () => {
     getBlob.mockImplementation(async (assetId: string) => (
       [...listStoredProjectAssetIds(documentState()), NEW_ID].includes(assetId) ? PNG : null
     ));
-    const republished = await publishDocument(documentState({
+    const republishDocument = documentState({
       revision: 5,
       spreads: [{
         ...documentState().spreads[0],
@@ -329,7 +389,8 @@ describe("publishing client", () => {
           frameAssetIds: [FRAME_A_ID, FRAME_B_ID, NEW_ID],
         }],
       }],
-    }));
+    });
+    const republished = await publishReady(republishDocument);
     expect(republished.status).toBe("published");
     expect(republished.shareUrl).not.toBe(published.shareUrl);
     expect(republished.manageToken).toBe(published.manageToken);
@@ -340,7 +401,7 @@ describe("publishing client", () => {
 
   it("keeps the local capability after a failed delete and clears it only after success", async () => {
     const api = installShareApi();
-    const published = await publishDocument(documentState());
+    const published = await publishReady(documentState());
     api.failDeletes();
     const deleteError = await deletePublication("warm-photo-story").catch((error: unknown) => error);
     expect(deleteError).toBeInstanceOf(PublicationError);
@@ -371,17 +432,33 @@ describe("publishing client", () => {
   it("fails before creating a draft when a referenced local blob is missing", async () => {
     const api = installShareApi();
     getBlob.mockImplementation(async (assetId: string) => assetId === COVER_ID ? null : PNG);
-    const missingError = await publishDocument(documentState()).catch((error: unknown) => error);
+    const missingError = await publishReady(documentState()).catch((error: unknown) => error);
     expect(missingError).toBeInstanceOf(PublicationError);
     expect(missingError).toMatchObject({ code: "missing_assets" });
     expect(api.fetchMock).not.toHaveBeenCalled();
     expect(getPublicationRecord("warm-photo-story")).toBeNull();
   });
 
+  it("fails the quality gate before reading blobs or creating a draft", async () => {
+    const api = installShareApi();
+    const blocked = await publishDocument(documentState(), null).catch((error: unknown) => error);
+    expect(blocked).toBeInstanceOf(PublicationError);
+    expect(blocked).toMatchObject({ code: "quality_blocked", retryable: false });
+    expect(getBlob).not.toHaveBeenCalled();
+    expect(api.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("publishes when warnings are explicitly recorded in an otherwise passing critique", async () => {
+    installShareApi();
+    const document = documentState();
+    const record = await publishDocument(document, qualityReport(document, true));
+    expect(record.status).toBe("published");
+  });
+
   it("recovers the same share link if the first publish response is lost after server commit", async () => {
     const api = installShareApi();
     api.loseNextPublishResponse();
-    const lost = await publishDocument(documentState()).catch((error: unknown) => error);
+    const lost = await publishReady(documentState()).catch((error: unknown) => error);
     expect(lost).toBeInstanceOf(PublicationError);
     expect(lost).toMatchObject({ code: "storage_unavailable", retryable: true });
     expect(getPublicationRecord("warm-photo-story")).toMatchObject({ status: "publishing" });
@@ -392,9 +469,9 @@ describe("publishing client", () => {
     };
     expect(stored.shareToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const putCount = api.requests.filter((request) => request.method === "PUT").length;
-    expect(putCount).toBe(7);
+    expect(putCount).toBe(6);
 
-    const recovered = await publishDocument(documentState());
+    const recovered = await publishReady(documentState());
     expect(recovered.status).toBe("published");
     expect(recovered.shareUrl).toBe(`https://apertale.test/share/${stored.shareToken}`);
     expect(recovered.shareUrl).toMatch(/^https:\/\/apertale\.test\/share\/[A-Za-z0-9_-]{43}$/);
