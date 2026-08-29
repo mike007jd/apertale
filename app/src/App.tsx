@@ -1592,14 +1592,6 @@ export function App() {
                   <span>{webMcpAvailable ? "Ready beside Codex" : "Read here. Open in Codex (ChatGPT desktop) to create."}</span>
                 </p>
 
-                <div className="workshop-readiness is-incomplete" role="status">
-                  <WarningCircle size={16} weight="fill" />
-                  <div>
-                    <strong>Finish the brief in Codex</strong>
-                    <span>{creationBrief.readiness.questions.slice(0, 3).join(" ")}</span>
-                  </div>
-                </div>
-
                 <fieldset className="workshop-field">
                   <legend>Start from</legend>
                   <div className="workshop-segment">
@@ -1614,23 +1606,6 @@ export function App() {
                     ))}
                   </div>
                 </fieldset>
-
-                {usesPhotos && (
-                  <fieldset className="workshop-field">
-                    <legend>Photo use</legend>
-                    <div className="workshop-segment workshop-photo-use">
-                      {CREATION_PHOTO_USES.map((choice) => (
-                        <button
-                          type="button"
-                          key={choice.id}
-                          className={`workshop-option ${creationPhotoUse === choice.id ? "is-selected" : ""}`}
-                          onClick={() => dispatchCreationWorkshop({ type: "set-photo-use", photoUse: choice.id })}
-                          aria-pressed={creationPhotoUse === choice.id}
-                        >{choice.label}</button>
-                      ))}
-                    </div>
-                  </fieldset>
-                )}
 
                 <fieldset className="workshop-field">
                   <legend>Spreads</legend>
@@ -1663,6 +1638,30 @@ export function App() {
                   </div>
                 </fieldset>
 
+                {/* Photo use sits at the END of the panel, beside the photos
+                    it describes. It used to be inserted between Start from and
+                    Spreads, so choosing a photo mode shoved everything the
+                    reader was already looking at further down the page.
+                    Deliberately NOT height-animated: an animated collapse that
+                    fails to run leaves the options present but invisible and
+                    unclickable, and hiding working controls is a worse failure
+                    than appearing without a flourish. */}
+                {usesPhotos && (
+                  <fieldset className="workshop-field">
+                    <legend>Photo use</legend>
+                    <div className="workshop-segment workshop-photo-use">
+                      {CREATION_PHOTO_USES.map((choice) => (
+                        <button
+                          type="button"
+                          key={choice.id}
+                          className={`workshop-option ${creationPhotoUse === choice.id ? "is-selected" : ""}`}
+                          onClick={() => dispatchCreationWorkshop({ type: "set-photo-use", photoUse: choice.id })}
+                          aria-pressed={creationPhotoUse === choice.id}
+                        >{choice.label}</button>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
                 {usesPhotos && (
                   <section className="workshop-photos" aria-label="Source images, in book order">
                     {/* The Agent's own sentence, printed where the reader acts
