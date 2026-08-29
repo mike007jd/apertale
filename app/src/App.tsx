@@ -444,42 +444,35 @@ export function App() {
       done?.();
       return;
     }
-    // Close runs at 70% of open's duration with an accelerating curve: a board
-    // being opened is a hand, a board falling shut is gravity.
-    const duration = to === 1 ? 760 : 532;
-    const started = performance.now();
+    // Equal durations. The shelf's own fade is what differentiates the two
+    // directions now, rather than a compressed curve that has to land harder
+    // to cover the same distance in less time.
+    const duration = 760;
 
     /**
-     * Phased, not a single curve.
+     * One curve, end to end.
      *
-     * A plain ease-out front-loads the motion, and the shelf fade sat on top of
-     * exactly that part: by the time the shelf had cleared, the cover was
-     * already 84% open, so the swing was over before anyone could see it. The
-     * case now holds almost shut while the shelf clears, swings in full view,
-     * and settles.
+     * This was three self-terminating power segments glued together, and the
+     * joins WERE the jank: measured, velocity stepped 15x at t=0.16, the cover
+     * came to a literal dead stop and restarted at t=0.79, and the close landed
+     * with speed still in it. Smootherstep has zero first AND second derivative
+     * at both ends, so nothing starts, stops or lands abruptly and there is no
+     * join left to twitch at.
      *
-     * Returns openness: 0 is a closed case facing the reader, 1 is open.
+     * The hold that used to be segment one existed because the shelf fade was
+     * covering the swing - but that was the wrong curve to deform. The shelf
+     * clears on its own compressed sub-timeline instead, which is how the
+     * reference implementations solve the same problem.
      */
-    const openness = to === 1
-      ? (t: number) => {
-          if (t < 0.16) return 0.033 * (t / 0.16);
-          if (t < 0.79) {
-            const u = (t - 0.16) / 0.63;
-            return 0.033 + (0.922 - 0.033) * (1 - Math.pow(1 - u, 2.2));
-          }
-          const u = (t - 0.79) / 0.21;
-          return 0.922 + (1 - 0.922) * (1 - Math.pow(1 - u, 2));
-        }
-      // Closing is gravity, not a hand: it accelerates where opening decelerated.
-      : (t: number) => {
-          if (t < 0.12) return 1 - 0.056 * (t / 0.12);
-          if (t < 0.865) {
-            const u = (t - 0.12) / 0.745;
-            return 0.944 - (0.944 - 0.044) * Math.pow(u, 1.9);
-          }
-          const u = (t - 0.865) / 0.135;
-          return 0.044 * (1 - u);
-        };
+    const smootherstep = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
+
+    /**
+     * The clock starts on the first frame, not at the click. A measured ~217ms
+     * of main-thread stall follows the click while the scene settles, and
+     * starting the clock before it meant the gesture was already a fifth over
+     * before anything could be drawn.
+     */
+    let started: number | null = null;
 
     /**
      * requestAnimationFrame stops on a hidden page, so a reader who switches
@@ -505,8 +498,10 @@ export function App() {
     openCleanup.current = stop;
 
     const step = (now: number) => {
+      started ??= now;
       const linear = Math.min(1, (now - started) / duration);
-      setOpenProgress(openness(linear));
+      const eased = smootherstep(linear);
+      setOpenProgress(to === 1 ? eased : 1 - eased);
       if (linear < 1) {
         openFrame.current = requestAnimationFrame(step);
         return;

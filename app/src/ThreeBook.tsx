@@ -929,6 +929,13 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     }
     const openBoardZ = -(0.22 + BOARD_T) / 2;
 
+    /**
+     * The board stops just shy of flat. A cover that lands has a moment of
+     * contact, and a moment of contact is a thing that can pop; removing the
+     * landing removes the problem rather than trying to cushion it.
+     */
+    const FLAT_PHI = 0.055;
+
     function applyCover() {
       const phi = coverPhi;
       const closure = (1 - Math.cos(phi)) / 2;
@@ -938,11 +945,11 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         0,
         THREE.MathUtils.lerp(openBoardZ, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2 + BOARD_T / 2, closure),
       );
-      // The open spread is meaningless while the case is shut, and drawing it
-      // through a closing cover is what made the old fake transition necessary.
-      const shut = closure > 0.02;
-      leftPage.visible = rightPage.visible = !shut;
-      leftStack.visible = rightStack.visible = !shut || closure < 0.6;
+      // No visibility toggles here. Two booleans used to flip mid-swing - the
+      // page block at 237ms and the spread at 532ms - and a boolean is a pop by
+      // construction. The closed front board sits in front of the pages in
+      // depth, so the depth test occludes them for free and keeps occluding
+      // them continuously as the cover turns.
       applyCamera();
     }
 
@@ -1097,13 +1104,20 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       const priorClearColor = renderer.getClearColor(new THREE.Color());
       const priorClearAlpha = renderer.getClearAlpha();
       const priorAutoClear = renderer.autoClear;
-      stageBackgroundMaterial.map = pair.spread;
+      // Bumping a material's version every frame sends three down a
+      // program-change path on every frame. Only bump it when the map has
+      // actually been swapped.
+      if (stageBackgroundMaterial.map !== pair.spread) {
+        stageBackgroundMaterial.map = pair.spread;
+        stageBackgroundMaterial.needsUpdate = true;
+      }
       // Night is lighting, not a filter: the desk lamp and the reduced key
       // do the work, so the illustration keeps its own colour.
       stageBackgroundMaterial.color.set(0xffffff);
-      stageBackgroundMaterial.needsUpdate = true;
-      stageOverlayMaterial.map = pair.overlay;
-      stageOverlayMaterial.needsUpdate = true;
+      if (stageOverlayMaterial.map !== pair.overlay) {
+        stageOverlayMaterial.map = pair.overlay;
+        stageOverlayMaterial.needsUpdate = true;
+      }
       setStageCameraView(view);
       stageScene.updateMatrixWorld(true);
       renderer.setRenderTarget(target);
@@ -1201,18 +1215,23 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       // which is exactly where the swinging board reaches furthest toward the
       // lens. Every term is zero at phi = 0, so the open pose is byte-identical
       // to the framing the rest of the scene was built against.
-      // Every offset is keyed to sin(phi), which is zero at both ends and peaks
-      // mid-swing. The closed pose therefore matches the shelf card exactly -
-      // face-on, normal framing - so the handoff has nothing to jump across,
-      // and the three-quarter view exists only while there is a moving board
-      // that needs it.
-      const s = Math.sin(coverPhi);
-      // The aim-up term was derived against a taller board and pushed the case
-      // off the bottom of the frame at mid-swing; the dolly carries that work
-      // instead, which keeps the whole book in view without tilting the desk.
-      const dolly = 4.2 * s;
-      camera.position.set(-3.2 * s, framing.y, framing.z + dolly);
-      camera.lookAt(2.05 * s, framing.targetY + 0.42 * s, 0);
+      /**
+       * The camera does not move.
+       *
+       * It used to pan, dolly and pitch on sin(phi), which peaks mid-swing and
+       * returns to zero - an out-and-back round trip inside a single 760ms
+       * gesture, asking the eye to follow a direction reversal at 34% while the
+       * book was also translating and scaling. Worse, keying the camera to the
+       * same parameter that drove the cover turned it into a jerk amplifier:
+       * measured, it multiplied the easing's velocity step into a 38 units/s
+       * pan jerk and a 50 units/s dolly jerk.
+       *
+       * It was there to keep the swinging board in frame, and it is no longer
+       * needed: the book arrives from a shelf card, so it is small for most of
+       * the swing and full size only once the cover is nearly flat.
+       */
+      camera.position.set(0, framing.y, framing.z);
+      camera.lookAt(0, framing.targetY, 0);
       camera.updateProjectionMatrix();
     }
 
@@ -1615,11 +1634,9 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
           lastTurnCaptureKey = "";
         }
       }
-      // The turn machinery hides these mid-turn and has to put them back, but
-      // it must not overrule the case: an open spread drawn through a closing
-      // cover is the exact tell that gave the old fake transition away.
-      const caseOpen = (1 - Math.cos(coverPhi)) / 2 <= 0.02;
-      leftPage.visible = rightPage.visible = caseOpen;
+      // The turn machinery hides these mid-turn and has to put them back. The
+      // case no longer needs a say: the cover occludes them in depth.
+      leftPage.visible = rightPage.visible = true;
 
       frame += 1;
       if (frame % 60 === 0) renderer.info.reset();
@@ -1634,7 +1651,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         coverArtMaterial.opacity = Math.min(1, coverArtMaterial.opacity + delta * 4);
       }
       const requestedOpen = propsRef.current.mode === "workshop" ? 1 : propsRef.current.openProgress.current;
-      const requestedPhi = (1 - THREE.MathUtils.clamp(requestedOpen, 0, 1)) * Math.PI;
+      const requestedPhi = FLAT_PHI + (1 - THREE.MathUtils.clamp(requestedOpen, 0, 1)) * (Math.PI - FLAT_PHI);
       if (Math.abs(requestedPhi - coverPhi) > 1e-4) {
         coverPhi = requestedPhi;
         applyCover();
@@ -1647,9 +1664,11 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       const anchor = settled ? null : shelfAnchor();
       if (anchor) {
         const t = THREE.MathUtils.clamp(requestedOpen, 0, 1);
-        // Arrive slightly ahead of the swing, so the last of the cover motion
-        // happens where the book has come to rest.
-        const travel = Math.min(1, t / 0.82);
+        // Arrives slightly ahead of the swing, but eased to a stop rather than
+        // clamped: min(1, t/0.82) cut the book's velocity from 1.53/s to zero
+        // in one frame at 421ms, while the cover was still turning at 226 deg/s.
+        const ramp = Math.min(1, t / 0.85);
+        const travel = ramp * ramp * ramp * (ramp * (ramp * 6 - 15) + 10);
         book.position.x = THREE.MathUtils.lerp(anchor.x, 0, travel);
         book.position.y = THREE.MathUtils.lerp(anchor.y, bookRestY, travel);
         book.scale.setScalar(THREE.MathUtils.lerp(anchor.scale, 1, travel));
