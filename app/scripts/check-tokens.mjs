@@ -41,6 +41,9 @@ const EXEMPT = {
   fontSize: new Set([
     "inherit",
   ]),
+  shadow: new Set([
+    "none", // the absence of elevation is not a magnitude
+  ]),
 };
 
 const budget = {
@@ -89,7 +92,7 @@ function scan({ label, pattern, exempt = new Set(), allowVar = true }) {
 const checks = [
   scan({ label: "font-size", pattern: /font-size:\s*([^;}]+)/g, exempt: EXEMPT.fontSize }),
   scan({ label: "border-radius", pattern: /border-radius:\s*([^;}]+)/g, exempt: EXEMPT.radius }),
-  scan({ label: "box-shadow", pattern: /box-shadow:\s*([^;}]+)/g }),
+  scan({ label: "box-shadow", pattern: /box-shadow:\s*([^;}]+)/g, exempt: EXEMPT.shadow }),
 ];
 
 const budgets = { "font-size": budget.fontSize, "border-radius": budget.radius, "box-shadow": budget.shadow };

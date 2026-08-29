@@ -117,14 +117,11 @@ select:focus-visible {
   align-items: center;
   gap: 8px;
   min-height: 42px;
-  border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   padding: 0 15px;
   color: var(--ink);
-  background: var(--surface);
+  background: var(--surface-strong);
   box-shadow: var(--elev-2);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
   pointer-events: auto;
   cursor: pointer;
 }
@@ -227,12 +224,9 @@ select:focus-visible {
   place-items: center;
   width: 42px;
   height: 42px;
-  border: 1px solid var(--line);
   border-radius: var(--shape-circle);
-  background: var(--surface);
+  background: var(--surface-strong);
   box-shadow: var(--elev-2);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
   cursor: pointer;
 }
 
@@ -302,8 +296,6 @@ select:focus-visible {
   border: 1px solid var(--line);
   color: var(--ink);
   background: var(--surface);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
 }
 
 /* Compact segmented control. Personal books lead; the counts stay quiet so the
@@ -313,12 +305,9 @@ select:focus-visible {
   gap: 2px;
   align-self: center;
   padding: 4px;
-  border: 1px solid var(--line);
   border-radius: var(--radius-pill);
-  background: var(--surface);
+  background: var(--surface-strong);
   box-shadow: var(--elev-2);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
   pointer-events: auto;
 }
 
@@ -453,8 +442,6 @@ select:focus-visible {
   color: #fff;
   background: rgba(24, 21, 17, .78);
   box-shadow: var(--elev-1);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
   font-size: var(--text-caption);
   font-weight: 700;
   letter-spacing: .02em;
@@ -471,8 +458,6 @@ select:focus-visible {
   place-items: center;
   padding: 24px;
   background: rgba(232, 222, 206, .28);
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
   pointer-events: auto;
   animation: book-loading-in var(--motion-state) var(--ease-info) var(--motion-feedback) both;
 }
@@ -487,14 +472,11 @@ select:focus-visible {
   gap: 13px;
   width: min(360px, calc(100vw - 40px));
   min-height: 76px;
-  border: 1px solid var(--line);
   border-radius: var(--radius-l);
   padding: 13px 18px;
   color: var(--ink);
-  background: var(--surface);
+  background: var(--surface-strong);
   box-shadow: var(--elev-3);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
 }
 
 .book-loading-icon {
@@ -728,21 +710,55 @@ select:focus-visible {
 
 .app-shell.is-book-nav-active .stage { pointer-events: none; }
 
+/* Three jobs, three treatments.
+ *
+ * One rule used to give ten unrelated selectors the same frosted card, and a
+ * second copy of it lower down gave three more. A default reading screen
+ * therefore showed seven surfaces at identical visual weight, each running a
+ * backdrop readback over a live WebGL canvas. Elevation now says what a thing
+ * IS, and nothing is translucent over the book.
+ */
+
+/* Resting on the paper: chrome that belongs to the page itself. */
 .theme-switch,
 .preview-button,
-.page-arrow,
 .outline-button,
-.agent-prompt,
-.page-progress,
+.page-arrow,
+.agent-action,
+.hover-hint {
+  border: 0;
+  background: var(--surface-strong);
+  box-shadow: var(--elev-1);
+}
+
+/* Lifted off the paper: a surface the reader summoned. */
 .context-menu,
 .element-panel,
-.agent-action,
-.story-outline {
-  border: 1px solid var(--line);
-  background: var(--surface);
+.element-rail {
+  border: 0;
+  background: var(--surface-strong);
   box-shadow: var(--elev-2);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
+}
+
+/* Floating over the book: an aside that takes the reader's attention. */
+.story-outline,
+.reveal-card {
+  border: 0;
+  background: var(--surface-strong);
+  box-shadow: var(--elev-3);
+}
+
+/* The folio is printed matter, not a control. Ink on the page edge. */
+.page-progress {
+  border: 0;
+  color: var(--ink-3);
+  background: none;
+  box-shadow: none;
+}
+
+/* The one primary action on the reading screen. */
+.agent-prompt {
+  border: 0;
 }
 
 .theme-switch {
@@ -1065,9 +1081,8 @@ select:focus-visible {
   gap: 10px;
   width: auto;
   max-width: 300px;
-  border-color: color-mix(in srgb, var(--accent) 76%, #7f241d);
-  padding: 0 18px;
-  color: #fff;
+  padding: 0 var(--space-4);
+  color: var(--accent-ink);
   background: var(--accent);
   box-shadow: var(--elev-accent-rest);
   cursor: pointer;
@@ -1336,7 +1351,6 @@ select:focus-visible {
   color: var(--ink);
   background: var(--surface);
   box-shadow: var(--elev-2);
-  backdrop-filter: blur(16px);
 }
 
 /* One scrolling sheet, so the same layout holds at 390px, in the Codex side
@@ -1358,7 +1372,6 @@ select:focus-visible {
   color: var(--ink);
   background: color-mix(in srgb, var(--surface-strong) 93%, transparent);
   box-shadow: var(--elev-3);
-  backdrop-filter: blur(24px) saturate(.92);
   pointer-events: auto;
 }
 
@@ -1822,16 +1835,6 @@ select:focus-visible {
 
 /* Structured interaction surfaces: element rail, hover affordance, reveal card. */
 
-.element-rail,
-.hover-hint,
-.reveal-card {
-  border: 1px solid var(--line);
-  background: var(--surface);
-  box-shadow: var(--elev-2);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
-}
-
 .element-rail {
   position: absolute;
   z-index: 14;
@@ -2179,14 +2182,11 @@ select:focus-visible {
   align-items: center;
   gap: 7px;
   min-height: 48px;
-  border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   padding: 0 17px;
   color: var(--ink);
-  background: var(--surface);
+  background: var(--surface-strong);
   box-shadow: var(--elev-2);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
   cursor: pointer;
   font-weight: 620;
 }
@@ -2280,7 +2280,7 @@ select:focus-visible {
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
   padding: 11px 12px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  background: var(--surface-strong);
 }
 
 .publication-quality > svg { margin-top: 1px; }
