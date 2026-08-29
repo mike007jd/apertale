@@ -65,6 +65,15 @@ const runtimeParams = new URLSearchParams(window.location.search);
 const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
 const forceReducedMotion = runtimeParams.get("reducedMotion") === "1";
 const forceFallback = runtimeParams.get("fallback") === "1";
+/**
+ * Freezes the case at a fixed openness so a mid-swing pose can be captured for
+ * the visual QA record in app/qa. 0 is closed, 1 is open; anything outside that
+ * range is ignored.
+ */
+const forcedOpenProgress = (() => {
+  const raw = Number(runtimeParams.get("openProgress"));
+  return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : null;
+})();
 const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: module.ThreeBook })));
 
 type OpeningBook = {
@@ -492,7 +501,70 @@ export function App() {
   const turnPage = turnController.turnPage;
   const onPageGesture = turnController.onPageGesture;
   const webGlAvailable = useMemo(supportsWebGl2, []);
-  const renderWebGl = !showLibrary && webGlAvailable && !sceneFailed;
+  const renderWebGl = webGlAvailable && !sceneFailed;
+
+  /**
+   * 1 is a fully open book, 0 is the closed case facing the reader. The library
+   * shows a closed book behind it; opening animates this to 1 while the shelf
+   * fades, so the cover the reader clicked is the cover that swings.
+   */
+  const openProgress = useRef(forcedOpenProgress ?? (showLibrary ? 0 : 1));
+  const openFrame = useRef<number | null>(null);
+  const openCleanup = useRef<(() => void) | null>(null);
+  const setOpenProgress = (value: number) => { openProgress.current = forcedOpenProgress ?? value; };
+
+  const animateCase = useCallback((to: 0 | 1, done?: () => void) => {
+    openCleanup.current?.();
+    if (reducedMotion) {
+      setOpenProgress(to);
+      done?.();
+      return;
+    }
+    // Close runs at 70% of open's duration with an accelerating curve: a board
+    // being opened is a hand, a board falling shut is gravity.
+    const duration = to === 1 ? 760 : 532;
+    const started = performance.now();
+    const from = to === 1 ? 0 : 1;
+
+    /**
+     * requestAnimationFrame stops on a hidden page, so a reader who switches
+     * tabs mid-open would come back to a shelf that never went away and a book
+     * that never opened. Settling on the way out is what a returning reader
+     * expects to find anyway.
+     */
+    const stop = () => {
+      if (openFrame.current !== null) cancelAnimationFrame(openFrame.current);
+      openFrame.current = null;
+      document.removeEventListener("visibilitychange", onHidden);
+      openCleanup.current = null;
+    };
+    const settle = () => {
+      stop();
+      setOpenProgress(to);
+      done?.();
+    };
+    function onHidden() {
+      if (document.hidden) settle();
+    }
+    document.addEventListener("visibilitychange", onHidden);
+    openCleanup.current = stop;
+
+    const step = (now: number) => {
+      const linear = Math.min(1, (now - started) / duration);
+      const eased = to === 1
+        ? 1 - Math.pow(1 - linear, 3)
+        : linear * linear * linear;
+      setOpenProgress(from + (to - from) * eased);
+      if (linear < 1) {
+        openFrame.current = requestAnimationFrame(step);
+        return;
+      }
+      settle();
+    };
+    openFrame.current = requestAnimationFrame(step);
+  }, [reducedMotion]);
+
+  useEffect(() => () => openCleanup.current?.(), []);
   const library = useMemo(() => bookEngine.getLibrary(), [snapshot.document.id, snapshot.document.revision]);
   const activeLibraryBook = library.books.find((book) => book.id === library.activeBookId);
   const { personal: personalBooks, curated: curatedBooks, tabbed: libraryTabbed } = useMemo(
@@ -675,32 +747,24 @@ export function App() {
   }, [bookTransition, hideLibrary]);
 
   const beginOpenTransition = useCallback((book: OpeningBook) => {
-    const sourceRect = book.sourceRect ?? findLibraryCoverRect(book.id);
-    if (reducedMotion || !sourceRect) {
+    if (reducedMotion) {
       recordDiagnostic("book:navigation-transition-reduced", { documentId: book.id, direction: "open" });
       openingBookRef.current = null;
       setOpeningBook(null);
+      setOpenProgress(1);
       hideLibrary();
       return;
     }
-    const liveSnapshot = bookEngine.getSnapshot();
-    const transitionSpread = liveSnapshot.document.spreads[liveSnapshot.session.currentSpreadIndex]
-      ?? liveSnapshot.document.spreads[0];
+    recordDiagnostic("book:cover-open-started", { documentId: book.id });
     openingBookRef.current = book;
     setOpeningBook(null);
     setLibraryMotion("opening-book");
-    setBookTransition({
-      id: book.id,
-      title: book.title,
-      coverUrl: book.coverUrl,
-      spreadTextureUrl: transitionSpread?.textureUrl ?? "",
-      spreadTitle: transitionSpread?.title ?? book.title,
-      spreadBody: transitionSpread?.body ?? "",
-      direction: "open",
-      cardRect: sourceRect,
+    animateCase(1, () => {
+      openingBookRef.current = null;
+      hideLibrary();
+      recordDiagnostic("book:cover-open-settled", { documentId: book.id });
     });
-    recordDiagnostic("book:navigation-transition-started", { documentId: book.id, direction: "open" });
-  }, [findLibraryCoverRect, hideLibrary, reducedMotion]);
+  }, [animateCase, hideLibrary, reducedMotion]);
 
   const openLibrary = useCallback(() => {
     if (showLibrary || bookTransition || openingBookRef.current) return;
@@ -709,34 +773,19 @@ export function App() {
     setShowLibrary(true);
     if (reducedMotion) {
       setLibraryMotion("idle");
+      setOpenProgress(0);
       recordDiagnostic("book:navigation-transition-reduced", { documentId: snapshot.document.id, direction: "close" });
       return;
     }
-    libraryFrame.current = window.requestAnimationFrame(() => {
-      libraryFrame.current = window.requestAnimationFrame(() => {
-        libraryFrame.current = null;
-        const cardRect = findLibraryCoverRect(snapshot.document.id);
-        if (!cardRect) {
-          setLibraryMotion("idle");
-          return;
-        }
-        const liveSnapshot = bookEngine.getSnapshot();
-        const transitionSpread = liveSnapshot.document.spreads[liveSnapshot.session.currentSpreadIndex]
-          ?? liveSnapshot.document.spreads[0];
-        setBookTransition({
-          id: snapshot.document.id,
-          title: snapshot.document.title,
-          coverUrl: resolvedCoverUrls[snapshot.document.id] ?? activeLibraryBook?.coverTextureUrl ?? "",
-          spreadTextureUrl: transitionSpread?.textureUrl ?? "",
-          spreadTitle: transitionSpread?.title ?? snapshot.document.title,
-          spreadBody: transitionSpread?.body ?? "",
-          direction: "close",
-          cardRect,
-        });
-        recordDiagnostic("book:navigation-transition-started", { documentId: snapshot.document.id, direction: "close" });
-      });
+    // The shelf is already mounted over the scene, so the case closes behind it
+    // and the reader sees the cover come back rather than a card being redrawn.
+    recordDiagnostic("book:cover-close-started", { documentId: snapshot.document.id });
+    animateCase(0, () => {
+      setLibraryMotion("idle");
+      recordDiagnostic("book:cover-close-settled", { documentId: snapshot.document.id });
+      window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>(".library-close")?.focus(), 0);
     });
-  }, [activeLibraryBook?.coverTextureUrl, bookTransition, findLibraryCoverRect, reducedMotion, resolvedCoverUrls, showLibrary, snapshot.document.id, snapshot.document.title]);
+  }, [animateCase, bookTransition, reducedMotion, showLibrary, snapshot.document.id]);
 
   const handleBookLoading = useCallback((documentId: string) => {
     setSceneLoadingBookId(documentId);
@@ -757,11 +806,33 @@ export function App() {
     recordDiagnostic("book:visual-review-unavailable", { documentId });
   }, []);
 
+  /**
+   * The cover swings only once the scene behind the shelf can actually draw
+   * the book. Starting on the document switch instead meant the shelf faded
+   * out onto an empty stage for the length of a WebGL cold start - the two
+   * phases were strictly serial, which is what made click-to-readable take
+   * roughly two and a half seconds. The shelf now holds its "Opening" state
+   * during the warmup and the reader never sees the gap.
+   */
   useEffect(() => {
     if (!openingBook || snapshot.document.id !== openingBook.id) return;
-    if (bookTransition?.direction === "open") return;
-    beginOpenTransition(openingBook);
-  }, [beginOpenTransition, bookTransition?.direction, openingBook, snapshot.document.id]);
+    if (readyBookId === openingBook.id) {
+      beginOpenTransition(openingBook);
+      return undefined;
+    }
+    /**
+     * Readiness is a signal from the render loop, and the render loop stops on
+     * a hidden page or a stalled GPU. Waiting for it unconditionally would trap
+     * the reader on a shelf that says "Opening" forever, so the open proceeds
+     * regardless after a bounded wait - the same failsafe the CSS transition
+     * carried, kept for the same reason.
+     */
+    const failsafe = window.setTimeout(() => {
+      recordDiagnostic("book:cover-open-unready", { documentId: openingBook.id });
+      beginOpenTransition(openingBook);
+    }, 2600);
+    return () => window.clearTimeout(failsafe);
+  }, [beginOpenTransition, openingBook, readyBookId, snapshot.document.id]);
 
   const closeCodexGuide = useCallback(() => {
     setShowCreateGuide(false);
@@ -1240,7 +1311,7 @@ export function App() {
         aria-busy={!showCreateGuide && stageIsLoading}
         aria-label={showCreateGuide ? "Blank three-dimensional book workshop" : `${spread.title}. Spread ${snapshot.session.currentSpreadIndex + 1} of ${snapshot.document.spreads.length}`}
       >
-        {showLibrary && !showCreateGuide ? null : renderWebGl ? (
+        {renderWebGl ? (
           <Suspense fallback={showCreateGuide
             ? <div className="fallback-book workshop-blank-fallback is-loading" />
             : <div className="fallback-book is-loading"><img src={spread.textureUrl} alt="" /></div>}>
@@ -1248,6 +1319,7 @@ export function App() {
               snapshot={showCreateGuide ? workshopSnapshot : snapshot}
               turn={showCreateGuide ? null : turn}
               mode={showCreateGuide ? "workshop" : "reader"}
+              openProgress={openProgress}
               onSelect={showCreateGuide ? () => undefined : (elementId) => { bookEngine.setSelection(elementId); setShowMore(false); }}
               onHover={showCreateGuide ? () => undefined : setHoveredId}
               onMoveElement={showCreateGuide ? () => undefined : (elementId, x, y) => humanEdit(elementId, { x, y })}

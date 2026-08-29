@@ -16,8 +16,13 @@ type Props = {
    * 1 is fully open, 0 is closed with the cover facing the reader. The caller
    * owns the timing; the renderer only follows, so open and close share one
    * code path and the pose stays duration-agnostic.
+   *
+   * A ref rather than a value on purpose. Driving this through React state
+   * re-rendered the whole app on every animation frame and stretched a 760ms
+   * open to over a second; the render loop already runs, so it reads the
+   * current value itself.
    */
-  openProgress?: number;
+  openProgress?: { readonly current: number };
   onSelect: (elementId: string | null) => void;
   onHover: (elementId: string | null) => void;
   onMoveElement: (elementId: string, x: number, y: number) => void;
@@ -40,6 +45,9 @@ type PagePair = {
   spread: THREE.CanvasTexture;
   overlay: THREE.CanvasTexture;
 };
+
+/** Surfaces that never animate the case hold it fully open. */
+const STATIC_OPEN = { current: 1 } as const;
 
 const PAGE_W = 4.2;
 const PAGE_H = 5.18;
@@ -551,7 +559,7 @@ function buildSceneElement(
   };
 }
 
-export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, openProgress = 1, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
+export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, openProgress = STATIC_OPEN, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const propsRef = useRef({ snapshot, turn, mode, readOnly, openProgress, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
   propsRef.current = { snapshot, turn, mode, readOnly, openProgress, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
@@ -713,7 +721,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     let spineGap = spineWidth(propsRef.current.snapshot.document.spreads.length);
 
     const coverMaterial = new THREE.MeshStandardMaterial({ color: 0x173f39, roughness: 0.52, metalness: 0.03 });
-    const spineMaterial = new THREE.MeshStandardMaterial({ color: 0x5e5040, roughness: 0.78 });
+    const spineMaterial = new THREE.MeshStandardMaterial({ color: 0x5e5040, roughness: 0.78, side: THREE.DoubleSide });
 
     const spineShell = new THREE.Mesh(
       // Open-ended: the head and tail of a cased spine are covered by the
@@ -767,6 +775,44 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     frontBoardPivot.add(coverArt);
 
     /**
+     * Covers are authored 2:3 while the board is 4.27 x 5.75, so the map is
+     * cropped rather than stretched - 118px comes off the bottom of 1152 and
+     * the title, which always sits in the upper half, survives intact.
+     *
+     * The art fades in over its own board instead of replacing the material, so
+     * a cover that resolves late (a user book's blob comes from IndexedDB) or
+     * never resolves at all changes nothing about the board's lighting or its
+     * silhouette. There is no spinner and no swap-pop.
+     */
+    const coverSource = propsRef.current.snapshot.document.coverAssetId ?? propsRef.current.snapshot.document.coverTextureUrl;
+    if (coverSource) {
+      const resolveCover = isStoredAssetId(coverSource) ? resolveAssetUrl(coverSource) : Promise.resolve(coverSource);
+      resolveCover
+        .then((url) => new Promise<THREE.Texture>((resolve, reject) => {
+          textureLoader.load(url, resolve, undefined, reject);
+        }))
+        .then((texture) => {
+          if (disposed) return;
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.anisotropy = 8;
+          const boardAspect = BOARD_W / BOARD_H;
+          const image = texture.image as { width?: number; height?: number } | undefined;
+          const artAspect = (image?.width ?? 2) / (image?.height ?? 3);
+          if (artAspect < boardAspect) {
+            texture.repeat.set(1, artAspect / boardAspect);
+            texture.offset.set(0, (1 - artAspect / boardAspect) / 2);
+          } else {
+            texture.repeat.set(boardAspect / artAspect, 1);
+            texture.offset.set((1 - boardAspect / artAspect) / 2, 0);
+          }
+          coverArtMaterial.map = texture;
+          coverArtMaterial.needsUpdate = true;
+          coverArtFadeIn = true;
+        })
+        .catch(() => recordDiagnostic("asset:cover-board-failed", { documentId: propsRef.current.snapshot.document.id }));
+    }
+
+    /**
      * phi = 0 is fully open; phi = PI is closed with the spine on the left and
      * the cover art facing the reader.
      *
@@ -776,6 +822,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
      * to float off its own hinge.
      */
     let coverPhi = 0;
+    let coverArtFadeIn = false;
     const openBoardZ = -(0.22 + BOARD_T) / 2;
 
     function applyCover() {
@@ -1078,7 +1125,7 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
     // The joint defaults to its closed transform, so the case has to be placed
     // once before the first frame or a reader who never triggers an open sees
     // a shut book.
-    coverPhi = (1 - THREE.MathUtils.clamp(propsRef.current.openProgress, 0, 1)) * Math.PI;
+    coverPhi = (1 - THREE.MathUtils.clamp(propsRef.current.openProgress.current, 0, 1)) * Math.PI;
     applyCover();
 
     function setPointer(event: PointerEvent) {
@@ -1457,7 +1504,13 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
       // The case follows the caller's progress rather than owning a timeline of
       // its own, so opening and closing are the same code path read in
       // opposite directions.
-      const requestedPhi = (1 - THREE.MathUtils.clamp(propsRef.current.openProgress, 0, 1)) * Math.PI;
+      // The workshop shows a blank book that is never closed, so it ignores the
+      // caller's progress rather than inheriting the library's closed state.
+      if (coverArtFadeIn && coverArtMaterial.opacity < 1) {
+        coverArtMaterial.opacity = Math.min(1, coverArtMaterial.opacity + delta * 1.4);
+      }
+      const requestedOpen = propsRef.current.mode === "workshop" ? 1 : propsRef.current.openProgress.current;
+      const requestedPhi = (1 - THREE.MathUtils.clamp(requestedOpen, 0, 1)) * Math.PI;
       if (Math.abs(requestedPhi - coverPhi) > 1e-4) {
         coverPhi = requestedPhi;
         applyCover();
