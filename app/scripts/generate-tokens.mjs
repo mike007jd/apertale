@@ -119,6 +119,27 @@ export const accentElevation = ${literal(accentElevation)} as const;
  */
 export const motion = ${literal(motion)} as const;
 
+/**
+ * The same two scales in the units Motion takes. Derived here rather than
+ * retyped at the call sites, which is what the CSS strings above were quietly
+ * forcing every JS animation to do.
+ */
+export const durationMs = ${literal(
+    Object.fromEntries(Object.entries(motion.duration).map(([k, v]) => [k, Number.parseFloat(String(v))])),
+  )} as const;
+
+export const easePoints = ${literal(
+    Object.fromEntries(
+      Object.entries(motion.ease).map(([k, v]) => [
+        k,
+        String(v)
+          .replace(/^cubic-bezier\(|\)$/g, "")
+          .split(",")
+          .map((n) => Number.parseFloat(n)),
+      ]),
+    ),
+  )} as const;
+
 export type SpaceStep = keyof typeof space;
 export type RadiusStep = keyof typeof radius;
 `;

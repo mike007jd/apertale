@@ -41,6 +41,10 @@ import {
   restoreCreationWorkshopAssets,
 } from "./creationWorkshop";
 import { AnimatePresence } from "motion/react";
+import { smootherstep } from "./design/curves";
+import { durationMs } from "./design/tokens.generated";
+import { announce, supportsWebGl2 } from "./readerShell";
+import { spreadFraction } from "./stageGeometry";
 import { Panel, Toast } from "./design/primitives";
 import { ThemeSwitch } from "./design/ThemeSwitch";
 import { completeImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
@@ -170,24 +174,6 @@ function BookLoadingFeedback({ title, placement, stage, reducedMotion }: {
 }
 
 /** Joins announcement fragments without producing the doubled `..` of naive concatenation. */
-function announce(...parts: Array<string | undefined | null>) {
-  return parts
-    .map((part) => (part ?? "").trim())
-    .filter(Boolean)
-    .map((part) => (/[.!?…:;]$/u.test(part) ? part : `${part}.`))
-    .join(" ");
-}
-
-function supportsWebGl2() {
-  if (forceFallback) return false;
-  try {
-    const canvas = document.createElement("canvas");
-    return Boolean(canvas.getContext("webgl2"));
-  } catch {
-    return false;
-  }
-}
-
 type FallbackLayer = {
   id: string;
   url: string;
@@ -312,7 +298,7 @@ function FallbackBook({ snapshot, spread, onReady, onUnavailable, onRendered }: 
         onError={() => markFailed(loadKeys[0])}
       />
       {resolved.layers.map(({ id, url, element }, index) => {
-        const x = ((element.page === "right" ? 0.5 : 0) + element.transform.x * 0.5) * 100;
+        const x = spreadFraction(element) * 100;
         const style = {
           left: `${x}%`,
           top: `${element.transform.y * 100}%`,
@@ -423,7 +409,7 @@ export function App() {
 
   const turnPage = turnController.turnPage;
   const onPageGesture = turnController.onPageGesture;
-  const webGlAvailable = useMemo(supportsWebGl2, []);
+  const webGlAvailable = useMemo(() => supportsWebGl2(forceFallback), []);
   const renderWebGl = webGlAvailable && !sceneFailed;
 
   /**
@@ -447,26 +433,21 @@ export function App() {
     }
     // Equal durations. The shelf's own fade is what differentiates the two
     // directions now, rather than a compressed curve that has to land harder
-    // to cover the same distance in less time.
-    const duration = 760;
+    // to cover the same distance in less time. This IS `--motion-navigation`;
+    // retyping the number is how the CSS and the case fall out of step.
+    const duration = durationMs.navigation;
 
-    /**
-     * One curve, end to end.
-     *
-     * This was three self-terminating power segments glued together, and the
-     * joins WERE the jank: measured, velocity stepped 15x at t=0.16, the cover
-     * came to a literal dead stop and restarted at t=0.79, and the close landed
-     * with speed still in it. Smootherstep has zero first AND second derivative
-     * at both ends, so nothing starts, stops or lands abruptly and there is no
-     * join left to twitch at.
+    /*
+     * One curve, end to end. This was three self-terminating power segments
+     * glued together, and the joins WERE the jank: measured, velocity stepped
+     * 15x at t=0.16, the cover came to a literal dead stop and restarted at
+     * t=0.79, and the close landed with speed still in it.
      *
      * The hold that used to be segment one existed because the shelf fade was
      * covering the swing - but that was the wrong curve to deform. The shelf
      * clears on its own compressed sub-timeline instead, which is how the
      * reference implementations solve the same problem.
      */
-    const smootherstep = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
-
     /**
      * The clock starts on the first frame, not at the click. A measured ~217ms
      * of main-thread stall follows the click while the scene settles, and
@@ -624,8 +605,7 @@ export function App() {
       // positioned against the padding box the border encloses.
       const left = bookBox.left - hostBox.left + book.clientLeft;
       const top = bookBox.top - hostBox.top + book.clientTop;
-      const acrossSpread = (selected.page === "right" ? 0.5 : 0) + selected.transform.x * 0.5;
-      host.style.setProperty("--selection-x", `${left + acrossSpread * book.clientWidth}px`);
+      host.style.setProperty("--selection-x", `${left + spreadFraction(selected) * book.clientWidth}px`);
       host.style.setProperty("--selection-y", `${top + selected.transform.y * book.clientHeight}px`);
     };
     place();
@@ -1076,7 +1056,9 @@ export function App() {
   // is held in a ref. Without this the effect below needs no dependency array,
   // which detaches and reattaches a window listener on every single render.
   const pasteImporter = useRef<(files: FileList) => void>(() => undefined);
-  pasteImporter.current = (files: FileList) => { void importWorkshopPhotos(files); };
+  useEffect(() => {
+    pasteImporter.current = (files: FileList) => { void importWorkshopPhotos(files); };
+  });
 
   useEffect(() => {
     if (!showCreateGuide) return undefined;

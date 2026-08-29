@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ArrowLeft, ArrowRight, X } from "@phosphor-icons/react";
 import { ThemeSwitch } from "./design/ThemeSwitch";
 import { hasReveal, resolveInteraction } from "./interaction";
+import { announce, supportsWebGl2 } from "./readerShell";
 import {
   canTurnPage,
   createPageTurnSession,
@@ -24,22 +25,6 @@ function shareTokenFromPath() {
 }
 
 /** Joins announcement fragments without producing the doubled `..` of naive concatenation. */
-function announce(...parts: Array<string | undefined | null>) {
-  return parts
-    .map((part) => (part ?? "").trim())
-    .filter(Boolean)
-    .map((part) => (/[.!?…:;]$/u.test(part) ? part : `${part}.`))
-    .join(" ");
-}
-
-function supportsWebGl2() {
-  try {
-    return Boolean(document.createElement("canvas").getContext("webgl2"));
-  } catch {
-    return false;
-  }
-}
-
 export function SharedBookApp() {
   const [documentState, setDocumentState] = useState<DocumentState | null>(null);
   const [error, setError] = useState<string | null>(null);
