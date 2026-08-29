@@ -124,7 +124,10 @@ describe("BookEngine document contract", () => {
     const documents = structuredClone(sampleBooks);
     const atlas = documents.find((book) => book.id === "apertale-atlas-of-wonders")!;
     atlas.revision = 2;
-    const taj = atlas.spreads.find((item) => item.id === "taj-mahal")!.elements.find((element) => element.id === "taj-monument")!;
+    const tajSpread = atlas.spreads.find((item) => item.id === "taj-mahal")!;
+    tajSpread.textureUrl = tajSpread.artwork!.cleanPlateAssetId;
+    const taj = tajSpread.elements.find((element) => element.id === "taj-monument")!;
+    const dome = tajSpread.elements.find((element) => element.id === "taj-dome")!;
     taj.transform.x = 0.91;
     taj.transform.scaleX = 1.5;
     taj.transform.scaleY = 1.22;
@@ -132,15 +135,22 @@ describe("BookEngine document contract", () => {
     taj.kind = "lifted";
     taj.locked = false;
     taj.interaction!.focus = "orbit-inspect";
+    dome.transform.scaleX = 1;
+    dome.transform.scaleY = 1;
+    dome.motion = { preset: "soft-pulse", durationMs: 4200, loop: true };
     localStorage.setItem("apertale.library.v4", JSON.stringify({ activeBookId: atlas.id, documents, sampleSourceVersion: 3 }));
 
     const migrated = new BookEngine().getSnapshot().document;
-    const migratedTaj = migrated.spreads.find((item) => item.id === "taj-mahal")!.elements.find((element) => element.id === "taj-monument")!;
+    const migratedTajSpread = migrated.spreads.find((item) => item.id === "taj-mahal")!;
+    const migratedTaj = migratedTajSpread.elements.find((element) => element.id === "taj-monument")!;
+    const migratedDome = migratedTajSpread.elements.find((element) => element.id === "taj-dome")!;
     expect(migratedTaj.transform.x).toBe(0.91);
     expect(migratedTaj.transform).toMatchObject({ scaleX: 0.72, scaleY: 0.72 });
     expect(migratedTaj).toMatchObject({ kind: "decoration", locked: true, depth: 0.12 });
     expect(isProceduralElement(migratedTaj)).toBe(true);
     expect(migratedTaj.interaction?.focus).toBe("spotlight");
+    expect(migratedDome.transform).toMatchObject({ scaleX: 0.72, scaleY: 0.72 });
+    expect(migratedDome.motion).toBeUndefined();
   });
 
   it("commits one revision and returns an undo token", () => {

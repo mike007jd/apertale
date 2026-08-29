@@ -197,6 +197,8 @@ function loadLibrary(): StoredLibrary {
           return;
         }
         const removedLegacyModel = storedSpread.elements.some((element) => element.assetId.startsWith("model:"));
+        const adoptsGroundedComposite = spread.textureUrl === spread.artwork?.sourceAssetId
+          && storedSpread.textureUrl !== spread.textureUrl;
         storedSpread.elements = storedSpread.elements.filter((element) => !element.assetId.startsWith("model:"));
         spread.elements.forEach((element) => {
           const storedElement = storedSpread.elements.find((candidate) => candidate.id === element.id);
@@ -212,7 +214,7 @@ function loadLibrary(): StoredLibrary {
             storedElement.kind = element.kind;
             storedElement.motion = clone(element.motion);
             storedElement.interaction = clone(element.interaction);
-            if (replacesImageWithProcedural) {
+            if (replacesImageWithProcedural || adoptsGroundedComposite) {
               storedElement.transform.scaleX = element.transform.scaleX;
               storedElement.transform.scaleY = element.transform.scaleY;
               storedElement.depth = element.depth;

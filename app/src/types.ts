@@ -109,8 +109,11 @@ export type Spread = {
 };
 
 /** Resolve the asset actually painted behind a spread's interactive elements. */
-export function spreadBaseAssetId(spread: Pick<Spread, "textureUrl" | "artwork">) {
-  if (spread.textureUrl && spread.textureUrl === spread.artwork?.sourceAssetId) return spread.textureUrl;
+export function spreadBaseAssetId(spread: Pick<Spread, "textureUrl" | "artwork" | "elements">) {
+  const usesGroundedComposite = spread.textureUrl
+    && spread.textureUrl === spread.artwork?.sourceAssetId
+    && spread.elements.every(isProceduralElement);
+  if (usesGroundedComposite) return spread.textureUrl;
   return spread.artwork?.cleanPlateAssetId ?? spread.textureUrl;
 }
 

@@ -62,6 +62,7 @@ describe("render evidence readiness", () => {
   it("uses an explicitly selected source composite without re-adding detached layers", () => {
     const grounded = spread();
     grounded.textureUrl = grounded.artwork!.sourceAssetId;
+    expect(fallbackAssetPlan(grounded).baseAssetId).toBe("/clean.png");
     grounded.elements = grounded.elements.filter(isProceduralElement);
     const plan = fallbackAssetPlan(grounded);
     expect(plan.baseAssetId).toBe("/composite.png");
