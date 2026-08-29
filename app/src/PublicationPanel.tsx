@@ -17,6 +17,7 @@ import type { PublicationProgress, PublicationRecord } from "./publishingClient"
 import { recordDiagnostic } from "./diagnostics";
 import { useFocusTrap } from "./focusTrap";
 import { listStoredProjectAssetIds } from "./projectArtifact";
+import { groupQualityBlockers } from "./qualityContract";
 import type { QualityGateState } from "./qualityContract";
 import type { DocumentState } from "./types";
 
@@ -82,7 +83,9 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
         : qualityGate.status === "blocked"
           ? { label: "Fix quality blockers", detail: qualityGate.message }
           : { label: "Quality check needed", detail: qualityGate.message };
-  const qualityBlockers = qualityGate.report?.checks.filter((check) => check.outcome === "blocker") ?? [];
+  // One line per distinct problem; see groupQualityBlockers for why the raw
+  // check list repeats itself.
+  const qualityBlockers = useMemo(() => groupQualityBlockers(qualityGate.report?.checks), [qualityGate.report]);
 
   // Only browser-local blobs are uploaded; bundled `/assets/...` references travel
   // inside the manifest. The count comes from the same collector the publishing
@@ -210,12 +213,19 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
 
           {status !== "published" && qualityBlockers.length > 0 && (
             <ul className="publication-quality-findings" aria-label="Quality blockers">
-              {qualityBlockers.slice(0, 3).map((finding, index) => (
-                <li key={`${finding.criterionId}-${index}`}>
-                  <strong>{finding.message}</strong>
+              {qualityBlockers.slice(0, 3).map((finding) => (
+                <li key={finding.message}>
+                  <strong>{finding.message}{finding.count > 1 ? ` (${finding.count}×)` : ""}</strong>
                   {finding.suggestedPatch && <span>{finding.suggestedPatch}</span>}
                 </li>
               ))}
+              {/* Say what is not shown rather than letting three lines imply
+                  three problems is all there is. */}
+              {qualityBlockers.length > 3 && (
+                <li className="publication-quality-more">
+                  <strong>{qualityBlockers.length - 3} more blocker{qualityBlockers.length - 3 === 1 ? "" : "s"} in the critique</strong>
+                </li>
+              )}
             </ul>
           )}
 

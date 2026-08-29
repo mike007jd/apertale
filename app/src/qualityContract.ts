@@ -77,7 +77,7 @@ export type QualityRenderEvidence = {
   renderedAt: string;
 };
 
-type QualityCheckResult = {
+export type QualityCheckResult = {
   criterionId: string;
   outcome: QualityOutcome;
   message: string;
@@ -450,6 +450,38 @@ export function buildQualityReport(
     publishAllowed,
     summary: submission.summary.trim(),
   };
+}
+
+export type QualityBlockerGroup = {
+  message: string;
+  suggestedPatch?: string;
+  count: number;
+};
+
+/**
+ * One entry per distinct blocker message, newest evidence folded into the
+ * first occurrence.
+ *
+ * A visual critique records a blocker per criterion per piece of evidence, so
+ * one fault - a cover with no legible title - arrives once for the cover and
+ * again for every spread that shows it. Listing the raw checks made a single
+ * problem look like three, which is both wrong and the most discouraging
+ * possible way to be wrong. The repeat count is kept because it is the only
+ * information the duplicate entries carried.
+ */
+export function groupQualityBlockers(checks: readonly QualityCheckResult[] | undefined): QualityBlockerGroup[] {
+  const byMessage = new Map<string, QualityBlockerGroup>();
+  for (const check of checks ?? []) {
+    if (check.outcome !== "blocker") continue;
+    const seen = byMessage.get(check.message);
+    if (seen) {
+      seen.count += 1;
+      seen.suggestedPatch ??= check.suggestedPatch;
+      continue;
+    }
+    byMessage.set(check.message, { message: check.message, suggestedPatch: check.suggestedPatch, count: 1 });
+  }
+  return [...byMessage.values()];
 }
 
 export function buildQualityRenderManifest(documentState: DocumentState, pageUrl: string): QualityRenderManifest {
