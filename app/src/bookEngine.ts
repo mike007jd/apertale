@@ -46,7 +46,7 @@ import type {
 } from "./types";
 
 const STORAGE_KEY = "apertale.library.v4";
-const SAMPLE_SOURCE_VERSION = 3;
+const SAMPLE_SOURCE_VERSION = 4;
 
 /**
  * Every render-evidence identity a fully rendered book can hold at one
