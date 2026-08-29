@@ -991,6 +991,12 @@ export function App() {
    * clipboard-in path whatsoever, so an image generated a moment earlier still
    * had to be saved to disk and picked back up through a file dialog.
    */
+  // The importer closes over state that changes on every render, so the handler
+  // is held in a ref. Without this the effect below needs no dependency array,
+  // which detaches and reattaches a window listener on every single render.
+  const pasteImporter = useRef<(files: FileList) => void>(() => undefined);
+  pasteImporter.current = (files: FileList) => { void importWorkshopPhotos(files); };
+
   useEffect(() => {
     if (!showCreateGuide) return undefined;
     const onPaste = (event: ClipboardEvent) => {
@@ -998,11 +1004,11 @@ export function App() {
       if (!files?.length) return;
       event.preventDefault();
       recordDiagnostic("handoff:pasted", { count: files.length });
-      void importWorkshopPhotos(files);
+      pasteImporter.current(files);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  });
+  }, [showCreateGuide]);
 
   useEffect(() => subscribeToImageHandoff((request) => {
     setHandoffRequest(request);
