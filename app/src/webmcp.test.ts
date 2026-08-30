@@ -238,12 +238,16 @@ describe("WebMCP registration", () => {
       requestId: "night-preview",
       surface: "reader",
       spreadId: "city-for-small-things",
+      theme: "midnight-desk",
+      preview: true,
     }), expect.any(AbortSignal));
     expect(bookEngine.getSnapshot().session).toMatchObject({ sceneThemeId: "midnight-desk", preview: true });
     expect(bookEngine.getSnapshot().document.revision).toBe(beforePresentationRevision);
     const shelfPresentation = JSON.parse(String(await tool("set_presentation").execute({
       requestId: "show-cover",
       surface: "shelf",
+      theme: "midnight-desk",
+      preview: false,
     }, { signal: new AbortController().signal })));
     expect(shelfPresentation).toMatchObject({ surface: "shelf", preview: false });
     expect(presented).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -487,8 +491,39 @@ describe("WebMCP registration", () => {
       surface: "reader",
       documentId: createdDocumentId,
       spreadId: "1-the-same-book",
+      theme: "paper-atelier",
+      preview: false,
     });
     expect(bookEngine.getSnapshot().document.id).toBe(createdDocumentId);
+    cleanup();
+  });
+
+  it("waits for an exact reader frame when only the theme changes", async () => {
+    bookEngine.openBook("apertale-your-story");
+    bookEngine.reset();
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const presented = vi.fn();
+    const cleanup = registerWebMcpTools(() => undefined, presented);
+    await vi.waitFor(() => expect(tools).toHaveLength(7));
+    const setPresentation = tools.find((candidate) => candidate.name === "set_presentation")!;
+
+    const result = JSON.parse(String(await setPresentation.execute({
+      requestId: "theme-only-frame",
+      theme: "midnight-desk",
+    }, { signal: new AbortController().signal })));
+
+    expect(result).toMatchObject({ theme: "midnight-desk", surface: "reader" });
+    expect(presented).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: "theme-only-frame",
+      surface: "reader",
+      theme: "midnight-desk",
+      preview: false,
+    }), expect.any(AbortSignal));
     cleanup();
   });
 
@@ -538,6 +573,8 @@ describe("WebMCP registration", () => {
       documentId: original.document.id,
       revision: original.document.revision,
       spreadId: targetSpreadId,
+      theme: "midnight-desk",
+      preview: true,
     });
     const restored = bookEngine.getSnapshot();
     expect(restored.document.id).toBe(original.document.id);

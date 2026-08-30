@@ -235,8 +235,8 @@ export function registerWebMcpTools(
       revision: number;
       surface: "reader" | "shelf";
       spreadId?: string;
-      theme?: ThemeId;
-      preview?: boolean;
+      theme: ThemeId;
+      preview: boolean;
     };
   };
   const pendingPresentations = new Map<string, PendingPresentation>();
@@ -276,6 +276,8 @@ export function registerWebMcpTools(
       documentId: pending.target.documentId,
       revision: pending.target.revision,
       spreadId: pending.target.surface === "reader" ? pending.target.spreadId : undefined,
+      theme: pending.target.theme,
+      preview: pending.target.preview,
     }, signal);
     pendingPresentations.delete(requestId);
     sessionResults.set(requestId, pending.result);
@@ -419,6 +421,8 @@ export function registerWebMcpTools(
                 revision: opened.document.revision,
                 surface: "reader",
                 spreadId: opened.document.spreads[opened.session.currentSpreadIndex]?.id,
+                theme: opened.session.sceneThemeId,
+                preview: opened.session.preview,
               },
             });
             return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
@@ -507,6 +511,8 @@ export function registerWebMcpTools(
                 revision: created.document.revision,
                 surface: "reader",
                 spreadId: created.document.spreads[created.session.currentSpreadIndex]?.id,
+                theme: created.session.sceneThemeId,
+                preview: created.session.preview,
               },
             });
             return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
@@ -809,7 +815,9 @@ export function registerWebMcpTools(
           if (typeof input.theme !== "undefined") bookEngine.setTheme(theme, "agent");
           if (typeof input.preview === "boolean") bookEngine.setPreview(input.preview, "agent");
           const visibleSurface = surface ?? (
-            typeof input.spreadId !== "undefined" || typeof input.preview !== "undefined"
+            typeof input.theme !== "undefined"
+              || typeof input.spreadId !== "undefined"
+              || typeof input.preview !== "undefined"
               ? "reader"
               : undefined
           );

@@ -6,12 +6,13 @@ import { recordDiagnostic } from "./diagnostics";
 import { spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
-import { sceneAssetsReadyForEvidence } from "./renderEvidence";
+import { readerSceneStructureKey, sceneAssetsReadyForEvidence, spreadLoadIndexes, type ReaderRenderEvidence } from "./renderEvidence";
 import { spreadBaseAssetId, type BookElement, type BookSnapshot, type Spread, type TurnState } from "./types";
 
 type Props = {
   snapshot: BookSnapshot;
   turn: TurnState;
+  renderEvidenceToken?: string;
   mode?: "reader" | "workshop";
   readOnly?: boolean;
   /**
@@ -39,14 +40,7 @@ type Props = {
   onPageTurnReady?: (direction: "forward" | "backward", ready: boolean) => void;
   onLoading: (documentId: string) => void;
   onReady: (documentId: string) => void;
-  onRendered?: (evidence: {
-    documentId: string;
-    revision: number;
-    spreadId: string;
-    theme: BookSnapshot["session"]["sceneThemeId"];
-    surface: "webgl";
-    locator: string;
-  }) => void;
+  onRendered?: (evidence: ReaderRenderEvidence & { surface: "webgl" }) => void;
   onFailure: () => void;
 };
 
@@ -624,23 +618,11 @@ function buildSceneElement(
   };
 }
 
-export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, openProgress = STATIC_OPEN, handoffRect = NO_HANDOFF, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
+export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader", readOnly = false, openProgress = STATIC_OPEN, handoffRect = NO_HANDOFF, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const propsRef = useRef({ snapshot, turn, mode, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
-  propsRef.current = { snapshot, turn, mode, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
-  const sceneStructureKey = JSON.stringify({
-    id: snapshot.document.id,
-    mode,
-    spreads: snapshot.document.spreads.map((spread) => ({
-      id: spread.id,
-      title: spread.title,
-      body: spread.body,
-      kicker: spread.kicker,
-      textureUrl: spread.textureUrl,
-      artwork: spread.artwork,
-      elements: spread.elements.map((element) => [element.id, element.assetId, ...(element.frameAssetIds ?? [])]),
-    })),
-  });
+  const propsRef = useRef({ snapshot, turn, renderEvidenceToken, mode, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
+  propsRef.current = { snapshot, turn, renderEvidenceToken, mode, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
+  const sceneStructureKey = readerSceneStructureKey(snapshot, mode);
 
   useEffect(() => {
     const maybeHost = hostRef.current;
@@ -1509,10 +1491,10 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
        */
       if (host.clientWidth < 2 || host.clientHeight < 2) return;
 
-      if (pagePair && lastPrefetchedSpreadIndex !== current.session.currentSpreadIndex) {
-        lastPrefetchedSpreadIndex = current.session.currentSpreadIndex;
-        if (previous) ensureSpreadLoaded(previous);
-        if (next) ensureSpreadLoaded(next);
+      if (!pagePair || lastPrefetchedSpreadIndex !== current.session.currentSpreadIndex) {
+        if (pagePair) lastPrefetchedSpreadIndex = current.session.currentSpreadIndex;
+        spreadLoadIndexes(current.session.currentSpreadIndex, current.document.spreads.length, Boolean(pagePair))
+          .forEach((index) => ensureSpreadLoaded(current.document.spreads[index]));
       }
       if (pagePair) {
         const readiness = {
@@ -1775,7 +1757,8 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         })),
       );
       if (pagePair && sceneAssetsReady && !currentTurn && mode === "reader") {
-        const evidenceKey = `${current.document.id}:${current.document.revision}:${spread.id}:${current.session.sceneThemeId}`;
+        const evidenceToken = propsRef.current.renderEvidenceToken ?? "";
+        const evidenceKey = `${current.document.id}:${current.document.revision}:${spread.id}:${current.session.sceneThemeId}:${evidenceToken}`;
         if (evidenceKey !== renderedEvidenceCandidate) {
           renderedEvidenceCandidate = evidenceKey;
           renderedEvidenceFrames = 0;
@@ -1785,6 +1768,8 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
         if (renderedEvidenceFrames >= 8 && renderedEvidenceKey !== evidenceKey) {
           renderedEvidenceKey = evidenceKey;
           propsRef.current.onRendered?.({
+            sceneKey: sceneStructureKey,
+            renderEvidenceToken: propsRef.current.renderEvidenceToken,
             documentId: current.document.id,
             revision: current.document.revision,
             spreadId: spread.id,
