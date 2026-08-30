@@ -3,6 +3,9 @@
   "version": "1.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^22.12.0 || >=24.0.0"
+  },
   "scripts": {
     "dev": "node scripts/sync-site-manifest.mjs && vite",
     "typecheck": "tsc --noEmit",
@@ -16,7 +19,8 @@
     "test:sites:built": "node --test tests/*.test.mjs",
     "optimize:assets": "node scripts/optimize-runtime-images.mjs --write",
     "audit:cutouts": "node scripts/audit-cutout-alpha.mjs",
-    "verify:release": "npm run tokens:check && npm run typecheck && npm test && npm run test:sites && npm run audit:cutouts",
+    "verify:release": "npm run tokens:check && npm run typecheck && npm test && npm run test:sites",
+    "verify:assets": "npm run audit:cutouts",
     "verify:deployment": "node scripts/verify-deployment.mjs"
   },
   "dependencies": {

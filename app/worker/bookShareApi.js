@@ -51,10 +51,6 @@ function tokenFromBytes(bytes) {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
-function defaultTokenFactory() {
-  return tokenFromBytes(crypto.getRandomValues(new Uint8Array(32)));
-}
-
 async function hashToken(token) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
   return tokenFromBytes(new Uint8Array(digest));
@@ -461,7 +457,6 @@ async function readJsonBody(request) {
 export function createBookShareApi({
   repository,
   objects,
-  tokenFactory = defaultTokenFactory,
   clock = () => new Date(),
   limits = {},
 }) {
@@ -478,25 +473,45 @@ export function createBookShareApi({
     return { book, manageTokenHash };
   }
 
-  async function createDraft() {
-    if (await repository.countBooks() >= maxSiteBooks) {
+  async function createDraft(request) {
+    const payload = await readJsonBody(request);
+    const id = payload?.bookId;
+    if (typeof id !== "string" || !BOOK_ID_PATTERN.test(id)) {
+      throw new HttpError(400, "invalid_book_id", "A valid client-generated book id is required.");
+    }
+    const manageTokenHash = await hashToken(bearerToken(request));
+    const windowStart = new Date(clock().getTime() - creationWindowMs).toISOString();
+    const outcome = await repository.createBook({
+      id,
+      manageTokenHash,
+      now: now(),
+      maxSiteBooks,
+      maxBooksPerWindow,
+      windowStart,
+    });
+    if (outcome === "conflict") {
+      throw new HttpError(409, "book_exists", "That book id already belongs to another creator capability.");
+    }
+    if (outcome === "site_limit") {
       throw new HttpError(429, "creation_limit", "This Site has reached its book storage bound.");
     }
-    const windowStart = new Date(clock().getTime() - creationWindowMs).toISOString();
-    if (await repository.countBooksCreatedSince(windowStart) >= maxBooksPerWindow) {
+    if (outcome === "rate_limit") {
       throw new HttpError(429, "creation_rate", "Too many books are being created right now. Try again later.");
     }
-    const id = crypto.randomUUID();
-    const manageToken = tokenFactory();
-    if (!TOKEN_PATTERN.test(manageToken)) throw new Error("Token factory returned an invalid capability token.");
-    await repository.createBook({ id, manageTokenHash: await hashToken(manageToken), now: now() });
-    return json({ ok: true, bookId: id, manageToken, status: "draft" }, { status: 201 });
+    const existing = outcome === "existing"
+      ? await repository.findManagedBook(id, manageTokenHash)
+      : null;
+    return json({
+      ok: true,
+      bookId: id,
+      status: existing?.status ?? "draft",
+    }, { status: outcome === "created" ? 201 : 200 });
   }
 
   async function uploadAsset(request, bookId, rawAssetId) {
     const assetId = decodePathComponent(rawAssetId, "The asset was not found.");
     if (!ASSET_ID_PATTERN.test(assetId)) throw new HttpError(400, "invalid_asset_id", "The asset id is invalid.");
-    const { book } = await managedBook(request, bookId);
+    const { book, manageTokenHash } = await managedBook(request, bookId);
     if (!MANAGEABLE_STATUSES.has(book.status)) {
       throw new HttpError(409, "invalid_state", "Only a draft or revoked book accepts new assets.");
     }
@@ -527,7 +542,29 @@ export function createBookShareApi({
     const objectKey = `books/${bookId}/${assetId.slice("asset:".length)}/${crypto.randomUUID()}`;
     await objects.put(objectKey, bytes, { httpMetadata: { contentType } });
     try {
-      await repository.insertAsset({ bookId, assetId, objectKey, contentType, byteSize: bytes.byteLength, now: now() });
+      const inserted = await repository.insertAsset({
+        bookId,
+        manageTokenHash,
+        assetId,
+        objectKey,
+        contentType,
+        byteSize: bytes.byteLength,
+        now: now(),
+        maxAssets: MAX_ASSETS,
+      });
+      if (!inserted) {
+        const current = await repository.findManagedBook(bookId, manageTokenHash);
+        if (current && MANAGEABLE_STATUSES.has(current.status)) {
+          const assets = await repository.listAssetIds(bookId);
+          if (assets.includes(assetId)) {
+            throw new HttpError(409, "asset_exists", "Asset ids are immutable; upload changed content with a new asset id.");
+          }
+          if (assets.length >= MAX_ASSETS) {
+            throw new HttpError(409, "asset_limit", `A book may contain at most ${MAX_ASSETS} uploaded assets.`);
+          }
+        }
+        throw new HttpError(409, "invalid_state", "Only a draft or revoked book accepts new assets.");
+      }
     } catch (error) {
       await objects.delete(objectKey);
       throw error;
@@ -546,23 +583,36 @@ export function createBookShareApi({
     const shareUrl = new URL(`/share/${shareToken}`, request.url).href;
 
     if (book.status === "published") {
-      const recovered = await repository.publishBook({
-        id: bookId,
-        manageTokenHash,
-        shareTokenHash,
-        title: book.title ?? "",
-        revision: payload?.manifest?.revision,
-        manifestJson: book.manifest_json ?? "null",
-        now: now(),
-      });
-      if (!recovered) {
+      if (book.share_token_hash !== shareTokenHash || !Number.isSafeInteger(book.revision)) {
         throw new HttpError(409, "invalid_state", "Only a draft or revoked book can be published.");
       }
-      return json({ ok: true, bookId, status: "published", shareUrl });
+      return json({ ok: true, bookId, status: "published", shareUrl, publishedRevision: book.revision });
     }
 
     if (!MANAGEABLE_STATUSES.has(book.status)) {
       throw new HttpError(409, "invalid_state", "Only a draft or revoked book can be published.");
+    }
+    if (await repository.isRetiredShareToken(shareTokenHash)) {
+      throw new HttpError(409, "revoked_share", "A revoked share capability cannot be published again.");
+    }
+    const claimed = await repository.claimPublishAttempt({
+      id: bookId,
+      manageTokenHash,
+      shareTokenHash,
+      now: now(),
+    });
+    if (!claimed) {
+      const current = await repository.findManagedBook(bookId, manageTokenHash);
+      if (current?.status === "published" && current.share_token_hash === shareTokenHash && Number.isSafeInteger(current.revision)) {
+        return json({
+          ok: true,
+          bookId,
+          status: "published",
+          shareUrl,
+          publishedRevision: current.revision,
+        });
+      }
+      throw new HttpError(409, "publish_conflict", "Another publication attempt already owns this book state.");
     }
     const manifest = payload?.manifest;
     const references = validateManifest(manifest);
@@ -593,7 +643,58 @@ export function createBookShareApi({
       bookId,
       status: "published",
       shareUrl,
+      publishedRevision: published,
     });
+  }
+
+  async function reconcilePublish(request, bookId) {
+    const { book, manageTokenHash } = await managedBook(request, bookId);
+    const payload = await readJsonBody(request);
+    const shareToken = payload?.shareToken;
+    if (typeof shareToken !== "string" || !TOKEN_PATTERN.test(shareToken)) {
+      throw new HttpError(400, "invalid_share_token", "A valid share token is required.");
+    }
+    const shareTokenHash = await hashToken(shareToken);
+    if (book.status === "published") {
+      if (book.share_token_hash !== shareTokenHash || !Number.isSafeInteger(book.revision)) {
+        throw new HttpError(409, "invalid_state", "The committed publication belongs to another share capability.");
+      }
+      return json({
+        ok: true,
+        bookId,
+        status: "published",
+        shareUrl: new URL(`/share/${shareToken}`, request.url).href,
+        publishedRevision: book.revision,
+      });
+    }
+    if (!MANAGEABLE_STATUSES.has(book.status)) {
+      throw new HttpError(409, "invalid_state", "This publication cannot be resumed from its current state.");
+    }
+    if (await repository.isRetiredShareToken(shareTokenHash)) {
+      return json({ ok: true, bookId, status: "revoked" });
+    }
+    if (await repository.claimPublishAttempt({
+      id: bookId,
+      manageTokenHash,
+      shareTokenHash,
+      now: now(),
+    })) {
+      return json({ ok: true, bookId, status: "publishing" });
+    }
+    const current = await repository.findManagedBook(bookId, manageTokenHash);
+    if (current?.status === "published" && current.share_token_hash === shareTokenHash && Number.isSafeInteger(current.revision)) {
+      return json({
+        ok: true,
+        bookId,
+        status: "published",
+        shareUrl: new URL(`/share/${shareToken}`, request.url).href,
+        publishedRevision: current.revision,
+      });
+    }
+    if (await repository.isRetiredShareToken(shareTokenHash)) {
+      return json({ ok: true, bookId, status: "revoked" });
+    }
+    throw new HttpError(409, "publish_conflict", "Another publication attempt already owns this book state.");
   }
 
   async function readShared(shareToken) {
@@ -637,11 +738,12 @@ export function createBookShareApi({
 
   async function revoke(request, bookId) {
     const { book, manageTokenHash } = await managedBook(request, bookId);
-    // The public token is already cleared once a revoke commits. Returning the
-    // same terminal state lets a creator safely retry when that success
-    // response was lost without ever restoring public access.
-    if (book.status === "revoked") return json({ ok: true, bookId, status: "revoked" });
-    if (book.status !== "published") throw new HttpError(409, "invalid_state", "Only a published book can be revoked.");
+    // Revocation retains the last public token hash as a tombstone and clears
+    // any in-flight publish claim. A retry is therefore idempotent without
+    // allowing the revoked URL to become public again.
+    if (book.status !== "published" && book.status !== "revoked") {
+      throw new HttpError(409, "invalid_state", "Only a published or revoked book can be revoked.");
+    }
     const revoked = await repository.revokeBook({ id: bookId, manageTokenHash, now: now() });
     if (!revoked) throw new HttpError(409, "revoke_conflict", "The book changed before it could be revoked.");
     return json({ ok: true, bookId, status: "revoked" });
@@ -663,10 +765,13 @@ export function createBookShareApi({
 
   async function route(request) {
     const url = new URL(request.url);
-    if (request.method === "POST" && url.pathname === "/api/books") return createDraft();
+    if (request.method === "POST" && url.pathname === "/api/books") return createDraft(request);
 
     let match = /^\/api\/books\/([^/]+)\/assets\/([^/]+)$/u.exec(url.pathname);
     if (match && request.method === "PUT" && BOOK_ID_PATTERN.test(match[1])) return uploadAsset(request, match[1], match[2]);
+
+    match = /^\/api\/books\/([^/]+)\/publish\/reconcile$/u.exec(url.pathname);
+    if (match && request.method === "POST" && BOOK_ID_PATTERN.test(match[1])) return reconcilePublish(request, match[1]);
 
     match = /^\/api\/books\/([^/]+)\/(publish|revoke)$/u.exec(url.pathname);
     if (match && request.method === "POST" && BOOK_ID_PATTERN.test(match[1])) {

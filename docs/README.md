@@ -14,11 +14,8 @@
 
 ## Historical delivery evidence
 
-The following files describe an earlier event-oriented prototype. Some contain stale completion claims; they are retained only for traceability and are not current delivery evidence:
+The following records retain historical delivery decisions or dated evidence. They are not current delivery truth:
 
-- [`LIVINGBOOK_PRD_AND_DESIGN_SPEC.md`](LIVINGBOOK_PRD_AND_DESIGN_SPEC.md)
-- [`CHALLENGE_SUBMISSION_HANDOFF.md`](CHALLENGE_SUBMISSION_HANDOFF.md)
-- [`COMPLETION_AUDIT.md`](COMPLETION_AUDIT.md)
 - [`GRILL_ME_LIVINGBOOK_CLOSEOUT.md`](GRILL_ME_LIVINGBOOK_CLOSEOUT.md) — durable publishing and privacy decision record; current implementation status lives in the active documents above.
 - [`qa/livingbook-authoring-shelf-closeout-2026-08-28/REPORT.md`](qa/livingbook-authoring-shelf-closeout-2026-08-28/REPORT.md) — 2026-08-28 production authoring, shelf, Site Tools, and shared-reader verification record.
 - [`../app/qa/`](../app/qa/) — retained historical engineering evidence with no other index: [`RELEASE_GATES_2026-08-26.md`](../app/qa/RELEASE_GATES_2026-08-26.md) and [`RELEASE_GATES_2026-08-27.md`](../app/qa/RELEASE_GATES_2026-08-27.md), [`PERFORMANCE.md`](../app/qa/PERFORMANCE.md), the `audit-*` and `interaction-audit-*` directories, `rejected-assets/`, and the dated capture sets. They are point-in-time snapshots, not current delivery truth.

@@ -104,12 +104,14 @@ export async function storeLocalImages(files: Iterable<File>, limit = Number.POS
   let failed = 0;
   let attempted = 0;
   for (const file of files) {
-    if (assets.length >= maximum) break;
     if (!SUPPORTED_SOURCE_TYPES.has(file.type) || file.size <= 0 || file.size > MAX_SOURCE_IMAGE_BYTES) {
       rejected += 1;
       continue;
     }
-    if (attempted >= maximum) break;
+    if (attempted >= maximum) {
+      rejected += 1;
+      continue;
+    }
     attempted += 1;
     try {
       assets.push(await storeLocalImage(file));

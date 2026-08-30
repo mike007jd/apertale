@@ -18,7 +18,7 @@ Read the returned capabilities as a runtime contract. In particular, use `full-s
 
 ## 2. Request an image handoff when needed
 
-Use `request_image_handoff` only when direct host media transfer is unavailable. Supply a unique `requestId` and a concise `reason` that tells the reader what image material is needed; include the requested quantity in that sentence when it matters. The call remains pending while the workshop drawer is open and resolves only after the reader chooses one or more files or dismisses the request.
+Use `request_image_handoff` only when direct host media transfer is unavailable. Supply a unique `requestId`, an `assetUse`, and a concise `reason` that tells the reader what image material and quantity are needed. Use `source-photo` for reader-supplied reference images; those join the next creation brief and share its 12-photo limit. Use `book-art` for generated covers, spread composites, clean plates, and cutouts; those enter only the reusable asset registry and do not alter the brief. The call remains pending while the matching drawer is open and resolves only after the reader chooses one or more files or dismisses the request. Read the returned `status` and `counts`: `provided` means every processed file was accepted, while `partial` reports accepted, rejected, and storage-failed counts and returns only the usable asset ids. On `partial`, the drawer stays open for replacements; use a fresh request id if another tool result is required, and refresh asset context before referring to any ids.
 
 The browser requires the reader's own click to open the file picker. Do not claim success while the request is pending. After a `provided` result, refresh `get_project_context(detail: "assets")` and bind only the returned browser-local asset ids. After a `dismissed` result, stop or re-plan without retrying the same request automatically.
 
@@ -45,7 +45,7 @@ Use `compose_spread` to change one existing spread's title, kicker, or body with
 
 Use one atomic `apply_scene_patch` per coherent spread edit. It can add, update, remove, or reorder up to 24 elements.
 
-The only supported scene source is a validated browser-local or bundled asset id. Every image-led spread records the original composite in `sourceAssetId` and the final repaired/preserved base in `cleanPlateAssetId`. A declared user photo belongs in `personalSourceAssetId`; this keeps identity provenance separate from the generated composite. Use `inpainted-clean-plate` for generated illustrated separations and `preserved-photo-layout` for an approved source-true album base. Generate native-alpha transparent cutouts in the user's current conversation before patching the scene. For GPT-Image-2 request `background: "transparent"` with PNG or WebP output. When direct host transfer is unavailable, call `request_image_handoff`, wait for its result, then refresh asset context.
+The only supported scene source is a validated browser-local or bundled asset id. Every image-led spread records the original composite in `sourceAssetId` and the final repaired/preserved base in `cleanPlateAssetId`. A declared user photo belongs in `personalSourceAssetId`; this keeps identity provenance separate from the generated composite. Use `inpainted-clean-plate` for generated illustrated separations and `preserved-photo-layout` for an approved source-true album base. Generate native-alpha transparent cutouts in the user's current conversation before patching the scene. For GPT-Image-2 request `background: "transparent"` with PNG or WebP output. When direct host transfer is unavailable, call `request_image_handoff` with `assetUse: "book-art"`, wait for its result, then refresh asset context.
 
 Before importing a cutout, inspect the actual pixels rather than trusting the file extension: the subject must be visible, complete, and padded; the background must be genuinely transparent; the edge must not contain a rectangular matte, chroma spill, detached crop fragments, or a baked glow intended to be supplied by the runtime hover effect. Reject and regenerate failed output.
 
@@ -62,7 +62,7 @@ Use a reveal when interaction teaches, identifies, or advances the story. Keep i
 
 ## 6. Present
 
-Use `set_presentation` for `paper-atelier` (Day), `midnight-desk` (Night), Preview, and `spreadId` navigation during visual review. Presentation changes do not advance the document revision.
+Use `set_presentation` for `paper-atelier` (Day), `midnight-desk` (Night), Preview, `surface: "shelf"` cover inspection, and `spreadId` reader navigation during visual review. The call returns only after the requested shelf or reader surface is visible; rendering evidence remains separately observable in quality context. Presentation changes do not advance the document revision.
 
 ## 7. Critique, patch, and publish gate
 
@@ -81,7 +81,7 @@ Use `undo_project_change` with the current revision and the exact returned undo 
 ## Failure handling
 
 - Revision conflict: call `get_project_context`, reconcile the user's latest state, and issue a new request id.
-- Missing asset: try the host's media transfer. If it is unavailable, call `request_image_handoff`, wait for the reader's result, then refresh asset context.
+- Missing asset: try the host's media transfer. If it is unavailable, call `request_image_handoff` with the correct `assetUse`, wait for the reader's result, then refresh asset context.
 - Legacy brief missing: run creation readiness from the visible document and user decisions, then use `adopt-creation-brief` once. Stop rather than inventing photo treatment, identity, crop, or colour permissions.
 - Unsupported asset type: keep the spread illustrated and report the boundary; do not claim that Apertale imported it.
 - Partial scene failure: do not simulate success. Use the returned undo token if the committed change should be reversed.

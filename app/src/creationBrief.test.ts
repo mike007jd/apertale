@@ -57,6 +57,9 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("dedicated portrait cover");
     expect(brief.prompt).toContain("purpose-built full-spread artwork");
     expect(brief.prompt).toContain("Never claim generation or import succeeded without evidence");
+    expect(brief.prompt.indexOf('detail: "authoring-guide"')).toBeLessThan(brief.prompt.indexOf('detail: "creation-readiness"'));
+    expect(brief.prompt).toContain("assetUse source-photo");
+    expect(brief.prompt).toContain("assetUse book-art");
 
     const assetSectionIndex = brief.prompt.indexOf("Selected source assets in order:");
     expect(assetSectionIndex).toBeGreaterThan(-1);

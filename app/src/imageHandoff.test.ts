@@ -9,7 +9,7 @@ import {
 } from "./imageHandoff";
 
 const ask = (requestId: string, reason = "Spread five needs a photo of your grandmother.") =>
-  requestImageHandoff({ requestId, reason });
+  requestImageHandoff({ requestId, assetUse: "source-photo", reason });
 
 describe("image handoff", () => {
   it("stays pending until the reader chooses, then returns the ids to the caller", async () => {
@@ -18,6 +18,7 @@ describe("image handoff", () => {
 
     const pending = ask("req-1");
     expect(currentImageHandoff()?.reason).toContain("grandmother");
+    expect(currentImageHandoff()?.assetUse).toBe("source-photo");
 
     // The promise must not settle on its own: the whole point is that the tool
     // call spans the reader's click, so the Agent never has to be told the
@@ -27,11 +28,33 @@ describe("image handoff", () => {
     await Promise.resolve();
     expect(settledEarly).not.toHaveBeenCalled();
 
-    expect(completeImageHandoff("req-1", ["asset:one", "asset:two"])).toBe(true);
-    await expect(pending).resolves.toEqual({ status: "provided", assetIds: ["asset:one", "asset:two"] });
+    const provided = {
+      status: "provided" as const,
+      assetIds: ["asset:one", "asset:two"],
+      counts: { accepted: 2, rejected: 0, failed: 0 },
+    };
+    expect(completeImageHandoff("req-1", { assetIds: provided.assetIds, rejected: 0, failed: 0 })).toEqual(provided);
+    await expect(pending).resolves.toEqual(provided);
     expect(currentImageHandoff()).toBeNull();
     expect(seen).toEqual([null, "req-1", null]);
     stop();
+  });
+
+  it("reports a mixed batch as partial with exact admission counts", async () => {
+    const pending = ask("req-partial", "Add three spread images.");
+    const outcome = completeImageHandoff("req-partial", {
+      assetIds: ["asset:accepted"],
+      rejected: 1,
+      failed: 1,
+    });
+
+    expect(outcome).toEqual({
+      status: "partial",
+      assetIds: ["asset:accepted"],
+      counts: { accepted: 1, rejected: 1, failed: 1 },
+      reason: expect.stringMatching(/1 image was added.*1 unsupported file was rejected.*1 file could not be stored/i),
+    });
+    await expect(pending).resolves.toEqual(outcome);
   });
 
   it("resolves rather than rejects when the reader declines", async () => {
@@ -56,9 +79,9 @@ describe("image handoff", () => {
     const second = ask("req-5", "Second ask.");
     await expect(first).resolves.toMatchObject({ status: "dismissed" });
     expect(currentImageHandoff()?.requestId).toBe("req-5");
-    expect(completeImageHandoff("req-4", ["asset:from-stale-request"])).toBe(false);
+    expect(completeImageHandoff("req-4", { assetIds: ["asset:from-stale-request"], rejected: 0, failed: 0 })).toBeNull();
     expect(currentImageHandoff()?.requestId).toBe("req-5");
-    expect(completeImageHandoff("req-5", ["asset:three"])).toBe(true);
+    expect(completeImageHandoff("req-5", { assetIds: ["asset:three"], rejected: 0, failed: 0 })).toMatchObject({ status: "provided" });
     await expect(second).resolves.toMatchObject({ status: "provided" });
   });
 
@@ -80,5 +103,11 @@ describe("image handoff", () => {
     expect(seen).toEqual(["req-8"]);
     stop();
     dismissImageHandoff("req-8");
+  });
+
+  it("preserves book art as a distinct handoff purpose", () => {
+    void requestImageHandoff({ requestId: "req-9", assetUse: "book-art", reason: "Add one generated cover." });
+    expect(currentImageHandoff()).toMatchObject({ requestId: "req-9", assetUse: "book-art" });
+    dismissImageHandoff("req-9");
   });
 });

@@ -44,6 +44,14 @@ const STATUS_COPY = {
   revoked: { label: "Revoked", detail: "The previous link no longer works" },
 } as const;
 
+export function publicationActionDisabled(
+  status: PublicationRecord["status"],
+  busy: boolean,
+  qualityStatus: QualityGateState["status"],
+) {
+  return busy || (status !== "publishing" && qualityStatus !== "ready");
+}
+
 /**
  * Creator-facing publication surface.
  *
@@ -138,10 +146,10 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
   }, [busy, record?.status, confirmingDelete]);
 
   const publish = useCallback(() => {
-    if (!qualityGate.report?.publishAllowed) return;
+    if (record?.status !== "publishing" && !qualityGate.report?.publishAllowed) return;
     setProgress({ phase: "creating", completed: 0, total: 1 });
     void run("publishing", () => publishDocument(documentState, qualityGate.report, setProgress), "Apertale could not publish this book.");
-  }, [documentState, qualityGate.report, run]);
+  }, [documentState, qualityGate.report, record?.status, run]);
 
   const revoke = useCallback(() => {
     if (!record) return;
@@ -290,7 +298,7 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
 
         <footer className="publication-actions">
           {status !== "published" && (
-            <button className="publication-primary" onClick={publish} disabled={Boolean(busy) || qualityGate.status !== "ready"}>
+            <button className="publication-primary" onClick={publish} disabled={publicationActionDisabled(status, Boolean(busy), qualityGate.status)}>
               {busy === "publishing" ? <SpinnerGap size={17} weight="bold" className="is-spinning" /> : <UploadSimple size={17} weight="bold" />}
               {busy === "publishing" ? "Publishing" : status === "revoked" ? "Publish again" : status === "publishing" ? "Resume publishing" : "Publish and share"}
             </button>

@@ -7,8 +7,6 @@ type PublicationStatus = "draft" | "publishing" | "published" | "revoked";
 
 export type PublicationRecord = {
   documentId: string;
-  bookId: string;
-  manageToken: string;
   status: PublicationStatus;
   shareUrl?: string;
   publishedRevision?: number;
@@ -27,6 +25,8 @@ const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const STATUSES = new Set<PublicationStatus>(["draft", "publishing", "published", "revoked"]);
 
 type StoredPublicationRecord = PublicationRecord & {
+  bookId: string;
+  manageToken: string;
   uploadedAssetIds: string[];
   shareToken?: string;
 };
@@ -50,7 +50,15 @@ export function getPublicationRecord(documentId: string): PublicationRecord | nu
   return stored ? toPublicRecord(stored) : null;
 }
 
-export async function publishDocument(
+export function publishDocument(
+  documentState: DocumentState,
+  qualityReport: QualityReport | null | undefined,
+  onProgress?: (progress: PublicationProgress) => void,
+): Promise<PublicationRecord> {
+  return withPublicationLock(documentState.id, () => publishDocumentLocked(documentState, qualityReport, onProgress));
+}
+
+async function publishDocumentLocked(
   documentState: DocumentState,
   qualityReport: QualityReport | null | undefined,
   onProgress?: (progress: PublicationProgress) => void,
@@ -66,6 +74,64 @@ export async function publishDocument(
     );
   }
 
+  let record = existing;
+  if (record?.status === "publishing") {
+    const shareToken = readShareToken(record.shareToken);
+    if (!shareToken) {
+      throw new PublicationError("The interrupted publication has no valid share capability.", {
+        code: "missing_capability",
+        status: 409,
+        retryable: false,
+      });
+    }
+    onProgress?.({ phase: "publishing", completed: 0, total: 1 });
+    const reconciled = await requestJson<{ status?: string; shareUrl?: string; publishedRevision?: number }>(
+      `/api/books/${encodeURIComponent(record.bookId)}/publish/reconcile`,
+      {
+        method: "POST",
+        headers: {
+          authorization: bearer(record.manageToken),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ shareToken }),
+      },
+    );
+    if (reconciled.status === "published") {
+      const shareUrl = readSameOriginShareUrl(reconciled.shareUrl, shareToken);
+      const publishedRevision = readPublishedRevision(reconciled.publishedRevision);
+      if (!shareUrl || !publishedRevision) {
+        throw new PublicationError("The publishing service could not restore the committed share link.", {
+          code: "invalid_publish_response",
+          status: 502,
+          retryable: true,
+        });
+      }
+      record = { ...record, status: "published", shareUrl, publishedRevision };
+      persistRecord(record);
+      onProgress?.({ phase: "publishing", completed: 1, total: 1 });
+      return toPublicRecord(record);
+    }
+    if (reconciled.status === "publishing") {
+      // The server has atomically claimed this same share capability. Keep the
+      // durable local attempt intact and resume its uploads/commit below.
+    } else if (reconciled.status === "revoked") {
+      record = {
+        ...record,
+        status: "revoked",
+        shareToken: undefined,
+        shareUrl: undefined,
+        publishedRevision: undefined,
+      };
+      persistRecord(record);
+    } else {
+      throw new PublicationError("The publishing service returned an unknown recovery state.", {
+        code: "invalid_publish_response",
+        status: 502,
+        retryable: true,
+      });
+    }
+  }
+
   try {
     assertPublishableQuality(documentState, qualityReport);
   } catch {
@@ -78,11 +144,13 @@ export async function publishDocument(
   const blobs = await loadRequiredBlobs(documentState);
   const localAssetIds = [...blobs.keys()];
 
-  let record = existing;
   if (!record) {
-    onProgress?.({ phase: "creating", completed: 0, total: 1 });
-    record = await createDraftRecord(documentState.id);
+    record = createDraftRecord(documentState.id);
     persistRecord(record);
+  }
+  if (record.status === "draft") {
+    onProgress?.({ phase: "creating", completed: 0, total: 1 });
+    await ensureDraftRecord(record);
     onProgress?.({ phase: "creating", completed: 1, total: 1 });
   }
 
@@ -91,6 +159,8 @@ export async function publishDocument(
     ...record,
     status: "publishing",
     shareToken,
+    shareUrl: undefined,
+    publishedRevision: undefined,
     uploadedAssetIds: uniqueAssetIds(record.uploadedAssetIds),
   };
   persistRecord(record);
@@ -109,7 +179,7 @@ export async function publishDocument(
   }
 
   onProgress?.({ phase: "publishing", completed: 0, total: 1 });
-  const published = await requestJson<{ shareUrl?: string }>(
+  const published = await requestJson<{ shareUrl?: string; publishedRevision?: number }>(
     `/api/books/${encodeURIComponent(record.bookId)}/publish`,
     {
       method: "POST",
@@ -121,9 +191,10 @@ export async function publishDocument(
     },
   );
   const shareUrl = readSameOriginShareUrl(published.shareUrl, shareToken);
-  if (!shareUrl) {
-    throw new PublicationError("The book was published, but no share link was returned.", {
-      code: "missing_share_url",
+  const publishedRevision = readPublishedRevision(published.publishedRevision);
+  if (!shareUrl || !publishedRevision) {
+    throw new PublicationError("The book was published, but its share response was incomplete.", {
+      code: "invalid_publish_response",
       status: 502,
       retryable: true,
     });
@@ -134,7 +205,7 @@ export async function publishDocument(
     status: "published",
     shareToken,
     shareUrl,
-    publishedRevision: documentState.revision,
+    publishedRevision,
     uploadedAssetIds: [...uploaded],
   };
   persistRecord(record);
@@ -143,6 +214,10 @@ export async function publishDocument(
 }
 
 export async function revokePublication(documentId: string): Promise<PublicationRecord> {
+  return withPublicationLock(documentId, () => revokePublicationLocked(documentId));
+}
+
+async function revokePublicationLocked(documentId: string): Promise<PublicationRecord> {
   const record = requireStoredRecord(documentId);
   await requestJson(`/api/books/${encodeURIComponent(record.bookId)}/revoke`, {
     method: "POST",
@@ -160,6 +235,10 @@ export async function revokePublication(documentId: string): Promise<Publication
 }
 
 export async function deletePublication(documentId: string): Promise<void> {
+  return withPublicationLock(documentId, () => deletePublicationLocked(documentId));
+}
+
+async function deletePublicationLocked(documentId: string): Promise<void> {
   const record = requireStoredRecord(documentId);
   const response = await apiRequest(`/api/books/${encodeURIComponent(record.bookId)}`, {
     method: "DELETE",
@@ -176,11 +255,21 @@ function storageKey(documentId: string) {
   return `${STORAGE_PREFIX}${documentId}`;
 }
 
+async function withPublicationLock<T>(documentId: string, work: () => Promise<T>): Promise<T> {
+  const lockManager = globalThis.navigator?.locks;
+  if (!lockManager) {
+    throw new PublicationError("This browser cannot safely coordinate publication across tabs.", {
+      code: "locking_unavailable",
+      status: 503,
+      retryable: false,
+    });
+  }
+  return lockManager.request(`apertale:publication:${documentId}`, { mode: "exclusive" }, work);
+}
+
 function toPublicRecord(record: StoredPublicationRecord): PublicationRecord {
   const publicRecord: PublicationRecord = {
     documentId: record.documentId,
-    bookId: record.bookId,
-    manageToken: record.manageToken,
     status: record.status,
   };
   if (record.shareUrl) publicRecord.shareUrl = record.shareUrl;
@@ -211,6 +300,10 @@ function createShareToken() {
 
 function readShareToken(value: unknown) {
   return typeof value === "string" && TOKEN_PATTERN.test(value) ? value : undefined;
+}
+
+function readPublishedRevision(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
 }
 
 function readSameOriginShareUrl(value: unknown, shareToken?: string) {
@@ -277,8 +370,10 @@ function readStoredRecord(documentId: string): StoredPublicationRecord | null {
       manageToken,
       status: status as PublicationStatus,
       shareToken,
-      shareUrl: allowedShareUrl,
-      publishedRevision: typeof publishedRevision === "number" ? publishedRevision : undefined,
+      shareUrl: status === "published" ? allowedShareUrl : undefined,
+      publishedRevision: status === "published" && typeof publishedRevision === "number"
+        ? publishedRevision
+        : undefined,
       uploadedAssetIds: Array.isArray(parsed.uploadedAssetIds)
         ? uniqueAssetIds(parsed.uploadedAssetIds.filter((assetId): assetId is string => typeof assetId === "string"))
         : [],
@@ -362,23 +457,40 @@ async function loadRequiredBlobs(documentState: DocumentState) {
   return blobs;
 }
 
-async function createDraftRecord(documentId: string): Promise<StoredPublicationRecord> {
-  const payload = await requestJson<{ bookId?: string; manageToken?: string }>("/api/books", {
-    method: "POST",
-  });
-  if (typeof payload.bookId !== "string" || !BOOK_ID_PATTERN.test(payload.bookId)) {
-    throw new PublicationError("The draft book id was invalid.", { code: "invalid_draft", status: 502, retryable: true });
-  }
-  if (typeof payload.manageToken !== "string" || !TOKEN_PATTERN.test(payload.manageToken)) {
-    throw new PublicationError("The creator capability was invalid.", { code: "invalid_draft", status: 502, retryable: true });
+function createDraftRecord(documentId: string): StoredPublicationRecord {
+  const bookId = crypto.randomUUID();
+  const manageToken = tokenFromBytes(crypto.getRandomValues(new Uint8Array(32)));
+  if (!BOOK_ID_PATTERN.test(bookId) || !TOKEN_PATTERN.test(manageToken)) {
+    throw new PublicationError("A private draft capability could not be created in this browser.", {
+      code: "invalid_draft",
+      retryable: true,
+    });
   }
   return {
     documentId,
-    bookId: payload.bookId,
-    manageToken: payload.manageToken,
+    bookId,
+    manageToken,
     status: "draft",
     uploadedAssetIds: [],
   };
+}
+
+async function ensureDraftRecord(record: StoredPublicationRecord) {
+  const payload = await requestJson<{ bookId?: string; status?: string }>("/api/books", {
+    method: "POST",
+    headers: {
+      authorization: bearer(record.manageToken),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ bookId: record.bookId }),
+  });
+  if (payload.bookId !== record.bookId || payload.status !== "draft") {
+    throw new PublicationError("The publishing service returned an invalid draft record.", {
+      code: "invalid_draft",
+      status: 502,
+      retryable: true,
+    });
+  }
 }
 
 async function uploadAsset(record: StoredPublicationRecord, assetId: string, blob: Blob) {

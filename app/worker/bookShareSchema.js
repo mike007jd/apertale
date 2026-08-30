@@ -1,10 +1,11 @@
-// Immutable fresh-binding bootstrap paired with drizzle/0001. Schema changes
-// ship as new numbered migrations; never rewrite this applied baseline.
+// Fresh-binding bootstrap mirrors the latest schema. Existing bindings evolve
+// through the numbered migrations in drizzle; never rewrite an applied migration.
 export const LIVING_BOOK_SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS living_books (
     id TEXT PRIMARY KEY,
     manage_token_hash TEXT NOT NULL,
     share_token_hash TEXT UNIQUE,
+    publish_attempt_token_hash TEXT,
     status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'revoked', 'deleting')),
     title TEXT,
     manifest_json TEXT,
@@ -24,4 +25,36 @@ export const LIVING_BOOK_SCHEMA_STATEMENTS = [
     PRIMARY KEY (book_id, asset_id),
     FOREIGN KEY (book_id) REFERENCES living_books(id) ON DELETE CASCADE
   )`,
+  // No foreign key by design: a token tombstone must outlive book deletion.
+  `CREATE TABLE IF NOT EXISTS living_book_retired_share_tokens (
+    share_token_hash TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL,
+    retired_at TEXT NOT NULL
+  )`,
+  // No foreign key by design: creation-rate evidence must survive deletion.
+  `CREATE TABLE IF NOT EXISTS living_book_creation_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS living_book_creation_events_created_at
+    ON living_book_creation_events (created_at)`,
+  `CREATE TRIGGER IF NOT EXISTS retire_living_book_share_token
+    AFTER UPDATE OF status ON living_books
+    WHEN OLD.status = 'published'
+      AND NEW.status IN ('revoked', 'deleting')
+      AND OLD.share_token_hash IS NOT NULL
+    BEGIN
+      INSERT OR IGNORE INTO living_book_retired_share_tokens (
+        share_token_hash, book_id, retired_at
+      ) VALUES (
+        OLD.share_token_hash, OLD.id, NEW.updated_at
+      );
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS record_living_book_creation
+    AFTER INSERT ON living_books
+    BEGIN
+      INSERT INTO living_book_creation_events (book_id, created_at)
+      VALUES (NEW.id, NEW.created_at);
+    END`,
 ];

@@ -1,6 +1,7 @@
 import { bookEngine } from "./bookEngine";
 import { getAssetMetadata, listAssetMetadata } from "./assetStore";
-import { abortImageHandoff, requestImageHandoff } from "./imageHandoff";
+import { IMAGE_HANDOFF_ASSET_USES, abortImageHandoff, requestImageHandoff } from "./imageHandoff";
+import type { AuthoringSurfaceRequest } from "./authoringSurface";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MOTION_PRESETS, MAX_BOOK_SPREADS } from "./types";
@@ -210,7 +211,10 @@ function canceled(signal: AbortSignal) {
   if (signal.aborted) throw new DOMException("Tool execution was canceled.", "AbortError");
 }
 
-export function registerWebMcpTools(onStatus: (available: boolean) => void) {
+export function registerWebMcpTools(
+  onStatus: (available: boolean) => void,
+  presentAuthoringSurface: (request: AuthoringSurfaceRequest, signal: AbortSignal) => void | Promise<void> = () => undefined,
+) {
   if (!document.modelContext?.registerTool) {
     recordDiagnostic("webmcp:unavailable");
     onStatus(false);
@@ -224,12 +228,59 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     registeredCount += 1;
   });
   const sessionResults = new Map<string, unknown>();
+  type PendingPresentation = {
+    result: unknown;
+    target: {
+      documentId: string;
+      revision: number;
+      surface: "reader" | "shelf";
+      spreadId?: string;
+      theme?: ThemeId;
+      preview?: boolean;
+    };
+  };
+  const pendingPresentations = new Map<string, PendingPresentation>();
   const activeImageHandoffs = new Map<string, ReturnType<typeof requestImageHandoff>>();
   const cancelActiveImageHandoffs = () => {
     activeImageHandoffs.forEach((_, requestId) => abortImageHandoff(requestId));
     activeImageHandoffs.clear();
   };
   let authoringGuideRead = false;
+  const resumePresentation = async (requestId: string, signal: AbortSignal) => {
+    const pending = pendingPresentations.get(requestId);
+    if (!pending) return undefined;
+    if (bookEngine.getSnapshot().document.id !== pending.target.documentId) {
+      if (!bookEngine.openBook(pending.target.documentId, "agent")) {
+        invalid("The book targeted by this presentation is no longer present in the library.");
+      }
+    }
+    let presented = bookEngine.getSnapshot();
+    if (presented.document.revision !== pending.target.revision) {
+      invalid("The book revision targeted by this presentation is no longer current; use a new requestId.");
+    }
+    if (pending.target.theme && presented.session.sceneThemeId !== pending.target.theme) {
+      bookEngine.setTheme(pending.target.theme, "agent");
+    }
+    if (typeof pending.target.preview === "boolean" && presented.session.preview !== pending.target.preview) {
+      bookEngine.setPreview(pending.target.preview, "agent");
+    }
+    if (pending.target.spreadId) {
+      const spreadIndex = presented.document.spreads.findIndex((spread) => spread.id === pending.target.spreadId);
+      if (spreadIndex < 0) invalid("The spread targeted by this presentation is no longer present in the book.");
+      if (spreadIndex !== presented.session.currentSpreadIndex) bookEngine.setSpread(spreadIndex);
+    }
+    presented = bookEngine.getSnapshot();
+    await presentAuthoringSurface({
+      requestId,
+      surface: pending.target.surface,
+      documentId: pending.target.documentId,
+      revision: pending.target.revision,
+      spreadId: pending.target.surface === "reader" ? pending.target.spreadId : undefined,
+    }, signal);
+    pendingPresentations.delete(requestId);
+    sessionResults.set(requestId, pending.result);
+    return pending.result;
+  };
 
   const registrations = [
     register(
@@ -338,6 +389,9 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
         execute: (input, options) => runTool(SITE_TOOL.manageBook, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["requestId", "expectedRevision", "action", "bookId", "coverAssetId", "title", "spreads", "creationBrief", "qualityReview"]);
           const requestId = requiredString(input, "requestId");
+          if (pendingPresentations.has(requestId)) {
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
+          }
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
           const action = requiredString(input, "action");
@@ -356,9 +410,18 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             }
             const bookId = requiredString(input, "bookId");
             if (!bookEngine.openBook(bookId, "agent")) invalid("bookId is not present in the current library.");
-            const result = { ok: true, bookId, summary: `Opened ${bookEngine.getSnapshot().document.title}.` };
-            sessionResults.set(requestId, result);
-            return result;
+            const opened = bookEngine.getSnapshot();
+            const result = { ok: true, bookId, summary: `Opened ${opened.document.title}.` };
+            pendingPresentations.set(requestId, {
+              result,
+              target: {
+                documentId: bookId,
+                revision: opened.document.revision,
+                surface: "reader",
+                spreadId: opened.document.spreads[opened.session.currentSpreadIndex]?.id,
+              },
+            });
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
           }
           if (action === "set-cover") {
             const coverAssetId = requiredString(input, "coverAssetId");
@@ -435,6 +498,19 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             creationBrief: creationBrief ?? {},
             validatedSourceAssetIds: validatedSourceAssets.map((asset) => asset.id),
           }, "agent");
+          if (result.ok) {
+            const created = bookEngine.getSnapshot();
+            pendingPresentations.set(requestId, {
+              result,
+              target: {
+                documentId: created.document.id,
+                revision: created.document.revision,
+                surface: "reader",
+                spreadId: created.document.spreads[created.session.currentSpreadIndex]?.id,
+              },
+            });
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
+          }
           sessionResults.set(requestId, result);
           return result;
         }),
@@ -689,7 +765,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
       {
         name: SITE_TOOL.setPresentation,
         title: "Set presentation",
-        description: "Switch Day/Night or Preview, or open one spread for rendered screenshot evidence, without changing document revision.",
+        description: "Switch Day/Night or Preview, or show the current shelf cover or one reader spread for rendered screenshot evidence, without changing document revision.",
         inputSchema: {
           type: "object",
           properties: {
@@ -697,14 +773,18 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             theme: { type: "string", enum: ["paper-atelier", "midnight-desk"] },
             preview: { type: "boolean" },
             spreadId: { type: "string", maxLength: 128 },
+            surface: { type: "string", enum: ["reader", "shelf"], description: "Visible surface to show. Use shelf for cover evidence and reader for a spread." },
           },
           required: ["requestId"],
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
-        execute: (input, options) => runTool(SITE_TOOL.setPresentation, options?.signal ?? uncancelledToolSignal, () => {
-          assertOnly(input, ["requestId", "theme", "preview", "spreadId"]);
+        execute: (input, options) => runTool(SITE_TOOL.setPresentation, options?.signal ?? uncancelledToolSignal, async () => {
+          assertOnly(input, ["requestId", "theme", "preview", "spreadId", "surface"]);
           const requestId = requiredString(input, "requestId");
+          if (pendingPresentations.has(requestId)) {
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
+          }
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
           let theme = bookEngine.getSnapshot().session.sceneThemeId;
@@ -714,6 +794,10 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             theme = requestedTheme as ThemeId;
           }
           if (typeof input.preview !== "undefined" && typeof input.preview !== "boolean") invalid("preview must be boolean.");
+          const surface = typeof input.surface === "undefined" ? undefined : requiredString(input, "surface");
+          if (surface !== undefined && surface !== "reader" && surface !== "shelf") invalid("surface is not supported.");
+          if (surface === "shelf" && typeof input.spreadId !== "undefined") invalid("surface shelf cannot be combined with spreadId.");
+          if (surface === "shelf" && input.preview === true) invalid("surface shelf cannot be combined with preview true.");
           let spreadId = bookEngine.getSnapshot().document.spreads[bookEngine.getSnapshot().session.currentSpreadIndex]?.id;
           if (typeof input.spreadId !== "undefined") {
             spreadId = requiredString(input, "spreadId");
@@ -721,10 +805,37 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
             if (spreadIndex < 0) invalid("spreadId is not present in the current book.");
             bookEngine.setSpread(spreadIndex);
           }
-          if (typeof input.theme === "undefined" && typeof input.preview === "undefined" && typeof input.spreadId === "undefined") invalid("set_presentation requires theme, preview, or spreadId.");
+          if (typeof input.theme === "undefined" && typeof input.preview === "undefined" && typeof input.spreadId === "undefined" && surface === undefined) invalid("set_presentation requires theme, preview, spreadId, or surface.");
           if (typeof input.theme !== "undefined") bookEngine.setTheme(theme, "agent");
           if (typeof input.preview === "boolean") bookEngine.setPreview(input.preview, "agent");
-          const result = { ok: true, theme, preview: bookEngine.getSnapshot().session.preview, spreadId, summary: "Presentation updated." };
+          const visibleSurface = surface ?? (
+            typeof input.spreadId !== "undefined" || typeof input.preview !== "undefined"
+              ? "reader"
+              : undefined
+          );
+          if (visibleSurface === "shelf" && bookEngine.getSnapshot().session.preview) {
+            bookEngine.setPreview(false, "agent");
+          }
+          if (visibleSurface) {
+            const presented = bookEngine.getSnapshot();
+            const presentedSpreadId = visibleSurface === "reader"
+              ? presented.document.spreads[presented.session.currentSpreadIndex]?.id
+              : undefined;
+            const result = { ok: true, theme, preview: presented.session.preview, spreadId, surface: visibleSurface, summary: "Presentation updated." };
+            pendingPresentations.set(requestId, {
+              result,
+              target: {
+                documentId: presented.document.id,
+                revision: presented.document.revision,
+                surface: visibleSurface,
+                spreadId: presentedSpreadId,
+                theme,
+                preview: presented.session.preview,
+              },
+            });
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
+          }
+          const result = { ok: true, theme, preview: bookEngine.getSnapshot().session.preview, spreadId, surface: visibleSurface, summary: "Presentation updated." };
           sessionResults.set(requestId, result);
           return result;
         }),
@@ -760,29 +871,32 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
         name: SITE_TOOL.requestImageHandoff,
         title: "Request an image handoff",
         description:
-          "Ask the reader for one or more photos. Opens the photo drawer in the page with your reason shown to them, and resolves with the browser-local asset ids once they have chosen — so you can reference the ids immediately instead of waiting to be told the upload finished. You cannot send image bytes through a tool call and the browser requires the reader's own click to open a file picker, so this asks rather than uploads.",
+          "Ask the reader to hand off source photos or finished book artwork. Opens the matching image drawer with your reason, then resolves with browser-local asset ids and accepted/rejected/failed counts. A mixed batch returns partial and leaves the drawer open for replacements. Source photos join the next creation brief; book art only joins the reusable asset registry. The browser requires the reader's own click to choose files.",
         inputSchema: {
           type: "object",
           properties: {
             requestId: { type: "string", description: "Caller-supplied id for this request." },
-            reason: { type: "string", description: "Plain-language reason shown to the reader, in your own words. For example: the fifth spread needs a photo of your grandmother.", maxLength: 220 },
+            assetUse: { type: "string", enum: [...IMAGE_HANDOFF_ASSET_USES], description: "Use source-photo for reader references; use book-art for generated cover, spread, clean-plate, or cutout finals." },
+            reason: { type: "string", description: "Plain-language reason shown to the reader, including what and how many files are needed.", maxLength: 220 },
           },
-          required: ["requestId", "reason"],
+          required: ["requestId", "assetUse", "reason"],
           additionalProperties: false,
         },
         // Mutating, and its result carries ids derived from a file the reader
         // chose, so it takes the same hint every other mutating tool carries.
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: (input, options) => runTool(SITE_TOOL.requestImageHandoff, options?.signal ?? uncancelledToolSignal, async () => {
-          assertOnly(input, ["requestId", "reason"]);
+          assertOnly(input, ["requestId", "assetUse", "reason"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
+          const assetUse = requiredString(input, "assetUse");
+          if (!IMAGE_HANDOFF_ASSET_USES.includes(assetUse as (typeof IMAGE_HANDOFF_ASSET_USES)[number])) invalid("assetUse is not supported.");
           const reason = boundedString(input, "reason", 220);
           const signal = options?.signal ?? uncancelledToolSignal;
           let pendingOutcome = activeImageHandoffs.get(requestId);
           if (!pendingOutcome) {
-            pendingOutcome = requestImageHandoff({ requestId, reason });
+            pendingOutcome = requestImageHandoff({ requestId, assetUse: assetUse as (typeof IMAGE_HANDOFF_ASSET_USES)[number], reason });
             activeImageHandoffs.set(requestId, pendingOutcome);
           }
           // Agent-side cancellation has to reach the drawer, or a cancelled
@@ -792,9 +906,17 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
           if (signal.aborted) onAbort();
           try {
             const outcome = await pendingOutcome;
-            const result = outcome.status === "provided"
-              ? { status: "provided", assetIds: outcome.assetIds, note: "Refresh get_project_context(detail: \"assets\") before referencing these ids." }
-              : { status: "dismissed", reason: outcome.reason };
+            const result = outcome.status === "dismissed"
+              ? { status: "dismissed", reason: outcome.reason }
+              : {
+                  status: outcome.status,
+                  assetIds: outcome.assetIds,
+                  counts: outcome.counts,
+                  ...(outcome.status === "partial" ? { reason: outcome.reason } : {}),
+                  note: outcome.status === "partial"
+                    ? "Only the returned ids were accepted. The image drawer remains open for replacements; refresh get_project_context(detail: \"assets\") before referencing any ids."
+                    : "Refresh get_project_context(detail: \"assets\") before referencing these ids.",
+                };
             sessionResults.set(requestId, result);
             return result;
           } finally {
@@ -816,6 +938,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     cancelActiveImageHandoffs();
     controller.abort();
     sessionResults.clear();
+    pendingPresentations.clear();
     recordDiagnostic("webmcp:registration-failed", {
       registered: registeredCount,
       error: error instanceof Error ? error.name : "UnknownError",
@@ -827,6 +950,7 @@ export function registerWebMcpTools(onStatus: (available: boolean) => void) {
     cancelActiveImageHandoffs();
     controller.abort();
     sessionResults.clear();
+    pendingPresentations.clear();
     recordDiagnostic("webmcp:removed", { count: registeredCount });
   };
 }
