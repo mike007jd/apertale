@@ -7,12 +7,15 @@ const readerRequest: AuthoringSurfaceRequest = {
   documentId: "book-one",
   revision: 4,
   spreadId: "spread-two",
+  theme: "paper-atelier",
+  preview: false,
 };
 
 const visibleReader: AuthoringSurfaceObservation = {
   documentId: "book-one",
   revision: 4,
   spreadId: "spread-two",
+  theme: "paper-atelier",
   preview: false,
   workshopOpen: false,
   libraryOpen: false,
@@ -37,6 +40,12 @@ describe("authoring surface acknowledgement", () => {
   it("does not acknowledge a reader spread before its matching frame is rendered", () => {
     const visibleButUnrendered = { ...visibleReader, contentRendered: false };
     expect(authoringSurfaceReady(readerRequest, visibleButUnrendered)).toBe(false);
+  });
+
+  it("does not acknowledge a frame for a different theme or preview target", () => {
+    const nightPreviewRequest: AuthoringSurfaceRequest = { ...readerRequest, theme: "midnight-desk", preview: true };
+    const dayEditorFrame: AuthoringSurfaceObservation = { ...visibleReader, theme: "paper-atelier" };
+    expect(authoringSurfaceReady(nightPreviewRequest, dayEditorFrame)).toBe(false);
   });
 
   it("acknowledges a shelf only when the active book is visible outside Preview", () => {

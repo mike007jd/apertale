@@ -1,15 +1,20 @@
+import type { ThemeId } from "./types";
+
 export type AuthoringSurfaceRequest = {
   requestId: string;
   surface: "reader" | "shelf";
   documentId: string;
   revision: number;
   spreadId?: string;
+  theme: ThemeId;
+  preview: boolean;
 };
 
 export type AuthoringSurfaceObservation = {
   documentId: string;
   revision: number;
   spreadId: string;
+  theme: ThemeId;
   preview: boolean;
   workshopOpen: boolean;
   libraryOpen: boolean;
@@ -33,6 +38,8 @@ export function authoringSurfaceReady(
   if (
     observation.documentId !== request.documentId
     || observation.revision !== request.revision
+    || observation.theme !== request.theme
+    || observation.preview !== request.preview
     || observation.workshopOpen
     || observation.blockingOverlayOpen
     || observation.libraryMotion !== "idle"
@@ -46,6 +53,5 @@ export function authoringSurfaceReady(
   }
 
   return observation.libraryOpen
-    && !observation.preview
     && observation.shelfBookIds.includes(request.documentId);
 }

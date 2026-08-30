@@ -1,4 +1,93 @@
-import { isProceduralElement, spreadBaseAssetId, type Spread } from "./types";
+import { isProceduralElement, spreadBaseAssetId, type BookSnapshot, type Spread, type ThemeId } from "./types";
+
+type RenderBounds = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
+type RenderElement = Pick<HTMLElement, "isConnected" | "getBoundingClientRect">;
+
+export type ReaderRenderEvidence = {
+  sceneKey: string;
+  renderEvidenceToken?: string;
+  documentId: string;
+  revision: number;
+  spreadId: string;
+  theme: ThemeId;
+  surface: "webgl" | "fallback";
+  locator: string;
+};
+
+export type ShelfCoverEvidence = {
+  url: string;
+  renderElement: RenderElement & Pick<HTMLImageElement, "complete" | "naturalWidth">;
+};
+
+export function readerSceneStructureKey(snapshot: BookSnapshot, mode: "reader" | "workshop") {
+  return JSON.stringify({
+    id: snapshot.document.id,
+    mode,
+    spreads: snapshot.document.spreads.map((spread) => ({
+      id: spread.id,
+      title: spread.title,
+      body: spread.body,
+      kicker: spread.kicker,
+      textureUrl: spread.textureUrl,
+      artwork: spread.artwork,
+      elements: spread.elements.map((element) => [element.id, element.assetId, ...(element.frameAssetIds ?? [])]),
+    })),
+  });
+}
+
+function renderElementVisible(element: RenderElement, bounds: RenderBounds) {
+  if (!element.isConnected) return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0
+    && rect.height > 0
+    && rect.right > bounds.left
+    && rect.left < bounds.right
+    && rect.bottom > bounds.top
+    && rect.top < bounds.bottom;
+}
+
+/**
+ * A successful frame belongs to one scene structure and one presentation
+ * attempt. A retired renderer cannot satisfy a later request by replaying
+ * metadata from the live snapshot while its passive cleanup is pending.
+ */
+export function readerRenderMatches(
+  evidence: ReaderRenderEvidence | null,
+  target: Required<Pick<ReaderRenderEvidence, "sceneKey" | "renderEvidenceToken" | "documentId" | "revision" | "spreadId" | "theme" | "surface">>,
+) {
+  return Boolean(
+    evidence
+    && evidence.sceneKey === target.sceneKey
+    && evidence.renderEvidenceToken === target.renderEvidenceToken
+    && evidence.documentId === target.documentId
+    && evidence.revision === target.revision
+    && evidence.spreadId === target.spreadId
+    && evidence.theme === target.theme
+    && evidence.surface === target.surface,
+  );
+}
+
+/** A shelf ACK is tied to the currently mounted, decoded, visible cover node. */
+export function shelfCoverMatches(
+  evidence: ShelfCoverEvidence | undefined,
+  expectedUrl: string | undefined,
+  bounds: RenderBounds,
+) {
+  return Boolean(
+    evidence
+    && expectedUrl
+    && evidence.url === expectedUrl
+    && evidence.renderElement.complete
+    && evidence.renderElement.naturalWidth > 0
+    && renderElementVisible(evidence.renderElement, bounds),
+  );
+}
 
 export function fallbackAssetPlan(spread: Spread) {
   return {

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete, sceneAssetsReadyForEvidence, spreadLoadIndexes } from "./renderEvidence";
+import {
+  dedicatedCoverRendered,
+  fallbackAssetPlan,
+  fallbackImageLoadKeys,
+  fallbackRenderComplete,
+  readerRenderMatches,
+  sceneAssetsReadyForEvidence,
+  shelfCoverMatches,
+  spreadLoadIndexes,
+  type ReaderRenderEvidence,
+  type ShelfCoverEvidence,
+} from "./renderEvidence";
 import { isProceduralElement, type Spread } from "./types";
 
 const spread = (): Spread => ({
@@ -37,6 +48,8 @@ const spread = (): Spread => ({
 });
 
 describe("render evidence readiness", () => {
+  const viewport = { top: 0, right: 1280, bottom: 720, left: 0 };
+
   it("counts only a resolved dedicated cover as shelf cover evidence", () => {
     const personalBook = { sample: false, coverAssetId: "asset:12345678-1234-4234-8234-123456789abc" };
     expect(dedicatedCoverRendered(personalBook, "blob:cover")).toBe(true);
@@ -91,5 +104,61 @@ describe("render evidence readiness", () => {
     expect(spreadLoadIndexes(0, 4, false)).toEqual([0]);
     expect(spreadLoadIndexes(0, 4, true)).toEqual([1]);
     expect(spreadLoadIndexes(2, 4, true)).toEqual([1, 3]);
+  });
+
+  it("rejects evidence from a retired reader session or rendering backend", () => {
+    const evidence: ReaderRenderEvidence = {
+      sceneKey: "reader-scene-after-workshop",
+      renderEvidenceToken: "presentation-attempt-two",
+      documentId: "book-one",
+      revision: 4,
+      spreadId: "opening",
+      theme: "paper-atelier",
+      surface: "webgl",
+      locator: ".book-scene canvas",
+    };
+    const target = {
+      sceneKey: "reader-scene-after-workshop",
+      renderEvidenceToken: "presentation-attempt-two",
+      documentId: "book-one",
+      revision: 4,
+      spreadId: "opening",
+      theme: "paper-atelier" as const,
+      surface: "webgl" as const,
+    };
+
+    expect(readerRenderMatches(evidence, target)).toBe(true);
+    expect(readerRenderMatches(evidence, { ...target, sceneKey: "workshop-scene" })).toBe(false);
+    expect(readerRenderMatches(evidence, { ...target, renderEvidenceToken: "presentation-attempt-one" })).toBe(false);
+    expect(readerRenderMatches(evidence, { ...target, surface: "fallback" })).toBe(false);
+  });
+
+  it("accepts only the currently mounted, decoded, visible shelf cover", () => {
+    const rect = (top: number): DOMRect => ({
+      x: 20,
+      y: top,
+      top,
+      right: 220,
+      bottom: top + 280,
+      left: 20,
+      width: 200,
+      height: 280,
+      toJSON: () => ({}),
+    });
+    const cover: ShelfCoverEvidence = {
+      url: "blob:cover",
+      renderElement: {
+        isConnected: true,
+        complete: true,
+        naturalWidth: 800,
+        getBoundingClientRect: () => rect(40),
+      },
+    };
+
+    expect(shelfCoverMatches(cover, "blob:cover", viewport)).toBe(true);
+    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, isConnected: false } }, "blob:cover", viewport)).toBe(false);
+    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, complete: false } }, "blob:cover", viewport)).toBe(false);
+    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, naturalWidth: 0 } }, "blob:cover", viewport)).toBe(false);
+    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, getBoundingClientRect: () => rect(900) } }, "blob:cover", viewport)).toBe(false);
   });
 });
