@@ -43,7 +43,7 @@ The first prompt proves page-grounded context and library navigation. The second
 
 ## Run locally
 
-Use Node.js `^20.19.0`, `^22.12.0`, or `>=24.0.0`. The verified development baseline is Node 24.18.0 with npm 11.16.0.
+Use Node.js `^22.12.0` or `>=24.0.0`. The verified development baseline is Node 24.18.0 with npm 11.16.0; Node 20 is intentionally excluded because it is [end-of-life](https://nodejs.org/en/about/previous-releases).
 
 ```bash
 cd app

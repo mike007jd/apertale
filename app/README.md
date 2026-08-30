@@ -52,7 +52,7 @@ npm run verify:assets
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
-Use Node.js `^20.19.0`, `^22.12.0`, or `>=24.0.0`; CI and the current local baseline use Node 24.18.0. `npm run verify:release` is the deterministic code, type, unit, production-build, and Worker/Sites gate. `npm run verify:assets` is a separate visual-production audit and currently exits non-zero for 41 referenced legacy v2 layers that need regeneration rather than padding-only repair. Twenty-five retired layers were removed after their sample spreads moved to grounded composite artwork.
+Use Node.js `^22.12.0` or `>=24.0.0`; CI and the current local baseline use Node 24.18.0. Node 20 is intentionally excluded because it is [end-of-life](https://nodejs.org/en/about/previous-releases). `npm run verify:release` is the deterministic code, type, unit, production-build, and Worker/Sites gate. `npm run verify:assets` is a separate visual-production audit and currently exits non-zero for 41 referenced legacy v2 layers that need regeneration rather than padding-only repair. Twenty-five retired layers were removed after their sample spreads moved to grounded composite artwork.
 
 `npm run audit:cutouts` and `npm run optimize:assets` shell out to the ImageMagick 7 CLI, so they require a `magick` executable on `PATH` (install ImageMagick 7, for example with `brew install imagemagick` on macOS); without it the audit reports an ImageMagick inspection failure for every file.
 
