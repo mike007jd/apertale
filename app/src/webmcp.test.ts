@@ -34,7 +34,8 @@ describe("WebMCP registration", () => {
     };
     vi.stubGlobal("document", { modelContext });
     const statuses: boolean[] = [];
-    const cleanup = registerWebMcpTools((available) => statuses.push(available));
+    const presented = vi.fn();
+    const cleanup = registerWebMcpTools((available) => statuses.push(available), presented);
     await vi.waitFor(() => expect(statuses).toEqual([true]));
 
     expect(tools.map((tool) => tool.name)).toEqual([...SITE_TOOL_NAMES]);
@@ -57,12 +58,14 @@ describe("WebMCP registration", () => {
     expect(registrationSignals).toHaveLength(7);
     const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
     const manageBookSchema = tool("manage_book").inputSchema as { required?: string[] };
+    const handoffSchema = tool("request_image_handoff").inputSchema as { required?: string[] };
     const projectContextSchema = tool("get_project_context").inputSchema as {
       properties?: { detail?: { enum?: string[] } };
     };
     expect(projectContextSchema.properties?.detail?.enum).toEqual([...PROJECT_CONTEXT_DETAILS]);
     expect(JSON.stringify(manageBookSchema)).toContain("set-cover");
     expect(manageBookSchema.required).toContain("expectedRevision");
+    expect(handoffSchema.required).toEqual(["requestId", "assetUse", "reason"]);
     expect(tool("get_project_context").description).toContain("authoring-guide");
     expect(tool("get_project_context").description).toContain("creation-readiness");
     expect(tool("get_project_context").description).toContain("ask every returned blocking question");
@@ -230,9 +233,28 @@ describe("WebMCP registration", () => {
       signal: new AbortController().signal,
     });
     expect(duplicatePresentation).toBe(presentation);
-    expect(JSON.parse(String(presentation))).toMatchObject({ spreadId: "city-for-small-things" });
+    expect(JSON.parse(String(presentation))).toMatchObject({ spreadId: "city-for-small-things", surface: "reader" });
+    expect(presented).toHaveBeenLastCalledWith(expect.objectContaining({
+      requestId: "night-preview",
+      surface: "reader",
+      spreadId: "city-for-small-things",
+    }), expect.any(AbortSignal));
     expect(bookEngine.getSnapshot().session).toMatchObject({ sceneThemeId: "midnight-desk", preview: true });
     expect(bookEngine.getSnapshot().document.revision).toBe(beforePresentationRevision);
+    const shelfPresentation = JSON.parse(String(await tool("set_presentation").execute({
+      requestId: "show-cover",
+      surface: "shelf",
+    }, { signal: new AbortController().signal })));
+    expect(shelfPresentation).toMatchObject({ surface: "shelf", preview: false });
+    expect(presented).toHaveBeenLastCalledWith(expect.objectContaining({
+      requestId: "show-cover",
+      surface: "shelf",
+    }), expect.any(AbortSignal));
+    await expect(tool("set_presentation").execute({
+      requestId: "invalid-shelf-spread",
+      surface: "shelf",
+      spreadId: "city-for-small-things",
+    }, { signal: new AbortController().signal })).rejects.toThrow("cannot be combined");
     await expect(tool("set_presentation").execute({
       requestId: "invalid-presentation",
       theme: "paper-atelier",
@@ -261,6 +283,11 @@ describe("WebMCP registration", () => {
       signal: new AbortController().signal,
     })));
     expect(opened).toMatchObject({ ok: true, bookId: "apertale-atlas-of-wonders" });
+    expect(presented).toHaveBeenLastCalledWith(expect.objectContaining({
+      requestId: "open-atlas",
+      surface: "reader",
+      documentId: "apertale-atlas-of-wonders",
+    }), expect.any(AbortSignal));
     expect(bookEngine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "Codex opened Atlas of Living Wonders" });
     const duplicateOpen = await tool("manage_book").execute({ requestId: "open-atlas", expectedRevision: openExpectedRevision, action: "open", bookId: "apertale-lantern-garden" }, {
       signal: new AbortController().signal,
@@ -277,6 +304,12 @@ describe("WebMCP registration", () => {
       creationBrief: readyStoryBrief(1),
     }, { signal: new AbortController().signal })));
     expect(created).toMatchObject({ ok: true, changedIds: ["1-the-moon-pulls"] });
+    expect(presented).toHaveBeenLastCalledWith(expect.objectContaining({
+      requestId: "create-tides",
+      surface: "reader",
+      documentId: expect.stringMatching(/^book-how-tides-move-/),
+      spreadId: "1-the-moon-pulls",
+    }), expect.any(AbortSignal));
 
     const composed = JSON.parse(String(await tool("compose_spread").execute({
       requestId: "compose-tides",
@@ -451,7 +484,7 @@ describe("WebMCP registration", () => {
     expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "imagegen-before-create").rule)
       .toMatch(/before manage_book create/);
     expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "handoff-before-refer").rule)
-      .toMatch(/Hand off each generated asset/);
+      .toMatch(/assetUse book-art/);
     expect(guideResult.authoringGuide.phases[0].mutationAllowed).toBe(false);
     expect(guideResult.authoringGuide.phases[1].sequence).toEqual(["handoff", "create", "set-cover", "patch", "verify"]);
 
@@ -497,21 +530,58 @@ describe("WebMCP registration", () => {
     const firstController = new AbortController();
     const secondController = new AbortController();
 
-    const first = handoff.execute({ requestId: "handoff-a", reason: "First request." }, { signal: firstController.signal });
+    await expect(handoff.execute({ requestId: "handoff-missing-use", reason: "Missing purpose." }, {
+      signal: new AbortController().signal,
+    })).rejects.toThrow("assetUse");
+
+    const first = handoff.execute({ requestId: "handoff-a", assetUse: "source-photo", reason: "First request." }, { signal: firstController.signal });
     await vi.waitFor(() => expect(currentImageHandoff()?.requestId).toBe("handoff-a"));
-    const second = handoff.execute({ requestId: "handoff-b", reason: "Second request." }, { signal: secondController.signal });
+    const second = handoff.execute({ requestId: "handoff-b", assetUse: "book-art", reason: "Second request." }, { signal: secondController.signal });
     expect(currentImageHandoff()?.requestId).toBe("handoff-b");
 
     // Abort A before its superseded execution has unwound and removed the old
     // listener. This is the exact window that used to let A cancel B.
     const firstCancellation = expect(first).rejects.toMatchObject({ name: "AbortError" });
-    expect(completeImageHandoff("handoff-a", ["asset:from-a"])).toBe(false);
+    expect(completeImageHandoff("handoff-a", { assetIds: ["asset:from-a"], rejected: 0, failed: 0 })).toBeNull();
     firstController.abort();
     await Promise.resolve();
     expect(currentImageHandoff()?.requestId).toBe("handoff-b");
     await firstCancellation;
-    expect(completeImageHandoff("handoff-b", ["asset:for-b"])).toBe(true);
+    expect(completeImageHandoff("handoff-b", { assetIds: ["asset:for-b"], rejected: 0, failed: 0 })).toMatchObject({ status: "provided" });
     await expect(second).resolves.toContain("asset:for-b");
+    cleanup();
+  });
+
+  it("returns explicit counts when an image handoff is only partially accepted", async () => {
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const cleanup = registerWebMcpTools(() => undefined);
+    await vi.waitFor(() => expect(tools).toHaveLength(7));
+    const handoff = tools.find((tool) => tool.name === "request_image_handoff")!;
+    const pending = handoff.execute({
+      requestId: "handoff-partial",
+      assetUse: "book-art",
+      reason: "Add a cover and two spreads.",
+    }, { signal: new AbortController().signal });
+    await vi.waitFor(() => expect(currentImageHandoff()?.requestId).toBe("handoff-partial"));
+
+    expect(completeImageHandoff("handoff-partial", {
+      assetIds: ["asset:cover"],
+      rejected: 1,
+      failed: 1,
+    })).toMatchObject({ status: "partial" });
+    const result = JSON.parse(String(await pending)) as Record<string, unknown>;
+    expect(result).toMatchObject({
+      status: "partial",
+      assetIds: ["asset:cover"],
+      counts: { accepted: 1, rejected: 1, failed: 1 },
+      reason: expect.stringContaining("Only the returned asset ids are available"),
+      note: expect.stringContaining("drawer remains open"),
+    });
     cleanup();
   });
 
@@ -525,7 +595,7 @@ describe("WebMCP registration", () => {
     const cleanup = registerWebMcpTools(() => undefined);
     await vi.waitFor(() => expect(tools).toHaveLength(7));
     const handoff = tools.find((tool) => tool.name === "request_image_handoff")!;
-    const pending = handoff.execute({ requestId: "handoff-cleanup", reason: "Wait for a photo." }, {
+    const pending = handoff.execute({ requestId: "handoff-cleanup", assetUse: "source-photo", reason: "Wait for a photo." }, {
       signal: new AbortController().signal,
     });
     await vi.waitFor(() => expect(currentImageHandoff()?.requestId).toBe("handoff-cleanup"));

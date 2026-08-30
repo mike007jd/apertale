@@ -26,7 +26,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
-import { releaseAssetUrls, resolveAssetUrl } from "./assetStore";
+import { releaseAssetUrls, resolveAssetUrl, storeLocalImages } from "./assetStore";
 import {
   CREATION_LENGTHS,
   CREATION_PHOTO_USES,
@@ -47,7 +47,7 @@ import { announce, supportsWebGl2 } from "./readerShell";
 import { spreadFraction } from "./stageGeometry";
 import { Panel, Toast } from "./design/primitives";
 import { ThemeSwitch } from "./design/ThemeSwitch";
-import { completeImageHandoff, currentImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
+import { completeImageHandoff, currentImageHandoff, describePartialImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
 import { useFocusTrap } from "./focusTrap";
 import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete } from "./renderEvidence";
@@ -63,7 +63,9 @@ import { canTurnPage, createPageTurnSession, pageTurnNavDisabled } from "./pageT
 import { PublicationPanel } from "./PublicationPanel";
 import { getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
+import { MAX_BOOK_UPLOADED_ASSETS } from "./qualityContract";
 import type { BookSnapshot, FocusResponse, HoverResponse, MotionPreset, Spread, ThemeId, TurnState } from "./types";
+import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
 import { registerWebMcpTools } from "./webmcp";
 
 const runtimeParams = new URLSearchParams(window.location.search);
@@ -100,6 +102,15 @@ type OpeningBook = {
 
 type LibraryMotion = "idle" | "opening-book" | "closing-book";
 type LibraryTab = "yours" | "explore";
+
+type PendingAuthoringSurface = {
+  request: AuthoringSurfaceRequest;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  cleanup: () => void;
+};
+
+const AUTHORING_SURFACE_TIMEOUT_MS = 4_000;
 
 /**
  * A book belongs to the reader unless the samples set claims it, so `sample`
@@ -367,6 +378,7 @@ export function App() {
   const [workshopImportError, setWorkshopImportError] = useState<string | null>(null);
   const [showPublication, setShowPublication] = useState(false);
   const [publicationRecord, setPublicationRecord] = useState<PublicationRecord | null>(null);
+  const [authoringSurfaceRequest, setAuthoringSurfaceRequest] = useState<AuthoringSurfaceRequest | null>(null);
   const creationSpreadCount = creationWorkshop.spreadCount;
   const creationStyle = creationWorkshop.visualDirection;
   const creationSource = creationWorkshop.mode;
@@ -386,6 +398,7 @@ export function App() {
   const elementAgentCard = useRef<HTMLDivElement | null>(null);
   const elementAgentOpener = useRef<HTMLElement | null>(null);
   const publicationOpener = useRef<HTMLElement | null>(null);
+  const pendingAuthoringSurface = useRef<PendingAuthoringSurface | null>(null);
   const prewarmedBooks = useRef(new Map<string, { renderer: Promise<unknown>; media: Promise<unknown> }>());
   const loadToken = useRef(0);
   const openingBookRef = useRef<OpeningBook | null>(null);
@@ -756,6 +769,9 @@ export function App() {
   const openLibrary = useCallback(() => {
     if (showLibrary || openingBookRef.current) return;
     libraryOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // A human opening Books should land on their own work. Site Tools may
+    // choose Explore instead when presenting a sample cover.
+    setLibraryTab("yours");
     setLibraryMotion("closing-book");
     setShowLibrary(true);
     if (reducedMotion) {
@@ -835,6 +851,7 @@ export function App() {
   const closeCodexGuide = useCallback(() => {
     const request = currentImageHandoff();
     if (request) dismissImageHandoff(request.requestId);
+    setPartialImageHandoff(null);
     setShowCreateGuide(false);
     window.setTimeout(() => createGuideOpener.current?.focus(), 0);
   }, []);
@@ -938,7 +955,96 @@ export function App() {
     });
   }, [advanceLoadStage, beginOpenTransition, library.books, prewarmReader, readyBookId, resolvedCoverUrls, snapshot.document.id]);
 
-  useEffect(() => registerWebMcpTools(setWebMcpAvailable), []);
+  const presentAuthoringSurface = useCallback((request: AuthoringSurfaceRequest, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+    const current = bookEngine.getSnapshot();
+    if (request.documentId !== current.document.id || request.revision !== current.document.revision) {
+      reject(new Error("The requested authoring surface no longer matches the active book revision."));
+      return;
+    }
+    if (signal.aborted) {
+      reject(new DOMException("Authoring surface request was cancelled.", "AbortError"));
+      return;
+    }
+    const previous = pendingAuthoringSurface.current;
+    if (previous) {
+      previous.cleanup();
+      previous.reject(new DOMException("Superseded by a newer authoring surface request.", "AbortError"));
+    }
+    let timeout = 0;
+    const finishWithError = (error: Error) => {
+      if (pendingAuthoringSurface.current?.request.requestId !== request.requestId) return;
+      pendingAuthoringSurface.current.cleanup();
+      pendingAuthoringSurface.current = null;
+      setAuthoringSurfaceRequest(null);
+      reject(error);
+    };
+    const onAbort = () => finishWithError(new DOMException("Authoring surface request was cancelled.", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    pendingAuthoringSurface.current = {
+      request,
+      resolve,
+      reject,
+      cleanup: () => {
+        signal.removeEventListener("abort", onAbort);
+        window.clearTimeout(timeout);
+      },
+    };
+    timeout = window.setTimeout(() => finishWithError(new Error("The requested authoring surface did not become visible.")), AUTHORING_SURFACE_TIMEOUT_MS);
+    setAuthoringSurfaceRequest(request);
+    setShowCreateGuide(false);
+    setShowElementAgentGuide(false);
+    setShowPublication(false);
+    setTurn(null);
+    setHoveredId(null);
+    setShowMore(false);
+    setShowOutline(false);
+    if (request.surface === "shelf") {
+      openingBookRef.current = null;
+      setOpeningBook(null);
+      setOpenProgress(0);
+      const activeBook = bookEngine.getLibrary().books.find((book) => book.id === request.documentId);
+      setLibraryTab(activeBook?.sample ? "explore" : "yours");
+      setLibraryMotion("idle");
+      setShowLibrary(true);
+      return;
+    }
+    settleLibraryToReader();
+  }), [settleLibraryToReader]);
+
+  useEffect(() => {
+    if (!authoringSurfaceRequest) return undefined;
+    const activeSpreadId = snapshot.document.spreads[snapshot.session.currentSpreadIndex]?.id ?? "";
+    const visibleShelfIds = shelfBooks.map((book) => book.id);
+    const ready = authoringSurfaceReady(authoringSurfaceRequest, {
+      documentId: snapshot.document.id,
+      revision: snapshot.document.revision,
+      spreadId: activeSpreadId,
+      preview: snapshot.session.preview,
+      workshopOpen: showCreateGuide,
+      libraryOpen: showLibrary,
+      libraryMotion,
+      blockingOverlayOpen: showElementAgentGuide || showPublication || showOutline || Boolean(openingBook),
+      shelfBookIds: visibleShelfIds,
+    });
+    if (!ready) return undefined;
+    const pending = pendingAuthoringSurface.current;
+    if (pending?.request.requestId !== authoringSurfaceRequest.requestId) return undefined;
+    pending.cleanup();
+    pendingAuthoringSurface.current = null;
+    setAuthoringSurfaceRequest(null);
+    pending.resolve();
+    return undefined;
+  }, [authoringSurfaceRequest, libraryMotion, openingBook, shelfBooks, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.document.revision, snapshot.document.spreads, snapshot.session.currentSpreadIndex, snapshot.session.preview]);
+
+  useEffect(() => () => {
+    const pending = pendingAuthoringSurface.current;
+    if (!pending) return;
+    pending.cleanup();
+    pending.reject(new DOMException("Authoring surface unmounted.", "AbortError"));
+    pendingAuthoringSurface.current = null;
+  }, []);
+
+  useEffect(() => registerWebMcpTools(setWebMcpAvailable, presentAuthoringSurface), [presentAuthoringSurface]);
 
   useEffect(() => {
     const updateMotionPreference = () => {
@@ -1020,12 +1126,6 @@ export function App() {
     sheet.querySelector<HTMLElement>("#library-shelf")?.focus();
   }, [showLibrary]);
 
-  // The shelf always opens on the reader's own books - including the first time
-  // one exists - so a stale Explore selection never hides what they just made.
-  useEffect(() => {
-    if (showLibrary) setLibraryTab("yours");
-  }, [showLibrary]);
-
   useFocusTrap(librarySheet, showLibrary);
   useFocusTrap(createGuideCard, showCreateGuide);
   useFocusTrap(elementAgentCard, showElementAgentGuide);
@@ -1077,6 +1177,9 @@ export function App() {
    * translate a sentence into six clicks through a dialog headed "New book".
    */
   const [handoffRequest, setHandoffRequest] = useState<ImageHandoffRequest | null>(null);
+  // A partial batch settles the tool call honestly, but the reader still needs
+  // the same drawer and purpose while replacing rejected or failed files.
+  const [partialImageHandoff, setPartialImageHandoff] = useState<ImageHandoffRequest | null>(null);
 
   /**
    * Copy an image in the conversation, press paste on the page. The app had no
@@ -1105,6 +1208,7 @@ export function App() {
   useEffect(() => subscribeToImageHandoff((request) => {
     setHandoffRequest(request);
     if (!request) return;
+    setPartialImageHandoff(null);
     recordDiagnostic("handoff:requested", { requestId: request.requestId });
     // A tool call must reveal the drawer it promises to open. Preview and the
     // other modal surfaces can otherwise keep it hidden, so exit or close them
@@ -1113,9 +1217,11 @@ export function App() {
     setShowElementAgentGuide(false);
     setShowPublication(false);
     setShowCreateGuide(true);
-    // Photos live behind a mode the reader has to pick first, which makes no
-    // sense when the Agent has just asked for one.
-    dispatchCreationWorkshop({ type: "set-mode", mode: "both" });
+    if (request.assetUse === "source-photo") {
+      // Reader references belong to the next creation brief. Generated final
+      // art is deliberately registry-only and must never change this mode.
+      dispatchCreationWorkshop({ type: "set-mode", mode: "both" });
+    }
     // The picker itself still needs a real user gesture - the browser requires
     // one and the host cannot automate uploads - so the page gets as far as it
     // is allowed to and leaves exactly one click.
@@ -1127,34 +1233,61 @@ export function App() {
     // Bind the eventual completion to the request visible when this import
     // began. A newer Agent request may supersede it while images are decoded.
     const handoffRequestId = handoffRequest?.requestId ?? null;
-    if (!workshopHydrated) {
+    const requestAtStart = handoffRequest ?? partialImageHandoff;
+    const isBookArt = requestAtStart?.assetUse === "book-art";
+    if (!isBookArt && !workshopHydrated) {
       setWorkshopImportError("Wait for saved photos to finish restoring before adding new images.");
       return;
     }
-    const room = MAX_WORKSHOP_ASSETS - workshopAssets.length;
+    const room = isBookArt ? MAX_BOOK_UPLOADED_ASSETS : MAX_WORKSHOP_ASSETS - workshopAssets.length;
     if (room <= 0) {
-      setWorkshopImportError(`This brief already holds ${MAX_WORKSHOP_ASSETS} photos. Remove one to add another.`);
+      setWorkshopImportError(isBookArt
+        ? `A book may reference at most ${MAX_BOOK_UPLOADED_ASSETS} uploaded images.`
+        : `This brief already holds ${MAX_WORKSHOP_ASSETS} photos. Remove one to add another.`);
       return;
     }
     setAssetImporting(true);
     setWorkshopImportError(null);
     try {
-      const batch = await importCreationWorkshopAssets(files, room);
+      const photoBatch = isBookArt ? null : await importCreationWorkshopAssets(files, room);
+      const bookArtBatch = isBookArt ? await storeLocalImages(files, room) : null;
+      const stored = photoBatch?.stored ?? bookArtBatch?.assets ?? [];
+      const assetIds = photoBatch?.imported.map((asset) => asset.id) ?? bookArtBatch?.assets.map((asset) => asset.id) ?? [];
+      const failed = photoBatch?.failed ?? bookArtBatch?.failed ?? 0;
+      const rejected = photoBatch?.rejected ?? bookArtBatch?.rejected ?? 0;
       // Files keep their picked order, and each import appends to the end of the strip.
-      for (const asset of batch.stored) {
-        recordDiagnostic("workbench:asset-handed-off", { assetId: asset.id, originalSize: asset.originalSize ?? asset.size, size: asset.size, optimized: asset.optimized ?? false });
+      for (const asset of stored) {
+        recordDiagnostic("workbench:asset-handed-off", { assetId: asset.id, assetUse: requestAtStart?.assetUse ?? "source-photo", originalSize: asset.originalSize ?? asset.size, size: asset.size, optimized: asset.optimized ?? false });
       }
-      if (batch.imported.length > 0) {
-        dispatchCreationWorkshop({ type: "append-assets", assets: batch.imported });
+      if (assetIds.length > 0) {
+        if (photoBatch) dispatchCreationWorkshop({ type: "append-assets", assets: photoBatch.imported });
         // The pending tool call resolves with real ids, so the Agent resumes
         // immediately instead of waiting to be told the upload finished.
-        if (handoffRequestId && completeImageHandoff(handoffRequestId, batch.imported.map((asset) => asset.id))) {
-          recordDiagnostic("handoff:provided", { requestId: handoffRequestId, count: batch.imported.length });
+        const outcome = handoffRequestId
+          ? completeImageHandoff(handoffRequestId, { assetIds, rejected, failed })
+          : null;
+        if (outcome) {
+          recordDiagnostic(outcome.status === "partial" ? "handoff:partial" : "handoff:provided", {
+            requestId: handoffRequestId,
+            assetUse: requestAtStart?.assetUse ?? "source-photo",
+            ...outcome.counts,
+          });
+          if (outcome.status === "partial") {
+            setPartialImageHandoff(requestAtStart);
+            setWorkshopImportError(outcome.reason);
+          } else {
+            setPartialImageHandoff(null);
+            if (isBookArt) setShowCreateGuide(false);
+          }
+        } else if (handoffRequestId === null && (rejected > 0 || failed > 0)) {
+          setWorkshopImportError(describePartialImageHandoff({ accepted: assetIds.length, rejected, failed }));
         }
-      } else if (batch.failed > 0) {
+      } else if (failed > 0) {
         setWorkshopImportError("This browser could not store those images. Free some space, then try again.");
-      } else {
+      } else if (rejected > 0) {
         setWorkshopImportError("That file was not a usable image. Choose PNG, JPEG, or WebP under 12 MB.");
+      } else {
+        setWorkshopImportError("No image was added.");
       }
     } finally {
       setAssetImporting(false);
@@ -1177,6 +1310,11 @@ export function App() {
   };
 
   const usesPhotos = creationSource !== "idea";
+  const displayedImageHandoff = handoffRequest ?? partialImageHandoff;
+  const handoffIsBookArt = displayedImageHandoff?.assetUse === "book-art";
+  const showImagePicker = usesPhotos || Boolean(displayedImageHandoff);
+  const pickerReady = handoffIsBookArt || workshopHydrated;
+  const pickerAtCapacity = !handoffIsBookArt && workshopAssets.length >= MAX_WORKSHOP_ASSETS;
   const creationBrief = useMemo(() => buildCreationWorkshopBrief(creationWorkshop), [creationWorkshop]);
   const briefAssets = creationBrief.sourceAssets;
   const createPrompt = creationBrief.prompt;
@@ -1620,22 +1758,22 @@ export function App() {
           <div className="workshop-ui" ref={createGuideCard}>
             <header className="workshop-topbar">
               <button className="workshop-wordmark" onClick={closeCodexGuide}><BookOpenText size={19} /> Apertale</button>
-              <button className="workshop-close" autoFocus onClick={closeCodexGuide} aria-label="Close creation workshop"><X size={20} /></button>
+              <button className="workshop-close" autoFocus onClick={closeCodexGuide} aria-label={handoffIsBookArt ? "Close image handoff" : "Close creation workshop"}><X size={20} /></button>
             </header>
 
             <div className="workshop-sheet">
               <div className="workshop-sheet-scroll">
                 <div className="workshop-headline">
-                  <p>New book</p>
-                  <h2 id="codex-guide-title">Make one yours.</h2>
+                  <p>{handoffIsBookArt ? "Artwork handoff" : "New book"}</p>
+                  <h2 id="codex-guide-title">{handoffIsBookArt ? "Add the finished book art." : "Make one yours."}</h2>
                 </div>
 
-                <p className={`workshop-signal ${webMcpAvailable ? "is-connected" : ""}`}>
+                {!handoffIsBookArt && <p className={`workshop-signal ${webMcpAvailable ? "is-connected" : ""}`}>
                   <i aria-hidden="true" />
                   <span>{webMcpAvailable ? "Ready beside Codex" : "Read here. Open in Codex (ChatGPT desktop) to create."}</span>
-                </p>
+                </p>}
 
-                <fieldset className="workshop-field">
+                {!handoffIsBookArt && <fieldset className="workshop-field">
                   <legend>Start from</legend>
                   <div className="workshop-segment">
                     {CREATION_SOURCES.map((source) => (
@@ -1648,9 +1786,9 @@ export function App() {
                       >{source.label}</button>
                     ))}
                   </div>
-                </fieldset>
+                </fieldset>}
 
-                <fieldset className="workshop-field">
+                {!handoffIsBookArt && <fieldset className="workshop-field">
                   <legend>Spreads</legend>
                   <div className="workshop-lengths">
                     {CREATION_LENGTHS.map((count) => (
@@ -1664,9 +1802,9 @@ export function App() {
                       >{count}</button>
                     ))}
                   </div>
-                </fieldset>
+                </fieldset>}
 
-                <fieldset className="workshop-field">
+                {!handoffIsBookArt && <fieldset className="workshop-field">
                   <legend>Style</legend>
                   <div className="workshop-chips">
                     {CREATION_STYLES.map((style) => (
@@ -1679,7 +1817,7 @@ export function App() {
                       >{style}</button>
                     ))}
                   </div>
-                </fieldset>
+                </fieldset>}
 
                 {/* Photo use sits at the END of the panel, beside the photos
                     it describes. It used to be inserted between Start from and
@@ -1689,7 +1827,7 @@ export function App() {
                     fails to run leaves the options present but invisible and
                     unclickable, and hiding working controls is a worse failure
                     than appearing without a flourish. */}
-                {usesPhotos && (
+                {!handoffIsBookArt && usesPhotos && (
                   <fieldset className="workshop-field">
                     <legend>Photo use</legend>
                     <div className="workshop-segment workshop-photo-use">
@@ -1705,33 +1843,33 @@ export function App() {
                     </div>
                   </fieldset>
                 )}
-                {usesPhotos && (
-                  <section className="workshop-photos" aria-label="Source images, in book order">
+                {showImagePicker && (
+                  <section className="workshop-photos" aria-label={handoffIsBookArt ? "Generated book artwork handoff" : "Source images, in book order"}>
                     {/* The Agent's own sentence, printed where the reader acts
                         on it. A request that only exists in the chat pane is
                         what made this step feel disconnected. */}
-                    <Toast open={Boolean(handoffRequest)} className="workshop-handoff-request">
+                    <Toast open={Boolean(displayedImageHandoff)} className="workshop-handoff-request">
                       <Sparkle size={16} weight="fill" />
-                      <span>{handoffRequest?.reason}</span>
+                      <span>{displayedImageHandoff?.reason}</span>
                     </Toast>
                     <div className="workshop-photos-head">
-                      <span>Photos<small>{workshopAssets.length}/{MAX_WORKSHOP_ASSETS}</small></span>
+                      <span>{handoffIsBookArt ? "Book art" : "Photos"}<small>{handoffIsBookArt ? `up to ${MAX_BOOK_UPLOADED_ASSETS} files` : `${workshopAssets.length}/${MAX_WORKSHOP_ASSETS}`}</small></span>
                       <button
                         type="button"
                         ref={addPhotoButton}
                         className="workshop-add-photo"
                         onClick={() => fileInput.current?.click()}
-                        disabled={!workshopHydrated || assetImporting || workshopAssets.length >= MAX_WORKSHOP_ASSETS}
+                        disabled={!pickerReady || assetImporting || pickerAtCapacity}
                       >
-                        {!workshopHydrated || assetImporting ? <SpinnerGap size={15} className="is-spinning" /> : <Plus size={15} weight="bold" />}
-                        <span>{!workshopHydrated ? "Restoring" : assetImporting ? "Adding" : "Add"}</span>
+                        {!pickerReady || assetImporting ? <SpinnerGap size={15} className="is-spinning" /> : <Plus size={15} weight="bold" />}
+                        <span>{!pickerReady ? "Restoring" : assetImporting ? "Adding" : "Add"}</span>
                       </button>
                     </div>
 
-                    {workshopAssets.length === 0 ? (
-                      <button type="button" className="workshop-photo-empty" onClick={() => fileInput.current?.click()} disabled={!workshopHydrated || assetImporting}>
+                    {handoffIsBookArt || workshopAssets.length === 0 ? (
+                      <button type="button" className="workshop-photo-empty" onClick={() => fileInput.current?.click()} disabled={!pickerReady || assetImporting}>
                         <ImageSquare size={22} />
-                        <span>Add photos in the order they should appear</span>
+                        <span>{handoffIsBookArt ? "Add the generated cover, spreads, clean plates, or cutouts" : "Add photos in the order they should appear"}</span>
                       </button>
                     ) : (
                       <ol className="workshop-photo-strip">
@@ -1756,7 +1894,7 @@ export function App() {
                       </ol>
                     )}
 
-                    <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={!workshopHydrated || assetImporting} onChange={(event) => { void importWorkshopPhotos(event.currentTarget.files); event.currentTarget.value = ""; }} />
+                    <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={!pickerReady || assetImporting} onChange={(event) => { void importWorkshopPhotos(event.currentTarget.files); event.currentTarget.value = ""; }} />
 
                     {workshopImportError && (
                       <p className="workshop-import-error" role="alert">
@@ -1764,16 +1902,16 @@ export function App() {
                         <span>{workshopImportError}</span>
                         <button type="button" onClick={() => {
                           setWorkshopImportError(null);
-                          if (workshopHydrated) fileInput.current?.click();
+                          if (pickerReady) fileInput.current?.click();
                           else setWorkshopHydrationAttempt((attempt) => attempt + 1);
-                        }}>{workshopHydrated ? "Try another image" : "Try restoring again"}</button>
+                        }}>{pickerReady ? "Try another image" : "Try restoring again"}</button>
                       </p>
                     )}
                   </section>
                 )}
               </div>
 
-              <div className="workshop-actionbar">
+              {!handoffIsBookArt && <div className="workshop-actionbar">
                 <p className="workshop-summary">
                   {creationSpreadCount} spreads · {creationStyle}{briefAssets.length > 0 ? ` · ${briefAssets.length} photo${briefAssets.length === 1 ? "" : "s"}` : ""}
                 </p>
@@ -1787,7 +1925,7 @@ export function App() {
                     <textarea readOnly value={createPrompt} onFocus={(event) => event.currentTarget.select()} aria-label="Creation brief to copy manually" />
                   </div>
                 )}
-              </div>
+              </div>}
             </div>
           </div>
         </section>

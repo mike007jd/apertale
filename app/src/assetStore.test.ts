@@ -103,9 +103,32 @@ describe("asset store blob access", () => {
 
     await expect(storeLocalImages(broken, 1)).resolves.toEqual({
       assets: [],
-      rejected: 0,
+      rejected: 2,
       failed: 1,
     });
     expect(imageOptimizer.optimizeImportedImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts every valid file beyond the finite import capacity as rejected", async () => {
+    installAssetDatabase();
+    const selected = [1, 2, 3].map((index) => ({
+      name: `spread-${index}.png`,
+      type: "image/png",
+      size: 400,
+    } as File));
+    imageOptimizer.optimizeImportedImage.mockImplementation(async (file: File) => ({
+      blob: new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }),
+      name: file.name,
+      width: 1_536,
+      height: 947,
+      originalSize: file.size,
+      optimized: false,
+    }));
+
+    const result = await storeLocalImages(selected, 2);
+
+    expect(result).toMatchObject({ rejected: 1, failed: 0 });
+    expect(result.assets).toHaveLength(2);
+    expect(imageOptimizer.optimizeImportedImage).toHaveBeenCalledTimes(2);
   });
 });

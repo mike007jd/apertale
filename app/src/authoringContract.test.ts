@@ -212,7 +212,8 @@ describe("site-native authoring guide contract", () => {
     expect(byId["photo-truth"]).toMatch(/raw uploaded photo/i);
     expect(byId["photo-truth"]).toMatch(/finished interior/i);
     expect(byId["photo-truth"]).toMatch(/literal photo album/i);
-    expect(byId["handoff-before-refer"]).toMatch(/Hand off each generated asset/i);
+    expect(byId["handoff-before-refer"]).toMatch(/assetUse source-photo/i);
+    expect(byId["handoff-before-refer"]).toMatch(/assetUse book-art/i);
     expect(byId["handoff-before-refer"]).toMatch(/before referring/i);
     expect(byId.layout).toMatch(/create, set-cover, and patch/i);
     expect(byId.interaction).toMatch(/spread-specific/i);

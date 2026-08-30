@@ -29,7 +29,7 @@ This check proves the deployed artifact and document policy. It does not claim t
    - `undo_project_change`
    - `request_image_handoff`
 
-Create flows must call `get_project_context` with `detail: "authoring-guide"`, then `detail: "creation-readiness"`. Blocking results are user questions, not permission to generate; create must reuse the same ready brief and reruns the same gate. When direct host media transfer is unavailable, `request_image_handoff` opens the reader-mediated import drawer and returns browser-local asset ids without changing the document revision. After actual rendering, the Agent reads `detail: "quality-review"`, explicitly calls `manage_book(action: "begin-critique")`, inspects real frames, and records the critique. Share stays closed until the current revision's report allows publication.
+Create flows must call `get_project_context` with `detail: "authoring-guide"`, then `detail: "creation-readiness"`. Blocking results are user questions, not permission to generate; create must reuse the same ready brief and reruns the same gate. When direct host media transfer is unavailable, `request_image_handoff` opens a reader-mediated import drawer and returns browser-local asset ids without changing the document revision. `assetUse: "source-photo"` adds reader references to the next brief; `assetUse: "book-art"` imports generated covers, spreads, clean plates, or cutouts without changing the brief. After actual rendering, the Agent reads `detail: "quality-review"`, explicitly calls `manage_book(action: "begin-critique")`, inspects real frames, and records the critique. Share stays closed until the current revision's report allows publication.
 
 If the arrow is absent, first verify that the selected account and model have Site Tools access; then refresh the page after enabling the permission. Do not reinterpret ordinary browser automation as a passing WebMCP run.
 
@@ -78,9 +78,10 @@ Prompt:
 
 Required evidence:
 
-- `request_image_handoff` receives a unique `requestId` and a plain-language reason that names the two needed images.
-- The workshop drawer opens with that reason, and the tool call remains pending until the reader chooses files or dismisses it.
+- `request_image_handoff` receives a unique `requestId`, `assetUse: "book-art"`, and a plain-language reason that names the two needed images.
+- The focused artwork drawer opens with that reason, and the tool call remains pending until the reader chooses files or dismisses it.
 - A provided result returns one or more real `asset:` ids; the Agent refreshes `get_project_context(detail: "assets")` before referencing them.
+- A mixed batch returns `status: "partial"` with exact accepted, rejected, and storage-failed counts. Only accepted ids are returned, and the artwork drawer remains open for replacements instead of presenting the handoff as complete.
 - The handoff does not change the document revision. A dismissed request returns a structured dismissal rather than a false success.
 
 ### Compose and patch
@@ -105,7 +106,7 @@ Prompt:
 
 Required evidence:
 
-- Shelf cover and every current spread emit render evidence, and the returned manifest identifies their URL/locators.
+- `set_presentation(surface: "shelf")` resolves only after the current cover is visible; each reader-spread call resolves only after that spread is visible. Shelf cover and every current spread emit separate render evidence, and the returned manifest identifies their URL/locators.
 - Deterministic results cover structural facts; the Agent uses visible frames or screenshots for cover appeal, 2:1 composition, readability, consistency, photo fidelity, crop/skew/occlusion/scale, alpha edges, coherence, and promotional value.
 - `begin-critique` visibly enters checking state. `record-critique` returns blocker/warn/note results with evidence and suggested patches.
 - A blocker disables Share/Publish. After a patch changes the revision, one final review round is available; no third round is accepted.
@@ -129,17 +130,26 @@ Required evidence:
 
 Prompt:
 
-> Switch Apertale to Night and enter Preview without editing book content.
+> Switch Apertale to Night, enter Preview, and show the current reader spread without editing book content.
 
 Required evidence:
 
-- `set_presentation` changes both shared presentation fields atomically.
+- `set_presentation(surface: "reader")` changes the shared presentation fields and acknowledges the unobstructed reader surface.
 - Document revision does not change.
 - Night lighting, Preview controls, page turn, and click reveal remain functional.
 
 ### Cleanup
 
 Run this story in a disposable browser profile or dedicated acceptance Site state. The original book-creation undo token is intentionally valid only before later edits; after compose and scene mutations, it must conflict rather than delete newer work. Retain the temporary book as evidence through recording, then clear the disposable Site data after acceptance if desired.
+
+### Recording release pass
+
+For an explicitly disposable, non-sensitive book, continue beyond publish-ready before recording:
+
+1. Open **Publish**, choose **Publish and share**, and confirm the panel displays one complete same-origin `/share/:token` URL.
+2. Keep the full URL visible; copying or opening it is optional for the filmed flow.
+3. Off camera, request the share page, `/api/shared/:token`, and at least one referenced uploaded asset without creator credentials. All must succeed, while the returned manifest remains read-only and matches the published revision.
+4. Reload the creator page and confirm the publication panel restores the same URL. Do not revoke or delete this evidence book until recording is complete.
 
 ## 4. Capture evidence
 

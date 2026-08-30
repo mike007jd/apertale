@@ -22,15 +22,33 @@
  * and nobody has to go back and say "I uploaded it".
  */
 
+export const IMAGE_HANDOFF_ASSET_USES = ["source-photo", "book-art"] as const;
+export type ImageHandoffAssetUse = (typeof IMAGE_HANDOFF_ASSET_USES)[number];
+
 export type ImageHandoffRequest = {
   requestId: string;
+  /** Keeps reader-supplied references separate from generated final artwork. */
+  assetUse: ImageHandoffAssetUse;
   /** The Agent's own words, shown to the reader verbatim. */
   reason: string;
 };
 
 export type ImageHandoffOutcome =
-  | { status: "provided"; assetIds: string[] }
+  | { status: "provided"; assetIds: string[]; counts: ImageHandoffImportCounts }
+  | { status: "partial"; assetIds: string[]; counts: ImageHandoffImportCounts; reason: string }
   | { status: "dismissed"; reason: string };
+
+export type ImageHandoffImportResult = {
+  assetIds: string[];
+  rejected: number;
+  failed: number;
+};
+
+export type ImageHandoffImportCounts = {
+  accepted: number;
+  rejected: number;
+  failed: number;
+};
 
 type Pending = {
   request: ImageHandoffRequest;
@@ -88,9 +106,26 @@ export function requestImageHandoff(request: ImageHandoffRequest): Promise<Image
   });
 }
 
-/** Called by the reader surface once the imported assets have real ids. */
-export function completeImageHandoff(requestId: string, assetIds: string[]) {
-  return settleImageHandoff(requestId, { status: "provided", assetIds });
+export function describePartialImageHandoff(counts: ImageHandoffImportCounts) {
+  const problems = [
+    counts.rejected > 0 ? `${counts.rejected} unsupported ${counts.rejected === 1 ? "file was" : "files were"} rejected` : null,
+    counts.failed > 0 ? `${counts.failed} ${counts.failed === 1 ? "file" : "files"} could not be stored` : null,
+  ].filter((problem): problem is string => Boolean(problem));
+  return `${counts.accepted} ${counts.accepted === 1 ? "image was" : "images were"} added, but ${problems.join(" and ")}. Only the returned asset ids are available; add replacements if the complete set is still required.`;
+}
+
+/** Called by the reader surface once one or more imported assets have real ids. */
+export function completeImageHandoff(requestId: string, imported: ImageHandoffImportResult) {
+  if (imported.assetIds.length === 0) throw new TypeError("An image handoff cannot complete without an accepted asset.");
+  const counts: ImageHandoffImportCounts = {
+    accepted: imported.assetIds.length,
+    rejected: imported.rejected,
+    failed: imported.failed,
+  };
+  const outcome: ImageHandoffOutcome = counts.rejected > 0 || counts.failed > 0
+    ? { status: "partial", assetIds: imported.assetIds, counts, reason: describePartialImageHandoff(counts) }
+    : { status: "provided", assetIds: imported.assetIds, counts };
+  return settleImageHandoff(requestId, outcome) ? outcome : null;
 }
 
 /**
@@ -100,7 +135,7 @@ export function completeImageHandoff(requestId: string, assetIds: string[]) {
  */
 export function dismissImageHandoff(
   requestId: string,
-  reason = "The reader closed the photo drawer without adding an image.",
+  reason = "The reader closed the image drawer without adding an image.",
 ) {
   return settleImageHandoff(requestId, { status: "dismissed", reason });
 }

@@ -52,12 +52,12 @@ Hard rejection: placing an uploaded source photo on the right page, or treating 
 
 Only after the complete asset plan and generated art set exist:
 
-1. Re-check `creation-readiness`, then create the book with the same completed brief.
+1. Import exact assets through supported host transfer. When direct transfer is unavailable, call `request_image_handoff` with a unique `requestId`, the correct `assetUse`, and a plain-language reason. Use `source-photo` only for reader-supplied references that belong in the next brief; use `book-art` for generated covers, spreads, clean plates, and cutouts. Wait for the reader to choose or dismiss. Treat a `partial` result as incomplete, use only its returned asset ids, and arrange replacements for its rejected or failed count. Then refresh `get_project_context(detail: "assets")`.
+2. Re-check `creation-readiness`, then create the book with the same completed brief. Successful create moves the page from the workshop to the new book.
    For an existing personal book that predates the lifecycle metadata, use the one-time `adopt-creation-brief` action at the inspected revision instead of recreating or guessing its brief.
-2. Import exact assets through supported host transfer. When direct transfer is unavailable, call `request_image_handoff` with a unique `requestId` and a plain-language reason, wait for the reader to choose or dismiss, then refresh `get_project_context(detail: "assets")`.
 3. Set the dedicated portrait cover.
 4. Apply full-spread backgrounds and meaningful interactions.
-5. Visit the shelf cover and every spread so Apertale records the current revision's real render evidence. Use `set_presentation(spreadId)` to navigate without changing the document revision.
+5. Visit the shelf cover with `set_presentation(surface: "shelf")`, then every spread with `set_presentation(spreadId)`, so Apertale records the current revision's real render evidence without changing document revision.
 6. Read `get_project_context(detail: "quality-review")`, then call `manage_book(action: "begin-critique")`. Use the deterministic checks and render manifest, then inspect the actual browser frames for every visual rubric item.
 7. Record the structured critique with `manage_book(action: "record-critique")`. Apply suggested patches, render again, and explicitly begin the next check. Complete at most two critique rounds.
 8. When blockers remain after round two, stop and tell the user which source material or decision is required. Publish only when the returned report says `publishAllowed: true`.
@@ -66,7 +66,7 @@ Never claim generation or import succeeded without evidence: returned asset ids,
 
 ## Authoring contract
 
-- Create a dedicated portrait cover. Never reuse an interior crop, flat color, or CSS stand-in. Prefer direct host media transfer from the Agent conversation. If the current host cannot transfer image bytes through WebMCP, call `request_image_handoff`, wait for the returned asset ids, refresh assets, then use `manage_book` with `action: "set-cover"`.
+- Create a dedicated portrait cover. Never reuse an interior crop, flat color, or CSS stand-in. Prefer direct host media transfer from the Agent conversation. If the current host cannot transfer image bytes through WebMCP, call `request_image_handoff` with `assetUse: "book-art"`, wait for the returned asset ids, refresh assets, then use `manage_book` with `action: "set-cover"`.
 - Make every showcase spread intentional. Use the page as a composition, not a template slot. A preserved-photo album keeps its approved source-true layout rather than reillustrating the people in it.
 - Treat each spread as one full-width illustration shared by both paper pages. Design across the gutter; keep important copy and faces clear of the fold. Use foreground, midground, and background layers to create depth without shipping runtime models.
 - Give every non-guide spread at least one meaningful hover/focus/click response. Vary the interaction according to the content.

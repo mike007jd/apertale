@@ -448,7 +448,7 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "handoff-before-refer",
-      rule: "Hand off each generated asset through supported transfer or request_image_handoff, then refresh get_project_context(detail: assets), before referring to that asset id.",
+      rule: "Hand off reader references with request_image_handoff assetUse source-photo and generated finals with assetUse book-art, then refresh get_project_context(detail: assets) before referring to those ids.",
     },
     {
       id: "layout",
