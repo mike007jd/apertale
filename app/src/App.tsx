@@ -124,7 +124,10 @@ type ActiveAuthoringSurfaceRequest = AuthoringSurfaceRequest & {
   renderEvidenceToken: string;
 };
 
-const AUTHORING_SURFACE_TIMEOUT_MS = 4_000;
+// The in-app Browser may throttle a background WebGL tab to only a few rAFs
+// per second. This remains a bounded failure, but leaves enough time for the
+// eight stable frames required by the renderer instead of racing them.
+const AUTHORING_SURFACE_TIMEOUT_MS = 10_000;
 
 /**
  * A book belongs to the reader unless the samples set claims it, so `sample`
