@@ -74,7 +74,7 @@ export type BookElement = {
   provenance: "sample" | "human" | "agent";
 };
 
-export const PROCEDURAL_ASSET_PREFIX = "procedural:";
+const PROCEDURAL_ASSET_PREFIX = "procedural:";
 
 export function isProceduralAssetId(assetId: string) {
   return assetId.startsWith(PROCEDURAL_ASSET_PREFIX);
@@ -187,7 +187,7 @@ type ConflictResult = {
   summary: string;
 };
 
-export type CreationNotReadyResult = {
+type CreationNotReadyResult = {
   ok: false;
   code: "creation_not_ready";
   currentRevision: number;

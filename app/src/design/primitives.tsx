@@ -37,7 +37,7 @@ const surfaceSpring = { type: "spring", ...motionTokens.springSurface } as const
 /** Informational motion: a duration, never a spring. */
 const info = { duration: durationMs.state / 1000, ease: easePoints.info } as const;
 
-export type SwitchOption<T extends string> = {
+type SwitchOption<T extends string> = {
   value: T;
   label: ReactNode;
   ariaLabel: string;

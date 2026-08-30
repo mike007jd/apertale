@@ -18,7 +18,7 @@ export type ImageContentAnalysis = {
 
 type DecodedImage = CanvasImageSource & { width: number; height: number; close?: () => void };
 
-export type OptimizedImage = {
+type OptimizedImage = {
   blob: Blob;
   name: string;
   width: number;

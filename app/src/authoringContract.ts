@@ -24,7 +24,7 @@ export const CREATION_BOOK_TYPES = ["illustrated-storybook", "photo-led-keepsake
 export type CreationBookType = (typeof CREATION_BOOK_TYPES)[number];
 
 export const PHOTO_SOURCE_USES = ["reference-and-compose", "preserve-original-layout"] as const;
-export type PhotoSourceUse = (typeof PHOTO_SOURCE_USES)[number];
+type PhotoSourceUse = (typeof PHOTO_SOURCE_USES)[number];
 
 export type CreationSourceAsset = {
   id: string;
@@ -50,7 +50,7 @@ export type CreationBriefPayload = {
   photoPolicy?: CreationPhotoPolicy;
 };
 
-export type CreationReadinessBlocker = {
+type CreationReadinessBlocker = {
   field: string;
   reason: string;
 };
@@ -287,14 +287,14 @@ export type CreationCompletionGate = {
   requirement: string;
 };
 
-export type AuthoringCountSpec = {
+type AuthoringCountSpec = {
   generatedCoverCount: number | string;
   generatedFullSpreadCount: number | string;
   preservedPhotoSpreadCount?: number | string;
   provenanceEntryCount: number | string;
 };
 
-export type AuthoringHardGate = {
+type AuthoringHardGate = {
   id: AuthoringHardGateId;
   rule: string;
 };
@@ -308,7 +308,7 @@ function spreadAssetMode(input: Pick<AuthoringCountSpec, "preservedPhotoSpreadCo
     : "generated";
 }
 
-export type AuthoringGuide = {
+type AuthoringGuide = {
   id: typeof AUTHORING_GUIDE_ID;
   version: typeof AUTHORING_GUIDE_VERSION;
   skillMirror: typeof AUTHORING_GUIDE_SKILL_MIRROR;
