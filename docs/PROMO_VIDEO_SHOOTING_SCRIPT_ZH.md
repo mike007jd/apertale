@@ -4,7 +4,7 @@
 >
 > 核实时间：2026-08-28（Pacific/Auckland）
 >
-> 核实基线：当前工作区，分支 `codex/simplify-imagebook-architecture`，`HEAD b2e5ccf`，包含尚未提交的创作工作台与发布/分享改动
+> 核实基线：以录制前最后一次生产部署、HTTP 门禁和 Codex 内置 Browser 端到端结果为准
 >
 > 用途：OpenAI The WebMCP Challenge 的公开演示视频；官方要求是带音频、公开、少于 3 分钟，本稿目标 59 秒
 
@@ -44,21 +44,21 @@
 |---|---|---|---|---|
 | 00:00–00:04 | 极短成品蒙太奇：Atlas 跨页翻动 → 照片驱动纪念书 → 匿名只读分享页。每个画面约 1 秒。 | 无需保留鼠标；用后段素材倒叙剪入。 | **“一句话，或者一组照片，都能变成一本会互动的书。”** | 硬切，开场即见结果；不放长 Logo 动画。最后 0.5 秒叠字：`Apertale — Open a page. Enter a world.` |
 | 00:04–00:11 | Codex 与 Apertale 并排。右侧停在漂亮的完整跨页，左侧露出当前任务标题和已选择模型，但遮住个人信息。叠字：`Codex · GPT-5.6 Sol · ChatGPT Sites`。 | 鼠标从 Codex 模型位置平滑移到右侧书页，不点击。 | **“这是 Apertale，一个在 Codex 里完成的 WebMCP 项目。这次演示用 GPT-5.6 Sol，部署在 ChatGPT Sites。”** | 这是事实安全版。只有确认完整开发历史都使用该模型时，才改成“我用 Codex 和 GPT-5.6 Sol 构建了 Apertale”。 |
-| 00:11–00:16 | 右侧地址栏展开 Site tools，短暂看到工具列表；随即收起，恢复完整书页。叠字：`Site tools (WebMCP)`。 | 点击地址栏的 **Site tools**，停 1.5 秒，再点空白处收起。 | **“Site tools，也就是 WebMCP，让 Codex 直接操作我正在看的同一页。”** | 列表只需证明页面提供工具，不逐个念六个名字。画面必须来自真实内置 Browser，不用静态假图代替。 |
+| 00:11–00:16 | 右侧地址栏展开 Site tools，短暂看到七个工具；随即收起，恢复完整书页。叠字：`Site tools (WebMCP)`。 | 点击地址栏的 **Site tools**，停 1.5 秒，再点空白处收起。 | **“Site tools，也就是 WebMCP，让 Codex 直接操作我正在看的同一页。”** | 列表只需证明页面提供七个工具，不逐个念名字。画面必须来自真实内置 Browser，不用静态假图代替。 |
 | 00:16–00:24 | 快速浏览三本成品：Atlas → 故事书 → `[个人照片纪念册标题]`。每本保留一个封面或跨页特征。 | 点 **Books**；依次点书封。每次打开后翻一页或触发一次 hover/click reveal。 | **“这里有插画知识书、故事书，也能把个人照片做成纪念书或相册。”** | 用 3 个跳剪压缩打开动画。若第三本是 `The Starlight Stitch`，画面标签写 `Photo-led keepsake`，不写 `Photo album`。 |
-| 00:24–00:34 | 进入 **Create your own** 工作台。依次出现 `Idea + photos`、`4` spreads、`Watercolor`，下方出现三张照片缩略图和顺序。 | 点击 **Create your own** → **Idea + photos** → **4** → **Watercolor** → **Add**，选择三张照片；必要时用左右箭头调整一次顺序。 | **“现在，我用几张旅行照片，做一本四跨页的水彩纪念册。”** | 上传选择器不必完整展示文件路径。鼠标停稳后再点击；原始动作可录 15–20 秒，后期压到 10 秒。 |
-| 00:34–00:43 | 点击复制 brief，焦点回到左侧 Codex 输入框。输入一句主题，粘贴 brief 并提交；右侧书页随 Site tools 调用逐步变化。 | 点 **Copy brief for Codex**；在 Codex 输入框补一句：**“请把这些照片做成一本温暖的南岛旅行纪念书。”**；粘贴 brief，发送。 | **“提交后，Codex 会先规划故事、生成画面，再通过 Site tools 把书一页页做出来。”** | 从发送到成品保留一份不断录的原始素材。成片用 6–12 倍加速或 2–3 个跳剪；保留至少一次真实工具调用、一次新书出现和一次跨页更新。麦克风轨不要跟画面一起变速。 |
+| 00:24–00:34 | 进入 **Create your own** 工作台。依次出现 `Idea + photos`、`Illustrated keepsake`、`4` spreads、`Watercolor`，下方出现三张照片缩略图和顺序。 | 点击 **Create your own** → **Idea + photos** → **Illustrated keepsake** → **4** → **Watercolor** → **Add**，选择三张照片；必要时用左右箭头调整一次顺序。 | **“现在，我用几张旅行照片，做一本四跨页的水彩纪念册。”** | `Photo use` 是 readiness 的必选项，不能跳过。上传选择器不必完整展示文件路径；原始动作可录 15–20 秒，后期压到 10 秒。 |
+| 00:34–00:43 | 点击复制问题，焦点回到左侧 Codex 输入框。输入主题和读者，粘贴 brief 并提交；保留一次真实的 `book-art` handoff：Codex 请求图片后，用户点击并粘贴或选择已生成的成品图；随后右侧书页逐步变化。 | 点 **Copy questions for Codex**；在 Codex 输入框补一句：**“请把这些照片做成一本给家人共同回忆的、温暖的南岛旅行纪念书。”**；粘贴 brief，发送。生成图准备好后，在右侧 handoff 抽屉真实点击 **Add** 并选择文件。 | **“提交后，Codex 会先规划故事、生成画面，再通过 Site tools 把书一页页做出来。”** | 提前把生成后的封面、跨页、clean plate 和 cutout 保存为可选文件；WebMCP 不会自动搬运图片字节。发送到成品保留一份不断录的原始素材，成片用 6–12 倍加速或跳剪，但至少保留一次真实 handoff、一次新书出现和一次跨页更新。 |
 | 00:43–00:50 | 成品全屏。快速翻两页，悬停一个前景元素，再点击打开事实卡或说明卡。 | 收起不必要面板；点向右翻页两次；悬停元素约 0.7 秒，再点击。 | **“我把等待过程加速了。现在，直接翻一遍成品。”** | 这一段不要再切回设置界面；让观众看到完整书、真实翻页与互动结果。 |
-| 00:50–00:56 | 打开发布面板，出现 Public link；最后在新标签打开只读 reader。 | 点 **Publish** → **Publish and share**；完成后点 **Copy link**，再点 **Open reader**。 | **“最后点 Publish and share，拿到只读链接，就能把成品分享出去。”** | 发布等待超过 1 秒时跳剪。只分享已确认可公开的素材；画面保留 `Anyone with it can view` 提示约 0.8 秒。 |
-| 00:56–00:59 | 只读成品页淡出到 Apertale 字标和 tagline。 | 鼠标移出主体。 | **“Apertale。打开一页，进入一个世界。”** | 结尾可放 `[公开项目链接]`，没有最终提交链接时只放品牌，不放占位符。 |
+| 00:50–00:56 | 打开发布面板，`Public link` 显示完整只读 URL。 | 点 **Publish** → **Publish and share**；成功后停在完整链接上，不必复制或打开。 | **“最后点 Publish and share。把这个完整链接发给别人，对方就能阅读。”** | 发布等待超过 1 秒时跳剪。只分享已确认可公开的素材；画面同时保留完整 URL 和 `Anyone with it can view` 提示。 |
+| 00:56–00:59 | 分享链接仍清晰可见，画面淡出到 Apertale 字标和 tagline。 | 鼠标移出主体。 | **“Apertale。打开一页，进入一个世界。”** | 幕后端到端必须已用匿名请求验证该链接，但镜头里不要求再复制或打开。 |
 
 ## 实操输入文本
 
-在工作台选择 `Idea + photos / 4 spreads / Watercolor` 并复制 brief 后，在 Codex 输入框最前面补这一句：
+在工作台选择 `Idea + photos / Illustrated keepsake / 4 spreads / Watercolor` 并复制 brief 后，在 Codex 输入框最前面补这一句：
 
-> 请把这些照片做成一本温暖的南岛旅行纪念书。保留真实地点和人物关系，故事从出发、相遇、意外天气写到回家后的回味。完成后逐页检查互动和照片来源，不要编造照片里没有的内容。
+> 请把这些照片做成一本给家人共同回忆的、温暖的南岛旅行纪念书。保留真实地点和人物关系，故事从出发、相遇、意外天气写到回家后的回味。完成后逐页检查互动和照片来源，不要编造照片里没有的内容。
 
-然后粘贴工作台生成的 creation brief 并发送。工作台 brief 已包含稳定照片 ID、页数、风格、先规划/生成再布局的顺序，以及 Site tools 验收条件，不需要在镜头里重新解释整段技术文本。
+然后粘贴工作台生成的 creation brief 并发送。工作台 brief 已包含照片用途、稳定照片 ID、页数、风格、先规划/生成再布局的顺序，以及 Site tools 验收条件；前句补齐了 audience，所以不会停下来追问读者是谁。生成图片后仍需由用户真实点击 `book-art` handoff 的 **Add**，粘贴或选择成品文件；提前把这些文件准备在易找的位置。
 
 如果要演示真正的直接照片相册，而不是照片驱动的插画纪念书，把第一句改为：
 
@@ -74,7 +74,7 @@
 - 技术镜头准确出现 `GPT-5.6 Sol`、`ChatGPT Sites`、`Site tools (WebMCP)`；
 - 真实 Site tools 列表或调用至少出现一次；
 - 实操完整覆盖照片导入、Codex 提交、右侧页面变化、成品翻阅；
-- 新生成书的 **Publish and share** 成功，并在匿名只读 reader 中打开；
+- 新生成书的 **Publish and share** 成功，完整链接在画面中可读；同一链接已在拍摄前通过匿名只读验证；
 - 全片 40–60 秒、中文人声清楚、没有账号隐私或未授权照片；
 - 静音回看时，仅凭画面和少量叠字也能理解“输入 → 协作生成 → 成品 → 分享”。
 
@@ -95,14 +95,14 @@
 
 | 结论 | 当前证据 |
 |---|---|
-| 正式品牌为 Apertale，当前 manifest 版本 1.1.0，并注册六个 WebMCP 工具 | `app/site-manifest.json:2-13`；`app/src/authoringContract.ts:3-9` |
+| 正式品牌为 Apertale，当前 manifest 版本 1.1.0，并注册七个 WebMCP 工具 | `app/site-manifest.json:2-13`；`app/src/authoringContract.ts:3-9` |
 | 产品是 WebMCP 原生互动书籍画布，智能与模型用量来自用户自己的 Codex/ChatGPT 会话，不是网页内置的站点方 API key | `README.md:3-9`；`docs/PRODUCT_ARCHITECTURE.md:16-25` |
 | 当前书库包含 Field Guide、Atlas、知识书、故事书和 Lantern Garden 五本独立书 | `app/src/sampleBook.ts:434-470` |
 | 创作入口实际支持 Idea、Photos、Idea + photos；可选 4/6/8/10/12 跨页和四种风格 | `app/src/creationWorkshop.ts:10-19`；`app/src/App.tsx:1339-1438` |
 | 照片驱动流程默认把照片作为故事事实和视觉参考；用户明确要求时允许 literal photo album | `app/src/creationBrief.ts:107-128`；`app/src/authoringContract.ts:41-44` |
 | 创作工作台接受 PNG/JPEG/WebP；当前 UI 对不可用或超过 12 MB 的图片给出错误 | `app/src/App.tsx:880-905,1429`；`README.md:18` |
 | 创建者书可 Publish and share，生成 Public link、Copy link 和只读 Open reader | `app/src/App.tsx:1277-1290`；`app/src/PublicationPanel.tsx:182-264`；`app/src/SharedBookApp.tsx:70-83,176-186` |
-| 当前 ChatGPT Sites 根地址、六工具部署契约和保留分享页在 2026-08-28 重新验证通过 | `docs/CHALLENGE_READINESS.md:18-20,33-36`；本次运行 `node app/scripts/verify-deployment.mjs <site-url>` 返回 `ok: true`；保留 share 与 `/api/shared/:token` 均返回 HTTP 200 |
+| 当前 ChatGPT Sites 根地址和保留分享页已验证；七工具部署、创建、发布和新分享链接须以录制前最后一次端到端结果为准 | `docs/CHALLENGE_READINESS.md:18-20,33-36`；`docs/SITE_TOOLS_ACCEPTANCE.md` |
 | 官方模型叶子型号是 `gpt-5.6-sol`；正式显示名是 GPT-5.6 Sol | [OpenAI API — GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol) |
 | 官方托管产品名是 Sites；Sites 可创建、托管、迭代和分享网站、Web app 与游戏 | [OpenAI — Sites](https://learn.chatgpt.com/docs/sites) |
 | 官方能力名称是 Site tools；它是 ChatGPT 对拟议 WebMCP 标准的实现，并在内置 browser 中让 Codex 与人操作同一 live page | [OpenAI — Site tools (WebMCP)](https://learn.chatgpt.com/docs/webmcp) |

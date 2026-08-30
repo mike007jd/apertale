@@ -34,7 +34,7 @@ The page registers exactly seven project-level tools through `document.modelCont
 6. `undo_project_change`
 7. `request_image_handoff`
 
-Every mutating tool requires a `requestId`. Document mutations also require the current `expectedRevision`; successful document mutations include an exact `undoToken`. `request_image_handoff` opens a reader-mediated browser-local import without changing the document revision.
+Every mutating tool requires a `requestId`. Document mutations also require the current `expectedRevision`; successful document mutations include an exact `undoToken`. `request_image_handoff` requires an explicit asset role: `source-photo` adds reader references to the next creation brief, while `book-art` imports generated covers, spreads, clean plates, or cutouts into the reusable asset registry. `set_presentation` can acknowledge either a visible reader spread or a shelf cover; neither operation changes the document revision.
 
 `get_project_context` defaults to a compact response. Focused details add `authoring-guide`, structured `creation-readiness`, local `assets`, a selected reveal, or the versioned `quality-review` rubric/render manifest. Create reads the guide, checks readiness, asks every blocking question, and reuses the same brief; the command runs that gate again and fails closed. A legacy personal book can use the one-time, revision-bound `adopt-creation-brief` action with the same gate; samples and books that already own a brief cannot be reclassified. After real rendering, `manage_book` explicitly begins and records at most two critique rounds. `manage_book` also opens books and assigns a validated browser-local portrait cover. `apply_scene_patch` covers Lift, transform, structured reveal, motion, interaction, add/remove, and ordering through one bounded atomic contract. A local `asset:` ID is accepted only after the IndexedDB adapter proves that it exists. Internal fine-grained commands remain shared with the human UI but are not exposed as additional WebMCP tools.
 
@@ -45,16 +45,14 @@ The seven registration promises are treated as one fail-closed set. One registra
 ## Run and verify
 
 ```bash
-npm install
+npm ci
 npm run dev
-npm run typecheck
-npm test
-npm run test:sites
-npm run audit:cutouts
+npm run verify:release
+npm run verify:assets
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
-`npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 41 still-referenced legacy v2 layers need regeneration rather than padding-only repair. Twenty-five retired v2 cutouts were removed after their sample spreads moved to grounded composite artwork. The code, unit, build, and Sites checks remain independently green.
+Use Node.js `^20.19.0`, `^22.12.0`, or `>=24.0.0`; CI and the current local baseline use Node 24.18.0. `npm run verify:release` is the deterministic code, type, unit, production-build, and Worker/Sites gate. `npm run verify:assets` is a separate visual-production audit and currently exits non-zero for 41 referenced legacy v2 layers that need regeneration rather than padding-only repair. Twenty-five retired layers were removed after their sample spreads moved to grounded composite artwork.
 
 `npm run audit:cutouts` and `npm run optimize:assets` shell out to the ImageMagick 7 CLI, so they require a `magick` executable on `PATH` (install ImageMagick 7, for example with `brew install imagemagick` on macOS); without it the audit reports an ImageMagick inspection failure for every file.
 
@@ -65,7 +63,7 @@ The production build is emitted as a host-portable bundle:
 - `dist/client/app-shell`
 - `dist/server/index.js`
 - `dist/.openai/hosting.json`
-- `dist/.openai/drizzle/0001_living_book_sharing.sql`
+- every numbered migration under `dist/.openai/drizzle/`
 
 ## Architecture map
 

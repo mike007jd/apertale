@@ -67,11 +67,9 @@ used.
    published; `10-fallback-unavailable.jpg` and `fallback-unavailable.json`
    preserve the result.
 
-Built-in ImageGen edit target:
-`/Users/haoshengli/.codex/generated_images/01a04543-3687-7303-ac85-1dd2988b3235/exec-f437ac04-7c2a-442b-86ff-5b85fd674ada.png`.
-The accepted output and full edit prompt are preserved as
-`starlight-clean-plate.png` in this evidence directory and in the session tool
-record. The prompt requested a precise-object edit: remove all five plush
+The accepted ImageGen edit and full prompt are preserved as
+[`starlight-clean-plate.png`](starlight-clean-plate.png) in this evidence directory
+and in the session tool record. The prompt requested a precise-object edit: remove all five plush
 characters, reconstruct only the occluded attic/table background, retain the
 stitched star and every composition/lighting invariant, and add no text or new
 subjects.

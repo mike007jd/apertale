@@ -43,9 +43,11 @@ The first prompt proves page-grounded context and library navigation. The second
 
 ## Run locally
 
+Use Node.js `^20.19.0`, `^22.12.0`, or `>=24.0.0`. The verified development baseline is Node 24.18.0 with npm 11.16.0.
+
 ```bash
 cd app
-npm install
+npm ci
 npm run dev
 ```
 
@@ -53,14 +55,12 @@ npm run dev
 
 ```bash
 cd app
-npm run typecheck
-npm test
-npm run test:sites
-npm run audit:cutouts
+npm run verify:release
+npm run verify:assets
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
-`npm run verify:release` runs the complete local sequence. The current private tree intentionally fails its final cutout-quality gate: 41 still-referenced legacy v2 layers require genuine regeneration because visual review found clipped subjects, detached fragments, or contaminated edges. Twenty-five retired v2 cutouts were removed after their sample spreads moved to grounded composite artwork. See the historical snapshot in [`app/qa/RELEASE_GATES_2026-08-27.md`](app/qa/RELEASE_GATES_2026-08-27.md) rather than treating the code/build passes as release completion.
+`npm run verify:release` is the deterministic code, type, unit, production-build, and Worker/Sites gate used by CI. `npm run verify:assets` is the separate visual-production audit; it currently exits non-zero for 41 referenced legacy v2 layers that require genuine regeneration because visual review found clipped subjects, detached fragments, or contaminated edges. Twenty-five retired layers were removed after their sample spreads moved to grounded composite artwork. See the historical snapshot in [`app/qa/RELEASE_GATES_2026-08-27.md`](app/qa/RELEASE_GATES_2026-08-27.md).
 
 `npm run optimize:assets` is a maintenance command that rewrites checked-in runtime images. Run it only for an intentional asset-optimization change and review the resulting diff.
 

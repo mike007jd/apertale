@@ -1,6 +1,5 @@
 # macOS and editor state
 .DS_Store
-**/.DS_Store
 .idea/
 .vscode/
 *.swp
@@ -21,23 +20,18 @@ pnpm-debug.log*
 
 # Dependencies, caches, and generated builds
 node_modules/
-**/node_modules/
 dist/
-**/dist/
 .vite/
-**/.vite/
 coverage/
-**/coverage/
 .cache/
-**/.cache/
 *.tsbuildinfo
 
+# Local code-intelligence index
+/.gitnexus/
+
 # Local browser and test-run artifacts
-test-results/
 **/test-results/
-playwright-report/
 **/playwright-report/
-blob-report/
 **/blob-report/
 
 # Local agent and browser verification state
