@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete, sceneAssetsReadyForEvidence } from "./renderEvidence";
+import { dedicatedCoverRendered, fallbackAssetPlan, fallbackImageLoadKeys, fallbackRenderComplete, sceneAssetsReadyForEvidence, spreadLoadIndexes } from "./renderEvidence";
 import { isProceduralElement, type Spread } from "./types";
 
 const spread = (): Spread => ({
@@ -82,5 +82,14 @@ describe("render evidence readiness", () => {
       ["hotspot", { loaded: 0, total: 0 }],
     ]))).toBe(false);
     expect(sceneAssetsReadyForEvidence(expected, new Set(), new Set(["character:texture:0"]), complete)).toBe(false);
+  });
+
+  it("loads a directly selected current spread before prefetching its neighbors", () => {
+    // A scene rebuilt on spread 4 may only have spreads 4 and 3 cached. A
+    // direct Site Tool jump to spread 1 must request spread 1 itself; returning
+    // no work here leaves the physical paper painted with spread 4 forever.
+    expect(spreadLoadIndexes(0, 4, false)).toEqual([0]);
+    expect(spreadLoadIndexes(0, 4, true)).toEqual([1]);
+    expect(spreadLoadIndexes(2, 4, true)).toEqual([1, 3]);
   });
 });

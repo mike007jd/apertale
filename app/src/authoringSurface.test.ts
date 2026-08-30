@@ -19,6 +19,7 @@ const visibleReader: AuthoringSurfaceObservation = {
   libraryMotion: "idle",
   transitionPending: false,
   blockingOverlayOpen: false,
+  contentRendered: true,
   shelfBookIds: ["book-one"],
 };
 
@@ -33,6 +34,11 @@ describe("authoring surface acknowledgement", () => {
     expect(authoringSurfaceReady(readerRequest, { ...visibleReader, revision: 5 })).toBe(false);
   });
 
+  it("does not acknowledge a reader spread before its matching frame is rendered", () => {
+    const visibleButUnrendered = { ...visibleReader, contentRendered: false };
+    expect(authoringSurfaceReady(readerRequest, visibleButUnrendered)).toBe(false);
+  });
+
   it("acknowledges a shelf only when the active book is visible outside Preview", () => {
     const shelfRequest: AuthoringSurfaceRequest = { ...readerRequest, requestId: "present-shelf", surface: "shelf", spreadId: undefined };
     const visibleShelf = { ...visibleReader, libraryOpen: true };
@@ -41,5 +47,6 @@ describe("authoring surface acknowledgement", () => {
     expect(authoringSurfaceReady(shelfRequest, { ...visibleShelf, shelfBookIds: [] })).toBe(false);
     expect(authoringSurfaceReady(shelfRequest, { ...visibleShelf, transitionPending: true })).toBe(false);
     expect(authoringSurfaceReady(shelfRequest, { ...visibleShelf, blockingOverlayOpen: true })).toBe(false);
+    expect(authoringSurfaceReady(shelfRequest, { ...visibleShelf, contentRendered: false })).toBe(false);
   });
 });

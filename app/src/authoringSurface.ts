@@ -16,13 +16,15 @@ export type AuthoringSurfaceObservation = {
   libraryMotion: "idle" | "opening-book" | "closing-book";
   transitionPending: boolean;
   blockingOverlayOpen: boolean;
+  contentRendered: boolean;
   shelfBookIds: readonly string[];
 };
 
 /**
  * A Site Tool may report success only after the requested authoring surface is
- * actually committed and unobstructed. Rendering evidence remains a separate,
- * bounded signal: a missing image or stalled GPU must not hang the tool call.
+ * committed, unobstructed, and has produced a matching frame. The caller owns
+ * a bounded timeout, so a missing image or stalled GPU fails instead of
+ * acknowledging stale pixels or hanging indefinitely.
  */
 export function authoringSurfaceReady(
   request: AuthoringSurfaceRequest,
@@ -35,6 +37,7 @@ export function authoringSurfaceReady(
     || observation.blockingOverlayOpen
     || observation.libraryMotion !== "idle"
     || observation.transitionPending
+    || !observation.contentRendered
   ) return false;
 
   if (request.surface === "reader") {

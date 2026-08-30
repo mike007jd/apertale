@@ -110,6 +110,15 @@ type PendingAuthoringSurface = {
   cleanup: () => void;
 };
 
+type ReaderRender = {
+  documentId: string;
+  revision: number;
+  spreadId: string;
+  theme: ThemeId;
+  surface: "webgl" | "fallback";
+  locator: string;
+};
+
 const AUTHORING_SURFACE_TIMEOUT_MS = 4_000;
 
 /**
@@ -379,6 +388,8 @@ export function App() {
   const [showPublication, setShowPublication] = useState(false);
   const [publicationRecord, setPublicationRecord] = useState<PublicationRecord | null>(null);
   const [authoringSurfaceRequest, setAuthoringSurfaceRequest] = useState<AuthoringSurfaceRequest | null>(null);
+  const [lastReaderRender, setLastReaderRender] = useState<ReaderRender | null>(null);
+  const [renderedShelfCovers, setRenderedShelfCovers] = useState<Record<string, string>>({});
   const creationSpreadCount = creationWorkshop.spreadCount;
   const creationStyle = creationWorkshop.visualDirection;
   const creationSource = creationWorkshop.mode;
@@ -695,6 +706,11 @@ export function App() {
   /** Stages only move forward, so a late signal can never rewind the message. */
   const advanceLoadStage = useCallback((next: LoadStage) => {
     setLoadStage((current) => (LOAD_STAGES.indexOf(next) > LOAD_STAGES.indexOf(current) ? next : current));
+  }, []);
+
+  const handleReaderRendered = useCallback((evidence: ReaderRender) => {
+    setLastReaderRender(evidence);
+    bookEngine.recordRenderEvidence({ ...evidence, scope: "spread" });
   }, []);
 
   useEffect(() => {
@@ -1031,6 +1047,17 @@ export function App() {
     if (!authoringSurfaceRequest) return undefined;
     const activeSpreadId = snapshot.document.spreads[snapshot.session.currentSpreadIndex]?.id ?? "";
     const visibleShelfIds = shelfBooks.map((book) => book.id);
+    const requestedSpreadId = authoringSurfaceRequest.spreadId ?? activeSpreadId;
+    const requestedShelfBook = shelfBooks.find((book) => book.id === authoringSurfaceRequest.documentId);
+    const requestedCoverUrl = requestedShelfBook
+      ? resolvedCoverUrls[requestedShelfBook.id] ?? requestedShelfBook.coverTextureUrl
+      : undefined;
+    const contentRendered = authoringSurfaceRequest.surface === "reader"
+      ? lastReaderRender?.documentId === authoringSurfaceRequest.documentId
+        && lastReaderRender.revision === authoringSurfaceRequest.revision
+        && lastReaderRender.spreadId === requestedSpreadId
+        && lastReaderRender.theme === snapshot.session.sceneThemeId
+      : Boolean(requestedCoverUrl && renderedShelfCovers[authoringSurfaceRequest.documentId] === requestedCoverUrl);
     const ready = authoringSurfaceReady(authoringSurfaceRequest, {
       documentId: snapshot.document.id,
       revision: snapshot.document.revision,
@@ -1041,6 +1068,7 @@ export function App() {
       libraryMotion,
       transitionPending: openingFrame.current !== null || libraryFrame.current !== null || openCleanup.current !== null,
       blockingOverlayOpen: showElementAgentGuide || showPublication || showOutline || Boolean(openingBook),
+      contentRendered,
       shelfBookIds: visibleShelfIds,
     });
     if (!ready) return undefined;
@@ -1051,7 +1079,7 @@ export function App() {
     setAuthoringSurfaceRequest(null);
     pending.resolve();
     return undefined;
-  }, [authoringSurfaceRequest, libraryMotion, openingBook, shelfBooks, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.document.revision, snapshot.document.spreads, snapshot.session.currentSpreadIndex, snapshot.session.preview]);
+  }, [authoringSurfaceRequest, lastReaderRender, libraryMotion, openingBook, renderedShelfCovers, resolvedCoverUrls, shelfBooks, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.document.revision, snapshot.document.spreads, snapshot.session.currentSpreadIndex, snapshot.session.preview, snapshot.session.sceneThemeId]);
 
   useEffect(() => () => {
     const pending = pendingAuthoringSurface.current;
@@ -1474,6 +1502,10 @@ export function App() {
                         decoding="async"
                         fetchPriority={index === 0 ? "high" : "auto"}
                         onLoad={() => {
+                          const renderedCoverUrl = resolvedCoverUrls[book.id] ?? book.coverTextureUrl;
+                          setRenderedShelfCovers((current) => current[book.id] === renderedCoverUrl
+                            ? current
+                            : { ...current, [book.id]: renderedCoverUrl });
                           if (dedicatedCoverRendered(book, resolvedCoverUrls[book.id])) {
                             bookEngine.recordRenderEvidence({
                               documentId: book.id,
@@ -1546,17 +1578,7 @@ export function App() {
               onPageGesture={showCreateGuide ? () => undefined : onPageGesture}
               onLoading={showCreateGuide ? () => undefined : handleBookLoading}
               onReady={showCreateGuide ? () => undefined : handleBookReady}
-              onRendered={showCreateGuide ? undefined : (evidence) => {
-                bookEngine.recordRenderEvidence({
-                  documentId: evidence.documentId,
-                  revision: evidence.revision,
-                  scope: "spread",
-                  spreadId: evidence.spreadId,
-                  theme: evidence.theme,
-                  surface: evidence.surface,
-                  locator: evidence.locator,
-                });
-              }}
+              onRendered={showCreateGuide ? undefined : handleReaderRendered}
               onFailure={() => setSceneFailed(true)}
             />
           </Suspense>
@@ -1568,17 +1590,7 @@ export function App() {
             spread={spread}
             onReady={handleBookReady}
             onUnavailable={handleBookUnavailable}
-            onRendered={(evidence) => {
-              bookEngine.recordRenderEvidence({
-                documentId: evidence.documentId,
-                revision: evidence.revision,
-                scope: "spread",
-                spreadId: evidence.spreadId,
-                theme: evidence.theme,
-                surface: evidence.surface,
-                locator: evidence.locator,
-              });
-            }}
+            onRendered={handleReaderRendered}
           />
         )}
 

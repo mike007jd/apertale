@@ -30,6 +30,19 @@ export function fallbackImageLoadKeys(renderKey: string, foregroundIds: readonly
   ];
 }
 
+/**
+ * Chooses the next spread textures requested by the live renderer.
+ *
+ * The current spread is a correctness dependency, so a cache miss requests it
+ * alone. Only once it is available may neighboring spreads use bandwidth as a
+ * navigation optimization.
+ */
+export function spreadLoadIndexes(currentIndex: number, spreadCount: number, currentLoaded: boolean) {
+  if (currentIndex < 0 || currentIndex >= spreadCount) return [];
+  if (!currentLoaded) return [currentIndex];
+  return [currentIndex - 1, currentIndex + 1].filter((index) => index >= 0 && index < spreadCount);
+}
+
 export function sceneAssetsReadyForEvidence(
   expectedElementIds: readonly string[],
   pendingElementIds: ReadonlySet<string>,

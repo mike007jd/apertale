@@ -6,7 +6,7 @@ import { recordDiagnostic } from "./diagnostics";
 import { spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
-import { sceneAssetsReadyForEvidence } from "./renderEvidence";
+import { sceneAssetsReadyForEvidence, spreadLoadIndexes } from "./renderEvidence";
 import { spreadBaseAssetId, type BookElement, type BookSnapshot, type Spread, type TurnState } from "./types";
 
 type Props = {
@@ -1509,10 +1509,10 @@ export function ThreeBook({ snapshot, turn, mode = "reader", readOnly = false, o
        */
       if (host.clientWidth < 2 || host.clientHeight < 2) return;
 
-      if (pagePair && lastPrefetchedSpreadIndex !== current.session.currentSpreadIndex) {
-        lastPrefetchedSpreadIndex = current.session.currentSpreadIndex;
-        if (previous) ensureSpreadLoaded(previous);
-        if (next) ensureSpreadLoaded(next);
+      if (!pagePair || lastPrefetchedSpreadIndex !== current.session.currentSpreadIndex) {
+        if (pagePair) lastPrefetchedSpreadIndex = current.session.currentSpreadIndex;
+        spreadLoadIndexes(current.session.currentSpreadIndex, current.document.spreads.length, Boolean(pagePair))
+          .forEach((index) => ensureSpreadLoaded(current.document.spreads[index]));
       }
       if (pagePair) {
         const readiness = {
