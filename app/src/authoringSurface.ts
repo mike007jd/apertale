@@ -14,6 +14,7 @@ export type AuthoringSurfaceObservation = {
   workshopOpen: boolean;
   libraryOpen: boolean;
   libraryMotion: "idle" | "opening-book" | "closing-book";
+  transitionPending: boolean;
   blockingOverlayOpen: boolean;
   shelfBookIds: readonly string[];
 };
@@ -33,6 +34,7 @@ export function authoringSurfaceReady(
     || observation.workshopOpen
     || observation.blockingOverlayOpen
     || observation.libraryMotion !== "idle"
+    || observation.transitionPending
   ) return false;
 
   if (request.surface === "reader") {

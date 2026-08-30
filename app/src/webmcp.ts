@@ -228,12 +228,59 @@ export function registerWebMcpTools(
     registeredCount += 1;
   });
   const sessionResults = new Map<string, unknown>();
+  type PendingPresentation = {
+    result: unknown;
+    target: {
+      documentId: string;
+      revision: number;
+      surface: "reader" | "shelf";
+      spreadId?: string;
+      theme?: ThemeId;
+      preview?: boolean;
+    };
+  };
+  const pendingPresentations = new Map<string, PendingPresentation>();
   const activeImageHandoffs = new Map<string, ReturnType<typeof requestImageHandoff>>();
   const cancelActiveImageHandoffs = () => {
     activeImageHandoffs.forEach((_, requestId) => abortImageHandoff(requestId));
     activeImageHandoffs.clear();
   };
   let authoringGuideRead = false;
+  const resumePresentation = async (requestId: string, signal: AbortSignal) => {
+    const pending = pendingPresentations.get(requestId);
+    if (!pending) return undefined;
+    if (bookEngine.getSnapshot().document.id !== pending.target.documentId) {
+      if (!bookEngine.openBook(pending.target.documentId, "agent")) {
+        invalid("The book targeted by this presentation is no longer present in the library.");
+      }
+    }
+    let presented = bookEngine.getSnapshot();
+    if (presented.document.revision !== pending.target.revision) {
+      invalid("The book revision targeted by this presentation is no longer current; use a new requestId.");
+    }
+    if (pending.target.theme && presented.session.sceneThemeId !== pending.target.theme) {
+      bookEngine.setTheme(pending.target.theme, "agent");
+    }
+    if (typeof pending.target.preview === "boolean" && presented.session.preview !== pending.target.preview) {
+      bookEngine.setPreview(pending.target.preview, "agent");
+    }
+    if (pending.target.spreadId) {
+      const spreadIndex = presented.document.spreads.findIndex((spread) => spread.id === pending.target.spreadId);
+      if (spreadIndex < 0) invalid("The spread targeted by this presentation is no longer present in the book.");
+      if (spreadIndex !== presented.session.currentSpreadIndex) bookEngine.setSpread(spreadIndex);
+    }
+    presented = bookEngine.getSnapshot();
+    await presentAuthoringSurface({
+      requestId,
+      surface: pending.target.surface,
+      documentId: pending.target.documentId,
+      revision: pending.target.revision,
+      spreadId: pending.target.surface === "reader" ? pending.target.spreadId : undefined,
+    }, signal);
+    pendingPresentations.delete(requestId);
+    sessionResults.set(requestId, pending.result);
+    return pending.result;
+  };
 
   const registrations = [
     register(
@@ -342,6 +389,9 @@ export function registerWebMcpTools(
         execute: (input, options) => runTool(SITE_TOOL.manageBook, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["requestId", "expectedRevision", "action", "bookId", "coverAssetId", "title", "spreads", "creationBrief", "qualityReview"]);
           const requestId = requiredString(input, "requestId");
+          if (pendingPresentations.has(requestId)) {
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
+          }
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
           const action = requiredString(input, "action");
@@ -362,15 +412,16 @@ export function registerWebMcpTools(
             if (!bookEngine.openBook(bookId, "agent")) invalid("bookId is not present in the current library.");
             const opened = bookEngine.getSnapshot();
             const result = { ok: true, bookId, summary: `Opened ${opened.document.title}.` };
-            await presentAuthoringSurface({
-              requestId,
-              surface: "reader",
-              documentId: bookId,
-              revision: opened.document.revision,
-              spreadId: opened.document.spreads[opened.session.currentSpreadIndex]?.id,
-            }, options?.signal ?? uncancelledToolSignal);
-            sessionResults.set(requestId, result);
-            return result;
+            pendingPresentations.set(requestId, {
+              result,
+              target: {
+                documentId: bookId,
+                revision: opened.document.revision,
+                surface: "reader",
+                spreadId: opened.document.spreads[opened.session.currentSpreadIndex]?.id,
+              },
+            });
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
           }
           if (action === "set-cover") {
             const coverAssetId = requiredString(input, "coverAssetId");
@@ -449,13 +500,16 @@ export function registerWebMcpTools(
           }, "agent");
           if (result.ok) {
             const created = bookEngine.getSnapshot();
-            await presentAuthoringSurface({
-              requestId,
-              surface: "reader",
-              documentId: created.document.id,
-              revision: created.document.revision,
-              spreadId: created.document.spreads[created.session.currentSpreadIndex]?.id,
-            }, options?.signal ?? uncancelledToolSignal);
+            pendingPresentations.set(requestId, {
+              result,
+              target: {
+                documentId: created.document.id,
+                revision: created.document.revision,
+                surface: "reader",
+                spreadId: created.document.spreads[created.session.currentSpreadIndex]?.id,
+              },
+            });
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
           }
           sessionResults.set(requestId, result);
           return result;
@@ -728,6 +782,9 @@ export function registerWebMcpTools(
         execute: (input, options) => runTool(SITE_TOOL.setPresentation, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["requestId", "theme", "preview", "spreadId", "surface"]);
           const requestId = requiredString(input, "requestId");
+          if (pendingPresentations.has(requestId)) {
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
+          }
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
           let theme = bookEngine.getSnapshot().session.sceneThemeId;
@@ -761,15 +818,22 @@ export function registerWebMcpTools(
           }
           if (visibleSurface) {
             const presented = bookEngine.getSnapshot();
-            await presentAuthoringSurface({
-              requestId,
-              surface: visibleSurface,
-              documentId: presented.document.id,
-              revision: presented.document.revision,
-              spreadId: visibleSurface === "reader"
-                ? presented.document.spreads[presented.session.currentSpreadIndex]?.id
-                : undefined,
-            }, options?.signal ?? uncancelledToolSignal);
+            const presentedSpreadId = visibleSurface === "reader"
+              ? presented.document.spreads[presented.session.currentSpreadIndex]?.id
+              : undefined;
+            const result = { ok: true, theme, preview: presented.session.preview, spreadId, surface: visibleSurface, summary: "Presentation updated." };
+            pendingPresentations.set(requestId, {
+              result,
+              target: {
+                documentId: presented.document.id,
+                revision: presented.document.revision,
+                surface: visibleSurface,
+                spreadId: presentedSpreadId,
+                theme,
+                preview: presented.session.preview,
+              },
+            });
+            return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
           }
           const result = { ok: true, theme, preview: bookEngine.getSnapshot().session.preview, spreadId, surface: visibleSurface, summary: "Presentation updated." };
           sessionResults.set(requestId, result);
@@ -874,6 +938,7 @@ export function registerWebMcpTools(
     cancelActiveImageHandoffs();
     controller.abort();
     sessionResults.clear();
+    pendingPresentations.clear();
     recordDiagnostic("webmcp:registration-failed", {
       registered: registeredCount,
       error: error instanceof Error ? error.name : "UnknownError",
@@ -885,6 +950,7 @@ export function registerWebMcpTools(
     cancelActiveImageHandoffs();
     controller.abort();
     sessionResults.clear();
+    pendingPresentations.clear();
     recordDiagnostic("webmcp:removed", { count: registeredCount });
   };
 }

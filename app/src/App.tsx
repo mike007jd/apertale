@@ -709,20 +709,40 @@ export function App() {
     window.setTimeout(() => libraryOpener.current?.focus(), 0);
   }, []);
 
-  const settleLibraryToReader = useCallback(() => {
-    // Escape is an explicit settle, not merely a visibility toggle. Cancel a
-    // close that has not reached animateCase yet as well as a case animation
-    // already in flight, then restore the fully-open reader pose.
+  const cancelLibraryTransition = useCallback(() => {
+    if (openingFrame.current !== null) {
+      cancelAnimationFrame(openingFrame.current);
+      openingFrame.current = null;
+    }
     if (libraryFrame.current !== null) {
       cancelAnimationFrame(libraryFrame.current);
       libraryFrame.current = null;
     }
     openCleanup.current?.();
+  }, []);
+
+  const settleLibraryToReader = useCallback(() => {
+    // Escape is an explicit settle, not merely a visibility toggle. Cancel a
+    // close that has not reached animateCase yet as well as a case animation
+    // already in flight, then restore the fully-open reader pose.
+    cancelLibraryTransition();
     setOpenProgress(1);
     openingBookRef.current = null;
     setOpeningBook(null);
     hideLibrary();
-  }, [hideLibrary]);
+  }, [cancelLibraryTransition, hideLibrary]);
+
+  const settleLibraryToShelf = useCallback(() => {
+    // Site Tools may interrupt either direction of the case animation. Cancel
+    // every pending clock before acknowledging the shelf, otherwise a stale
+    // open callback can hide it after the tool has already reported success.
+    cancelLibraryTransition();
+    openingBookRef.current = null;
+    setOpeningBook(null);
+    setOpenProgress(0);
+    setLibraryMotion("idle");
+    setShowLibrary(true);
+  }, [cancelLibraryTransition]);
 
   const beginOpenTransition = useCallback((book: OpeningBook) => {
     if (reducedMotion) {
@@ -999,17 +1019,13 @@ export function App() {
     setShowMore(false);
     setShowOutline(false);
     if (request.surface === "shelf") {
-      openingBookRef.current = null;
-      setOpeningBook(null);
-      setOpenProgress(0);
       const activeBook = bookEngine.getLibrary().books.find((book) => book.id === request.documentId);
       setLibraryTab(activeBook?.sample ? "explore" : "yours");
-      setLibraryMotion("idle");
-      setShowLibrary(true);
+      settleLibraryToShelf();
       return;
     }
     settleLibraryToReader();
-  }), [settleLibraryToReader]);
+  }), [settleLibraryToReader, settleLibraryToShelf]);
 
   useEffect(() => {
     if (!authoringSurfaceRequest) return undefined;
@@ -1023,6 +1039,7 @@ export function App() {
       workshopOpen: showCreateGuide,
       libraryOpen: showLibrary,
       libraryMotion,
+      transitionPending: openingFrame.current !== null || libraryFrame.current !== null || openCleanup.current !== null,
       blockingOverlayOpen: showElementAgentGuide || showPublication || showOutline || Boolean(openingBook),
       shelfBookIds: visibleShelfIds,
     });

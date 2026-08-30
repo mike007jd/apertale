@@ -17,6 +17,7 @@ const visibleReader: AuthoringSurfaceObservation = {
   workshopOpen: false,
   libraryOpen: false,
   libraryMotion: "idle",
+  transitionPending: false,
   blockingOverlayOpen: false,
   shelfBookIds: ["book-one"],
 };
@@ -28,6 +29,7 @@ describe("authoring surface acknowledgement", () => {
     expect(authoringSurfaceReady(readerRequest, { ...visibleReader, workshopOpen: true })).toBe(false);
     expect(authoringSurfaceReady(readerRequest, { ...visibleReader, libraryOpen: true })).toBe(false);
     expect(authoringSurfaceReady(readerRequest, { ...visibleReader, libraryMotion: "closing-book" })).toBe(false);
+    expect(authoringSurfaceReady(readerRequest, { ...visibleReader, transitionPending: true })).toBe(false);
     expect(authoringSurfaceReady(readerRequest, { ...visibleReader, revision: 5 })).toBe(false);
   });
 
@@ -37,6 +39,7 @@ describe("authoring surface acknowledgement", () => {
     expect(authoringSurfaceReady(shelfRequest, visibleShelf)).toBe(true);
     expect(authoringSurfaceReady(shelfRequest, { ...visibleShelf, preview: true })).toBe(false);
     expect(authoringSurfaceReady(shelfRequest, { ...visibleShelf, shelfBookIds: [] })).toBe(false);
+    expect(authoringSurfaceReady(shelfRequest, { ...visibleShelf, transitionPending: true })).toBe(false);
     expect(authoringSurfaceReady(shelfRequest, { ...visibleShelf, blockingOverlayOpen: true })).toBe(false);
   });
 });

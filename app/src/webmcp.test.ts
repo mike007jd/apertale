@@ -447,6 +447,106 @@ describe("WebMCP registration", () => {
     expect(registrationSignals.every((signal) => signal.aborted)).toBe(true);
   });
 
+  it("retries a created book's presentation against the original document", async () => {
+    bookEngine.openBook("apertale-your-story");
+    bookEngine.reset();
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const presented = vi.fn()
+      .mockRejectedValueOnce(new Error("The reader surface timed out."))
+      .mockResolvedValue(undefined);
+    const cleanup = registerWebMcpTools(() => undefined, presented);
+    await vi.waitFor(() => expect(tools).toHaveLength(7));
+    const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
+    const signal = { signal: new AbortController().signal };
+    await tool("get_project_context").execute({ detail: AUTHORING_GUIDE_DETAIL }, signal);
+    const input = {
+      requestId: "create-retry-presentation",
+      expectedRevision: bookEngine.getSnapshot().document.revision,
+      action: "create",
+      title: "The Presentation Retry",
+      spreads: [{ title: "The Same Book", body: "A retry must return to this exact document." }],
+      creationBrief: readyStoryBrief(1),
+    };
+
+    await expect(tool("manage_book").execute(input, signal)).rejects.toThrow("reader surface timed out");
+    const createdDocumentId = presented.mock.calls[0][0].documentId;
+    expect(createdDocumentId).toMatch(/^book-the-presentation-retry-/);
+    expect(bookEngine.openBook("apertale-atlas-of-wonders", "human")).toBe(true);
+    expect(bookEngine.getSnapshot().document.id).toBe("apertale-atlas-of-wonders");
+
+    const retried = JSON.parse(String(await tool("manage_book").execute(input, signal)));
+    expect(retried).toMatchObject({ ok: true, changedIds: ["1-the-same-book"] });
+    expect(presented).toHaveBeenCalledTimes(2);
+    expect(presented.mock.calls[1][0]).toMatchObject({
+      requestId: input.requestId,
+      surface: "reader",
+      documentId: createdDocumentId,
+      spreadId: "1-the-same-book",
+    });
+    expect(bookEngine.getSnapshot().document.id).toBe(createdDocumentId);
+    cleanup();
+  });
+
+  it("retries set_presentation against its exact book and session target", async () => {
+    bookEngine.openBook("apertale-your-story");
+    bookEngine.reset();
+    const original = bookEngine.getSnapshot();
+    const targetSpreadId = original.document.spreads.at(-1)!.id;
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const presented = vi.fn()
+      .mockRejectedValueOnce(new Error("The reader surface timed out."))
+      .mockResolvedValue(undefined);
+    const cleanup = registerWebMcpTools(() => undefined, presented);
+    await vi.waitFor(() => expect(tools).toHaveLength(7));
+    const setPresentation = tools.find((candidate) => candidate.name === "set_presentation")!;
+    const signal = { signal: new AbortController().signal };
+    const input = {
+      requestId: "presentation-retry-exact-target",
+      theme: "midnight-desk",
+      preview: true,
+      spreadId: targetSpreadId,
+      surface: "reader",
+    };
+
+    await expect(setPresentation.execute(input, signal)).rejects.toThrow("reader surface timed out");
+    expect(bookEngine.openBook("apertale-atlas-of-wonders", "human")).toBe(true);
+    bookEngine.setTheme("paper-atelier", "human");
+    bookEngine.setPreview(false, "human");
+
+    const retried = JSON.parse(String(await setPresentation.execute(input, signal)));
+    expect(retried).toMatchObject({
+      ok: true,
+      theme: "midnight-desk",
+      preview: true,
+      spreadId: targetSpreadId,
+      surface: "reader",
+    });
+    expect(presented).toHaveBeenCalledTimes(2);
+    expect(presented.mock.calls[1][0]).toMatchObject({
+      requestId: input.requestId,
+      surface: "reader",
+      documentId: original.document.id,
+      revision: original.document.revision,
+      spreadId: targetSpreadId,
+    });
+    const restored = bookEngine.getSnapshot();
+    expect(restored.document.id).toBe(original.document.id);
+    expect(restored.session.sceneThemeId).toBe("midnight-desk");
+    expect(restored.session.preview).toBe(true);
+    expect(restored.document.spreads[restored.session.currentSpreadIndex]?.id).toBe(targetSpreadId);
+    cleanup();
+  });
+
   it("returns the authoring-guide quality contract, rejects invalid detail, and keeps compact context unchanged", async () => {
     bookEngine.openBook("apertale-your-story");
     bookEngine.reset();
