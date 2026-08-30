@@ -40,6 +40,12 @@ playwright-report/
 blob-report/
 **/blob-report/
 
+# Local agent and browser verification state
+# Keep ephemeral worktrees, browser snapshots, traces, and generated media local.
+/.claude/worktrees/
+/.playwright-mcp/
+/output/
+
 # Local production Live Verify workspaces
 # Keep screenshots, generated art, upload fixtures, copied prompts, and browser/WebMCP logs local.
 # Durable release evidence belongs in an explicitly curated QA closeout directory instead.
