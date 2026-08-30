@@ -1,0 +1,6 @@
+self-hosted-runner:
+  labels:
+    - gmk-ci
+    - apertale-ci
+
+config-variables: null
