@@ -16,7 +16,7 @@ import { deletePublication, getPublicationRecord, publishDocument, revokePublica
 import type { PublicationProgress, PublicationRecord } from "./publishingClient";
 import { recordDiagnostic } from "./diagnostics";
 import { useFocusTrap } from "./focusTrap";
-import { listStoredProjectAssetIds } from "./projectArtifact";
+import { listStoredPublishedAssetIds } from "./projectArtifact";
 import { groupQualityBlockers } from "./qualityContract";
 import type { QualityGateState } from "./qualityContract";
 import type { DocumentState } from "./types";
@@ -27,9 +27,30 @@ type Props = {
   document: DocumentState;
   record: PublicationRecord | null;
   qualityGate: QualityGateState;
-  onRecordChange: (record: PublicationRecord | null) => void;
-  onClose: () => void;
+  onRecordChange: (expectedDocumentId: string, record: PublicationRecord | null) => boolean;
+  onClose: (expectedDocumentId?: string) => void;
 };
+
+export function commitPublicationRecordIfCurrent(
+  activeDocumentId: string,
+  expectedDocumentId: string,
+  record: PublicationRecord | null,
+  commit: (record: PublicationRecord | null) => void,
+) {
+  if (
+    activeDocumentId !== expectedDocumentId
+    || (record && record.documentId !== expectedDocumentId)
+  ) return false;
+  commit(record);
+  return true;
+}
+
+export function publicationRecordForDocument(
+  activeDocumentId: string,
+  record: PublicationRecord | null,
+) {
+  return record?.documentId === activeDocumentId ? record : null;
+}
 
 const PROGRESS_COPY: Record<PublicationProgress["phase"], string> = {
   creating: "Creating this book's private record",
@@ -42,6 +63,7 @@ const STATUS_COPY = {
   publishing: { label: "Publish interrupted", detail: "Ready to resume" },
   published: { label: "Published", detail: "Anyone with the link can view" },
   revoked: { label: "Revoked", detail: "The previous link no longer works" },
+  deleting: { label: "Delete interrupted", detail: "Retry permanent deletion" },
 } as const;
 
 export function publicationActionDisabled(
@@ -49,7 +71,43 @@ export function publicationActionDisabled(
   busy: boolean,
   qualityStatus: QualityGateState["status"],
 ) {
-  return busy || (status !== "publishing" && qualityStatus !== "ready");
+  return busy || status === "deleting" || (status !== "publishing" && qualityStatus !== "ready");
+}
+
+type PublicationLauncherPresentation = {
+  label: string;
+  state: "attention" | "checking" | "publishing" | "ready" | "shared";
+};
+
+const QUALITY_LAUNCHER_PRESENTATION = {
+  "needs-review": { label: "Review needed", state: "attention" },
+  checking: { label: "Reviewing", state: "checking" },
+  blocked: { label: "Fix blockers", state: "attention" },
+  "needs-user-input": { label: "Needs input", state: "attention" },
+  ready: { label: "Publish", state: "ready" },
+} as const satisfies Record<QualityGateState["status"], PublicationLauncherPresentation>;
+
+/**
+ * Projects the authoritative publication and quality state into the reader's
+ * footer. The launcher stays available so blocked creators can inspect the
+ * panel, but it never promises that publishing is possible before review.
+ */
+export function publicationLauncherPresentation(
+  record: Pick<PublicationRecord, "status" | "publishedRevision"> | null,
+  qualityStatus: QualityGateState["status"],
+  documentRevision: number,
+): PublicationLauncherPresentation {
+  if (record?.status === "published") {
+    return record.publishedRevision === documentRevision
+      ? { label: "Shared", state: "shared" }
+      : { label: "Share outdated", state: "attention" };
+  }
+  if (record?.status === "publishing") return { label: "Resume publishing", state: "publishing" };
+  if (record?.status === "deleting") return { label: "Finish deleting", state: "attention" };
+  if (record?.status === "revoked" && qualityStatus === "ready") {
+    return { label: "Publish again", state: "ready" };
+  }
+  return QUALITY_LAUNCHER_PRESENTATION[qualityStatus];
 }
 
 /**
@@ -68,15 +126,19 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
   const [copyError, setCopyError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const card = useRef<HTMLDivElement | null>(null);
+  const mountedDocumentId = useRef<string | null>(documentState.id);
+
+  useEffect(() => {
+    mountedDocumentId.current = documentState.id;
+    return () => { mountedDocumentId.current = null; };
+  }, [documentState.id]);
 
   const status = busy === "publishing" ? "publishing" : record?.status ?? "draft";
   const statusCopy = busy === "publishing"
     ? { label: "Publishing", detail: "Uploading and publishing this revision." }
     : STATUS_COPY[status];
   const shareUrl = record?.status === "published" ? record.shareUrl ?? "" : "";
-  const stale = record?.status === "published"
-    && typeof record.publishedRevision === "number"
-    && record.publishedRevision !== documentState.revision;
+  const stale = record?.status === "published" && record.publishedRevision !== documentState.revision;
   const qualityCopy = qualityGate.status === "ready"
     ? {
         label: qualityGate.report?.warningCount ? "Ready with notes" : "Ready to publish",
@@ -97,9 +159,9 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
 
   // Only browser-local blobs are uploaded; bundled `/assets/...` references travel
   // inside the manifest. The count comes from the same collector the publishing
-  // client uploads from — including a browser-local `spread.textureUrl` — so the
-  // disclosure can never promise fewer images than actually leave this browser.
-  const localImageCount = useMemo(() => listStoredProjectAssetIds(documentState).length, [documentState]);
+  // client uploads from, after resolving shadow cover/spread references and
+  // excluding author-only source provenance.
+  const localImageCount = useMemo(() => listStoredPublishedAssetIds(documentState).length, [documentState]);
 
   // Escape listens on the window, not the card: a completed publish, revoke, or
   // delete can remove the button that had focus, and the dialog must still close.
@@ -114,24 +176,28 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
   useFocusTrap(card, true);
 
   const run = useCallback(async (kind: Exclude<Busy, null>, work: () => Promise<PublicationRecord | null>, fallback: string) => {
+    const operationDocumentId = documentState.id;
     setBusy(kind);
     setError(null);
     setCopied(false);
     setCopyError(null);
     try {
       const next = await work();
-      onRecordChange(next);
-      recordDiagnostic(`publication:${kind}-succeeded`, { documentId: documentState.id, revision: documentState.revision });
-      return next;
+      const applied = onRecordChange(operationDocumentId, next);
+      recordDiagnostic(`publication:${kind}-succeeded`, { documentId: operationDocumentId, revision: documentState.revision });
+      return { applied, record: next };
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : fallback;
-      setError(message);
-      onRecordChange(getPublicationRecord(documentState.id));
-      recordDiagnostic(`publication:${kind}-failed`, { documentId: documentState.id });
+      const applied = onRecordChange(operationDocumentId, getPublicationRecord(operationDocumentId));
+      if (mountedDocumentId.current === operationDocumentId) setError(message);
+      recordDiagnostic(`publication:${kind}-failed`, { documentId: operationDocumentId });
+      if (!applied) return { applied: false, record: undefined };
       return undefined;
     } finally {
-      setBusy(null);
-      setProgress(null);
+      if (mountedDocumentId.current === operationDocumentId) {
+        setBusy(null);
+        setProgress(null);
+      }
     }
   }, [documentState.id, documentState.revision, onRecordChange]);
 
@@ -162,7 +228,7 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
       await deletePublication(record.documentId);
       return null;
     }, "Apertale could not delete this publication.").then((result) => {
-      if (result === null) onClose();
+      if (result?.applied && result.record === null) onClose(record.documentId);
     });
   }, [onClose, record, run]);
 
@@ -195,7 +261,7 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
       <div className="publication-card" ref={card}>
         <header>
           <span><LinkSimple size={16} weight="bold" /> Publish &amp; share</span>
-          <button autoFocus onClick={onClose} aria-label="Close publishing panel" disabled={Boolean(busy)}><X size={18} /></button>
+          <button autoFocus onClick={() => onClose()} aria-label="Close publishing panel" disabled={Boolean(busy)}><X size={18} /></button>
         </header>
 
         <div className="publication-body">
@@ -208,7 +274,7 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
               : ` · ${localImageCount} image${localImageCount === 1 ? "" : "s"} · revision ${documentState.revision}`)}
           </span>
 
-          {status !== "published" && (
+          {status !== "published" && status !== "deleting" && (
             <div className={`publication-quality is-${qualityGate.status}`} role="status" aria-live="polite">
               {qualityGate.status === "checking"
                 ? <SpinnerGap size={17} weight="bold" className="is-spinning" />

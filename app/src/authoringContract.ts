@@ -1,4 +1,5 @@
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
+import { isStoredAssetId } from "./assetId";
 import { MOTION_PRESETS } from "./types";
 import siteManifest from "../site-manifest.json";
 
@@ -13,10 +14,12 @@ export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", 
 
 export const AUTHORING_GUIDE_DETAIL = "authoring-guide" as const;
 export const AUTHORING_GUIDE_ID = "apertale-authoring-guide" as const;
-export const AUTHORING_GUIDE_VERSION = 2 as const;
+export const AUTHORING_GUIDE_VERSION = 3 as const;
 export const AUTHORING_GUIDE_SKILL_MIRROR = "apertale-authoring" as const;
 
 export const CREATION_READINESS_VERSION = 2 as const;
+/** Browser-local image capacity shared by readiness, quality review, and publishing. */
+export const MAX_BOOK_PUBLISHABLE_ASSETS = 50 as const;
 export const CREATION_BOOK_TYPES = ["illustrated-storybook", "photo-led-keepsake", "preserved-photo-album"] as const;
 export type CreationBookType = (typeof CREATION_BOOK_TYPES)[number];
 
@@ -162,7 +165,7 @@ export function assessCreationReadiness(
   if (duplicateAsset) {
     addBlocker("sourceAssets", "Source photo ids must be unique and remain in the user's intended order.", "Which copy of the repeated photo should I keep?");
   }
-  const invalidAsset = assets.find((asset) => !/^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(asset.id));
+  const invalidAsset = assets.find((asset) => !isStoredAssetId(asset.id));
   if (invalidAsset) {
     addBlocker("sourceAssets", `${invalidAsset.name} does not have a verified browser-local asset id.`, "Call request_image_handoff so the page can open the photo drawer for this source.");
   }
@@ -228,9 +231,10 @@ export function assessCreationReadiness(
       assetNeeds: [
         "1 dedicated portrait cover",
         bookType === "preserved-photo-album"
-          ? "1 source-true 2:1 preserved-photo layout per spread; 0 generated interiors"
-          : "1 complete generated 2:1 clean plate per spread",
+          ? "1 source-true layout composed for the approximately 1.62:1 stage per spread; 0 generated interiors"
+          : "1 complete generated clean plate composed for the approximately 1.62:1 stage per spread",
         "2–4 native-alpha foreground or interactive subjects per spread",
+        `at most ${MAX_BOOK_PUBLISHABLE_ASSETS} distinct browser-local reader-visible cover, final-base, layer, and frame assets across the book; author-only source provenance is private and excluded unless it is also rendered`,
         ...(isPhotoBook ? [`${recommendedSourceCount} ordered source photo${recommendedSourceCount === 1 ? "" : "s"} with identity preserved`] : []),
       ],
     },
@@ -275,7 +279,7 @@ type AuthoringHardGateId = (typeof AUTHORING_HARD_GATE_IDS)[number];
 export const PHOTO_TRUTH_REQUIREMENT =
   "Use source photos as references and story truth. Do not use a raw uploaded photo as finished interior or right-page artwork unless the user explicitly requested a literal photo album.";
 
-export const AUTHORING_LAYOUT_SEQUENCE = ["handoff", "create", "set-cover", "patch", "verify"] as const;
+export const AUTHORING_LAYOUT_SEQUENCE = ["handoff", "create", "verify"] as const;
 
 export type CreationCompletionGate = {
   id: RequiredGateId;
@@ -376,7 +380,7 @@ export function creationCompletionGates(input: AuthoringCountSpec): CreationComp
       id: "art",
       token: "[GATE:art]",
       requirement: mode === "preserved"
-        ? "Use ImageGen for the dedicated portrait cover. Prepare one source-true 2:1 layout per spread from the original photos, preserving their geometry and applying only authorised crop or colour correction."
+        ? "Use ImageGen for the dedicated portrait cover. Prepare one source-true layout per spread for the approximately 1.62:1 stage from the original photos, preserving their geometry and applying only authorised crop or colour correction."
         : mode === "generated"
           ? "Use the host ImageGen/image editing capability to make one dedicated portrait cover and one purpose-built full-spread artwork for every spread."
           : "Use ImageGen for the dedicated portrait cover. For illustrated-storybook and photo-led-keepsake, prepare one purpose-built generated full-spread artwork per spread. For preserved-photo-album, prepare one source-true original-photo layout per spread without reillustrating people or changing photo geometry beyond the authorised policy.",
@@ -389,7 +393,7 @@ export function creationCompletionGates(input: AuthoringCountSpec): CreationComp
     {
       id: "layout",
       token: "[GATE:layout]",
-      requirement: "Only after the complete asset plan and final cover/spread asset set exist, create the book through the Site Tools, import exact assets through supported transfer or by calling request_image_handoff, set the cover, apply full-spread backgrounds, add meaningful interactions, and verify all spreads.",
+      requirement: `Only after the complete asset plan and final cover/spread asset set exist, hand off every exact asset, deduplicate the reader-visible cover, resolved final bases, rendered layers, and frames and stay at or below ${MAX_BOOK_PUBLISHABLE_ASSETS}, then call manage_book create once with the verified cover plus every spread's background, 2–4 foreground layers, and meaningful interaction. Source-photo provenance remains private unless selected for rendering. Verify all spreads after the atomic create; use set-cover or patch only for later critique fixes.`,
     },
     {
       id: "evidence",
@@ -436,7 +440,7 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "plan-art",
-      rule: "Plan one dedicated portrait cover and one distinct 2:1 spread composition per spread. Generate illustrated compositions; preserve source-photo geometry for preserved-photo-album.",
+      rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Generate illustrated compositions; preserve source-photo geometry for preserved-photo-album.",
     },
     {
       id: "imagegen-before-create",
@@ -452,7 +456,7 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "layout",
-      rule: "Then create, set-cover, and patch through the Site Tools. Never overwrite a curated sample.",
+      rule: `Hand off the complete final asset set, keep the deduplicated reader-visible cover, resolved final bases, rendered layers, and frames at or below ${MAX_BOOK_PUBLISHABLE_ASSETS}, then atomically create with coverAssetId and every spread's background and 2–4 layers. Author-only source provenance stays private unless selected for rendering. Never create a text-only shell or overwrite a curated sample; set-cover and patch are later critique fixes only.`,
     },
     {
       id: "interaction",
@@ -464,7 +468,7 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "provenance-revision",
-      rule: "Preserve ordered provenance and requestId/expectedRevision. For every image-led spread, keep the original composite in sourceAssetId, the final base in cleanPlateAssetId, and any declared personal photo in personalSourceAssetId. Refresh context after every mutation. On conflict, refresh and re-plan.",
+      rule: "Preserve ordered provenance and requestId. Bind every book or presentation mutation to the expectedDocumentId and expectedRevision returned together by one get_project_context response. For every image-led spread, keep the original composite in sourceAssetId, the final base in cleanPlateAssetId, and any declared personal photo in personalSourceAssetId. Refresh context after every mutation. On conflict, refresh and re-plan.",
     },
     {
       id: "verify",
@@ -532,7 +536,7 @@ export function buildAuthoringGuide(): AuthoringGuide {
       ],
     },
     provenance: "Ordered provenance for the cover and every spread, distinguishing user photo, generated art, and curated sample.",
-    revisions: "Use unique requestId values and the current expectedRevision. Refresh get_project_context after every mutation and retain undo tokens.",
+    revisions: "Use unique requestId values and the expectedDocumentId plus expectedRevision returned together by the current get_project_context response. If a successful mutation returns presentation pending, retry the same requestId and original precondition until the exact frame is confirmed; never recreate with a new id. Refresh get_project_context after every mutation and retain undo tokens.",
     verify: [
       "content: title, agreed spread count, and complete story arc",
       "asset counts: generated cover 1 plus one generated illustration or preserved original-photo layout per spread, according to book type",

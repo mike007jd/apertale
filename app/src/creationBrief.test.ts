@@ -56,10 +56,17 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("Site Tools");
     expect(brief.prompt).toContain("dedicated portrait cover");
     expect(brief.prompt).toContain("purpose-built full-spread artwork");
+    expect(brief.prompt).toContain("approximately 1.62:1 stage");
+    expect(brief.prompt).toMatch(/at most 50/i);
+    expect(brief.prompt).toMatch(/presentation status pending.*same requestId/i);
     expect(brief.prompt).toContain("Never claim generation or import succeeded without evidence");
     expect(brief.prompt.indexOf('detail: "authoring-guide"')).toBeLessThan(brief.prompt.indexOf('detail: "creation-readiness"'));
     expect(brief.prompt).toContain("assetUse source-photo");
     expect(brief.prompt).toContain("assetUse book-art");
+    expect(brief.prompt).toContain("single manage_book create call");
+    expect(brief.prompt).toContain("coverAssetId");
+    expect(brief.prompt).toContain("2–4 native-alpha layers");
+    expect(brief.prompt).toContain("A text-only shell is not a book");
 
     const assetSectionIndex = brief.prompt.indexOf("Selected source assets in order:");
     expect(assetSectionIndex).toBeGreaterThan(-1);

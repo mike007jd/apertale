@@ -4,6 +4,7 @@ import type { TurnState } from "./types";
 
 export type TurnDirection = "forward" | "backward";
 export type TurnWaitState = Record<TurnDirection, boolean>;
+export type TurnReadiness = TurnWaitState & { navigationKey: string };
 type PageTurnSurface = "editor" | "shared";
 
 export type PageTurnSessionDeps = {
@@ -56,6 +57,19 @@ export function pageTurnNavDisabled(
   return {
     previous: locked || !canTurnPage("backward", spreadIndex, spreadCount, waitingForRenderer.backward),
     next: locked || !canTurnPage("forward", spreadIndex, spreadCount, waitingForRenderer.forward),
+  };
+}
+
+/** Stale renderer callbacks cannot unlock a different book revision or spread. */
+export function pageTurnWaitState(
+  rendererAvailable: boolean,
+  navigationKey: string,
+  readiness: TurnReadiness,
+): TurnWaitState {
+  const current = readiness.navigationKey === navigationKey;
+  return {
+    backward: rendererAvailable && (!current || !readiness.backward),
+    forward: rendererAvailable && (!current || !readiness.forward),
   };
 }
 

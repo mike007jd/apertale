@@ -105,7 +105,7 @@ Architectural rules:
 
 - Project state is authoritative; Three.js objects are render adapters.
 - Human and Agent actions share one command/history layer.
-- Every mutating tool validates schema, expected revision, visible scope, and stable IDs.
+- Every book or presentation mutation validates schema, the expected document id and revision from one context, visible scope, and stable IDs.
 - Agent-authored content is data, never executable code.
 - Theme, selection, camera hover, and preview state remain separate from document revisions where appropriate.
 - Rendering, persistence, host integration, and asset storage are replaceable adapters.
@@ -194,7 +194,7 @@ Keep tools semantic and small enough for an Agent to select reliably. The target
 
 `get_project_context` is compact by default. Focused details expose the selected reveal, reusable local assets, the authoring guide, `creation-readiness`, or `quality-review`. Readiness produces `ready`, blocking fields, recommendations, direct questions, asset needs, and photo boundaries. Create reuses the same brief and fails closed under the same assessment. A legacy personal book without lifecycle metadata can adopt that brief once at the inspected revision; curated samples and books with an existing brief cannot be reclassified. Quality review returns the single-source rubric, deterministic checks, current-revision render events, and locators/URL for real browser inspection; it does not pretend schema can judge aesthetics. Critique begins through an explicit mutating action and is recorded with evidence and suggested patches. A blocker/patch cycle stops after two rounds; an edit made after an approved report invalidates that report and starts a fresh bounded cycle for the new revision, so no action can advertise a round three. Fine-grained commands remain internal engine adapters for the human UI and do not register as Agent-discoverable tools.
 
-Every mutation accepts `requestId`. Document mutations also accept `expectedRevision`, commit atomically, return a compact summary plus `undoToken`, and preserve idempotency. Image handoff changes no document revision and returns only provided asset ids or the reader's dismissal. A book-open/create result is reported only after the same live page has committed an unobstructed reader surface; presentation calls similarly acknowledge the requested shelf or reader state.
+Every mutation accepts `requestId`. Book and presentation mutations also accept `expectedDocumentId` and `expectedRevision` from the same context; document changes commit atomically, return a compact summary plus `undoToken`, and preserve idempotency. Image handoff changes no document revision and returns only provided asset ids or the reader's dismissal. A book-open/create result is reported only after the same live page has committed an unobstructed reader surface; presentation calls similarly acknowledge the requested shelf or reader state.
 
 The runtime exposes exactly these seven tools. The scene patch applies up to 24 operations atomically, provides field-aware composite undo, and rejects arbitrary URLs or executable content. Fine-grained element commands remain internal adapters shared with the human UI; they do not consume host tool-discovery budget.
 

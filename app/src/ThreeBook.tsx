@@ -1,13 +1,14 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { isStoredAssetId, resolveAssetUrl } from "./assetStore";
+import { acquireAssetUrl, acquireAssetUrls, isStoredAssetId, type AssetUrlLease } from "./assetStore";
 import { smootherstep } from "./design/curves";
 import { recordDiagnostic } from "./diagnostics";
+import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
 import { spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
-import { readerSceneStructureKey, sceneAssetsReadyForEvidence, spreadLoadIndexes, type ReaderRenderEvidence } from "./renderEvidence";
-import { spreadBaseAssetId, type BookElement, type BookSnapshot, type Spread, type TurnState } from "./types";
+import { readerSceneStructureKey, resourceAttemptIsCurrent, sceneAssetsReadyForEvidence, spreadResourceIndexes, type ReaderRenderEvidence } from "./renderEvidence";
+import { renderedElementAssetIds, spreadArtworkFit, spreadBaseAssetId, type BookElement, type BookSnapshot, type Spread, type TurnState } from "./types";
 
 type Props = {
   snapshot: BookSnapshot;
@@ -41,7 +42,7 @@ type Props = {
   onLoading: (documentId: string) => void;
   onReady: (documentId: string) => void;
   onRendered?: (evidence: ReaderRenderEvidence & { surface: "webgl" }) => void;
-  onFailure: () => void;
+  onFailure: (sceneKey: string) => void;
 };
 
 /** The shelf card a book is being lifted out of, in viewport pixels. */
@@ -122,7 +123,11 @@ function sampleCanvasLuminance(context: CanvasRenderingContext2D) {
   return count > 0 ? weighted / count : 255;
 }
 
-function createPageBackgroundCanvas(image: HTMLImageElement | null, side: "left" | "right") {
+function createPageBackgroundCanvas(
+  image: HTMLImageElement | null,
+  side: "left" | "right",
+  fit: "cover" | "contain",
+) {
   const canvas = document.createElement("canvas");
   canvas.width = 1024;
   canvas.height = 1264;
@@ -130,8 +135,30 @@ function createPageBackgroundCanvas(image: HTMLImageElement | null, side: "left"
   if (!context) return canvas;
 
   if (image) {
-    const sourceX = side === "left" ? 0 : image.naturalWidth / 2;
-    context.drawImage(image, sourceX, 0, image.naturalWidth / 2, image.naturalHeight, 0, 0, canvas.width, canvas.height);
+    if (fit === "contain") {
+      // Preserved-photo layouts promise source geometry, so show the complete
+      // layout on paper instead of silently cropping a reader-owned original.
+      context.fillStyle = "#f7efdf";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      const placement = centeredContainPlacement(
+        image.naturalWidth,
+        image.naturalHeight,
+        canvas.width * 2,
+        canvas.height,
+      );
+      context.save();
+      context.translate(side === "left" ? 0 : -canvas.width, 0);
+      context.drawImage(image, placement.x, placement.y, placement.width, placement.height);
+      context.restore();
+    } else {
+      // Crop the full illustration once in spread coordinates, then give each
+      // page exactly half. Mapping either raw half directly onto the page would
+      // squash every source whose aspect differs from the physical stage.
+      const crop = centeredCoverCrop(image.naturalWidth, image.naturalHeight, (PAGE_W * 2) / PAGE_H);
+      const sourceWidth = crop.width / 2;
+      const sourceX = crop.x + (side === "left" ? 0 : sourceWidth);
+      context.drawImage(image, sourceX, crop.y, sourceWidth, crop.height, 0, 0, canvas.width, canvas.height);
+    }
   } else {
     // Warm uncoated paper fallback for books that have not received a generated
     // full-spread illustration yet.
@@ -222,7 +249,7 @@ function createPageOverlayCanvas(background: HTMLCanvasElement, spread: Spread, 
     top = bodyTop;
     bodyLines.forEach((bodyLine, index) => context.fillText(bodyLine, 114, top + index * bodyLeading));
 
-    if (!spread.textureUrl) {
+    if (!illustrated) {
       const rule = top + bodyLines.length * bodyLeading + 46;
       context.globalAlpha = 0.16;
       context.fillRect(116, rule, 300, 2);
@@ -238,48 +265,53 @@ function createPageOverlayCanvas(background: HTMLCanvasElement, spread: Spread, 
 async function loadPagePairs(spreads: Spread[], mode: "reader" | "workshop") {
   const entries = await Promise.all(
     spreads.map(async (spread) => {
-      let image: HTMLImageElement | null = null;
       const baseAssetId = spreadBaseAssetId(spread);
-      const artworkUrl = baseAssetId ? await resolveAssetUrl(baseAssetId) : undefined;
-      if (artworkUrl) {
-        image = new Image();
-        image.decoding = "async";
-        image.src = artworkUrl;
-        await image.decode();
+      const artworkLease = baseAssetId ? await acquireAssetUrl(baseAssetId) : undefined;
+      try {
+        let image: HTMLImageElement | null = null;
+        if (artworkLease) {
+          image = new Image();
+          image.decoding = "async";
+          image.src = artworkLease.url;
+          await image.decode();
+        }
+        const fit = spreadArtworkFit(spread);
+        const leftCanvas = createPageBackgroundCanvas(image, "left", fit);
+        const rightCanvas = createPageBackgroundCanvas(image, "right", fit);
+        const leftOverlay = mode === "workshop"
+          ? document.createElement("canvas")
+          : createPageOverlayCanvas(leftCanvas, spread, "left", Boolean(image));
+        const rightOverlay = mode === "workshop"
+          ? document.createElement("canvas")
+          : createPageOverlayCanvas(rightCanvas, spread, "right", Boolean(image));
+        if (mode === "workshop") {
+          leftOverlay.width = rightOverlay.width = leftCanvas.width;
+          leftOverlay.height = rightOverlay.height = leftCanvas.height;
+        }
+        const spreadCanvas = document.createElement("canvas");
+        spreadCanvas.width = leftCanvas.width + rightCanvas.width;
+        spreadCanvas.height = leftCanvas.height;
+        const spreadContext = spreadCanvas.getContext("2d");
+        spreadContext?.drawImage(leftCanvas, 0, 0);
+        spreadContext?.drawImage(rightCanvas, leftCanvas.width, 0);
+        const spreadTexture = new THREE.CanvasTexture(spreadCanvas);
+        spreadTexture.colorSpace = THREE.SRGBColorSpace;
+        spreadTexture.anisotropy = 8;
+        spreadTexture.needsUpdate = true;
+        const overlayCanvas = document.createElement("canvas");
+        overlayCanvas.width = spreadCanvas.width;
+        overlayCanvas.height = spreadCanvas.height;
+        const overlayContext = overlayCanvas.getContext("2d");
+        overlayContext?.drawImage(leftOverlay, 0, 0);
+        overlayContext?.drawImage(rightOverlay, leftOverlay.width, 0);
+        const overlayTexture = new THREE.CanvasTexture(overlayCanvas);
+        overlayTexture.colorSpace = THREE.SRGBColorSpace;
+        overlayTexture.anisotropy = 8;
+        overlayTexture.needsUpdate = true;
+        return [spread.id, { spread: spreadTexture, overlay: overlayTexture }] as const;
+      } finally {
+        artworkLease?.release();
       }
-      const leftCanvas = createPageBackgroundCanvas(image, "left");
-      const rightCanvas = createPageBackgroundCanvas(image, "right");
-      const leftOverlay = mode === "workshop"
-        ? document.createElement("canvas")
-        : createPageOverlayCanvas(leftCanvas, spread, "left", Boolean(image));
-      const rightOverlay = mode === "workshop"
-        ? document.createElement("canvas")
-        : createPageOverlayCanvas(rightCanvas, spread, "right", Boolean(image));
-      if (mode === "workshop") {
-        leftOverlay.width = rightOverlay.width = leftCanvas.width;
-        leftOverlay.height = rightOverlay.height = leftCanvas.height;
-      }
-      const spreadCanvas = document.createElement("canvas");
-      spreadCanvas.width = leftCanvas.width + rightCanvas.width;
-      spreadCanvas.height = leftCanvas.height;
-      const spreadContext = spreadCanvas.getContext("2d");
-      spreadContext?.drawImage(leftCanvas, 0, 0);
-      spreadContext?.drawImage(rightCanvas, leftCanvas.width, 0);
-      const spreadTexture = new THREE.CanvasTexture(spreadCanvas);
-      spreadTexture.colorSpace = THREE.SRGBColorSpace;
-      spreadTexture.anisotropy = 8;
-      spreadTexture.needsUpdate = true;
-      const overlayCanvas = document.createElement("canvas");
-      overlayCanvas.width = spreadCanvas.width;
-      overlayCanvas.height = spreadCanvas.height;
-      const overlayContext = overlayCanvas.getContext("2d");
-      overlayContext?.drawImage(leftOverlay, 0, 0);
-      overlayContext?.drawImage(rightOverlay, leftOverlay.width, 0);
-      const overlayTexture = new THREE.CanvasTexture(overlayCanvas);
-      overlayTexture.colorSpace = THREE.SRGBColorSpace;
-      overlayTexture.anisotropy = 8;
-      overlayTexture.needsUpdate = true;
-      return [spread.id, { spread: spreadTexture, overlay: overlayTexture }] as const;
     }),
   );
   return new Map<string, PagePair>(entries);
@@ -483,6 +515,7 @@ function buildSceneElement(
   resolvedAssetUrl = element.assetId,
   resolvedFrameUrls = element.frameAssetIds ?? [],
   onTextureError?: (frameIndex: number) => void,
+  onTextureReady?: () => void,
 ): SceneElement {
   const root = new THREE.Group();
   const tilt = new THREE.Group();
@@ -571,6 +604,7 @@ function buildSceneElement(
       (texture) => {
         loadedFrameIndices.add(index);
         if (index === 0) fitTextureAspect(texture);
+        onTextureReady?.();
       },
       undefined,
       () => onTextureError?.(index),
@@ -629,6 +663,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     if (!maybeHost) return undefined;
     const host: HTMLDivElement = maybeHost;
     const loadingDocumentId = propsRef.current.snapshot.document.id;
+    const failureSceneKey = sceneStructureKey;
+    const reportFailure = () => propsRef.current.onFailure(failureSceneKey);
     propsRef.current.onLoading(loadingDocumentId);
 
     const scene = new THREE.Scene();
@@ -637,7 +673,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
     } catch {
       recordDiagnostic("webgl:initialization-failed");
-      propsRef.current.onFailure();
+      reportFailure();
       return undefined;
     }
     recordDiagnostic("webgl:initialized", {
@@ -655,7 +691,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     const onContextLost = (event: Event) => {
       event.preventDefault();
       recordDiagnostic("webgl:context-lost");
-      propsRef.current.onFailure();
+      reportFailure();
     };
     renderer.domElement.addEventListener("webglcontextlost", onContextLost);
     renderer.domElement.tabIndex = 0;
@@ -845,13 +881,15 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
      */
     const coverSource = propsRef.current.snapshot.document.coverAssetId ?? propsRef.current.snapshot.document.coverTextureUrl;
     if (coverSource) {
-      const resolveCover = isStoredAssetId(coverSource) ? resolveAssetUrl(coverSource) : Promise.resolve(coverSource);
-      resolveCover
-        .then((url) => new Promise<THREE.Texture>((resolve, reject) => {
-          textureLoader.load(url, resolve, undefined, reject);
-        }))
-        .then((texture) => {
-          if (disposed) return;
+      void acquireAssetUrl(coverSource).then(async (lease) => {
+        try {
+          const texture = await new Promise<THREE.Texture>((resolve, reject) => {
+            textureLoader.load(lease.url, resolve, undefined, reject);
+          });
+          if (disposed) {
+            texture.dispose();
+            return;
+          }
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.anisotropy = 8;
           const boardAspect = BOARD_W / BOARD_H;
@@ -867,7 +905,10 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
           coverArtMaterial.map = texture;
           coverArtMaterial.needsUpdate = true;
           coverArtFadeIn = true;
-        })
+        } finally {
+          lease.release();
+        }
+      })
         .catch(() => recordDiagnostic("asset:cover-board-failed", { documentId: propsRef.current.snapshot.document.id }));
     }
 
@@ -1028,39 +1069,71 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     const textureLoader = new THREE.TextureLoader();
     const sceneElements = new Map<string, SceneElement>();
     const pendingAssets = new Set<string>();
+    const pendingAssetAttempts = new Map<string, symbol>();
+    const activeElementMounts = new Map<string, symbol>();
     const failedSceneAssets = new Set<string>();
+    let desiredElementIds = new Set<string>();
     let disposed = false;
+    let reportReadyForCurrentSpread: () => void = () => undefined;
     const mountSceneElement = (element: BookElement) => {
       if (sceneElements.has(element.id) || pendingAssets.has(element.id)) return;
-      const assetIds = [element.assetId, ...(element.frameAssetIds ?? [])];
-      const buildElement = (assetUrl: string, frameUrls: string[]) => {
+      const frameAssetIds = element.frameAssetIds?.length ? element.frameAssetIds : null;
+      const assetIds = renderedElementAssetIds(element);
+      const buildElement = (assetUrl: string, frameUrls: string[], leases: AssetUrlLease[] = []) => {
+        const mountAttempt = Symbol(element.id);
+        activeElementMounts.set(element.id, mountAttempt);
         [...failedSceneAssets].forEach((key) => {
           if (key.startsWith(`${element.id}:`)) failedSceneAssets.delete(key);
         });
-        return buildSceneElement(element, textureLoader, assetUrl, frameUrls, (frameIndex) => {
+        const sceneElement = buildSceneElement(element, textureLoader, assetUrl, frameUrls, (frameIndex) => {
+          if (disposed || !resourceAttemptIsCurrent(element.id, desiredElementIds, mountAttempt, activeElementMounts)) return;
           failedSceneAssets.add(`${element.id}:texture:${frameIndex}`);
           recordDiagnostic("asset:texture-load-failed", { elementId: element.id, frameIndex });
+          reportFailure();
+        }, () => {
+          if (!disposed && resourceAttemptIsCurrent(element.id, desiredElementIds, mountAttempt, activeElementMounts)) {
+            reportReadyForCurrentSpread();
+          }
         });
+        const disposeSceneElement = sceneElement.dispose;
+        sceneElement.dispose = () => {
+          disposeSceneElement();
+          leases.forEach((lease) => lease.release());
+        };
+        return sceneElement;
       };
       if (!assetIds.some(isStoredAssetId)) {
-        const sceneElement = buildElement(element.assetId, element.frameAssetIds ?? []);
+        const sceneElement = buildElement(element.assetId, frameAssetIds ?? []);
         stageScene.add(sceneElement.root);
         sceneElements.set(element.id, sceneElement);
         return;
       }
+      const assetAttempt = Symbol(element.id);
+      pendingAssetAttempts.set(element.id, assetAttempt);
       pendingAssets.add(element.id);
-      Promise.all(assetIds.map((assetId) => (isStoredAssetId(assetId) ? resolveAssetUrl(assetId) : Promise.resolve(assetId)))).then(([assetUrl, ...frameUrls]) => {
+      acquireAssetUrls(assetIds).then((leases) => {
+        if (pendingAssetAttempts.get(element.id) !== assetAttempt) {
+          leases.forEach((lease) => lease.release());
+          return;
+        }
+        pendingAssetAttempts.delete(element.id);
         pendingAssets.delete(element.id);
-        if (disposed || sceneElements.has(element.id)) return;
-        const stillExists = propsRef.current.snapshot.document.spreads.some((spread) => spread.elements.some((item) => item.id === element.id));
-        if (!stillExists) return;
-        const sceneElement = buildElement(assetUrl, frameUrls);
+        if (disposed || sceneElements.has(element.id) || !desiredElementIds.has(element.id)) {
+          leases.forEach((lease) => lease.release());
+          return;
+        }
+        const resolvedUrls = leases.map((lease) => lease.url);
+        const sceneElement = buildElement(resolvedUrls[0] ?? element.assetId, frameAssetIds ? resolvedUrls : [], leases);
         stageScene.add(sceneElement.root);
         sceneElements.set(element.id, sceneElement);
       }).catch(() => {
+        if (pendingAssetAttempts.get(element.id) !== assetAttempt) return;
+        pendingAssetAttempts.delete(element.id);
         pendingAssets.delete(element.id);
+        if (disposed || !desiredElementIds.has(element.id)) return;
         failedSceneAssets.add(`${element.id}:resolve`);
         recordDiagnostic("asset:resolve-failed", { elementId: element.id });
+        reportFailure();
       });
     };
     const placeStaticElement = (element: BookElement, sceneElement: SceneElement, scaleMultiplier = 1) => {
@@ -1171,22 +1244,42 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     let hoveredId: string | null = null;
 
     let pagePairs = new Map<string, PagePair>();
-    const loadingSpreadIds = new Set<string>();
+    const spreadLoadAttempts = new Map<string, symbol>();
+    let desiredSpreadIds = new Set<string>();
+    let resourceWindowKey = "";
     let readySent = false;
-    const reportReadyForCurrentSpread = () => {
-      if (readySent) return;
+    const sceneAssetsReady = (spread: Spread) => sceneAssetsReadyForEvidence(
+      spread.elements.map((element) => element.id),
+      pendingAssets,
+      failedSceneAssets,
+      new Map(spread.elements.flatMap((element) => {
+        const mounted = sceneElements.get(element.id);
+        return mounted ? [[element.id, { loaded: mounted.loadedFrameIndices.size, total: mounted.frameTextures.length }]] : [];
+      })),
+    );
+    reportReadyForCurrentSpread = () => {
+      if (disposed || readySent) return;
       const current = propsRef.current.snapshot;
+      if (current.document.id !== loadingDocumentId) return;
       const spread = current.document.spreads[current.session.currentSpreadIndex];
-      if (!spread || !pagePairs.has(spread.id)) return;
+      if (!spread || !pagePairs.has(spread.id) || !sceneAssetsReady(spread)) return;
       readySent = true;
       propsRef.current.onReady(loadingDocumentId);
     };
     const ensureSpreadLoaded = (spread: Spread) => {
-      if (pagePairs.has(spread.id) || loadingSpreadIds.has(spread.id)) return;
-      loadingSpreadIds.add(spread.id);
+      if (pagePairs.has(spread.id) || spreadLoadAttempts.has(spread.id)) return;
+      const loadAttempt = Symbol(spread.id);
+      spreadLoadAttempts.set(spread.id, loadAttempt);
       loadPagePairs([spread], propsRef.current.mode).then((pairs) => {
-        loadingSpreadIds.delete(spread.id);
-        if (disposed) {
+        if (spreadLoadAttempts.get(spread.id) !== loadAttempt) {
+          pairs.forEach(({ spread: texture, overlay }) => {
+            texture.dispose();
+            overlay.dispose();
+          });
+          return;
+        }
+        spreadLoadAttempts.delete(spread.id);
+        if (disposed || !desiredSpreadIds.has(spread.id)) {
           pairs.forEach(({ spread: texture, overlay }) => {
             texture.dispose();
             overlay.dispose();
@@ -1199,20 +1292,53 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
           reportReadyForCurrentSpread();
         }
       }).catch(() => {
-        loadingSpreadIds.delete(spread.id);
-        if (disposed) return;
+        if (spreadLoadAttempts.get(spread.id) !== loadAttempt) return;
+        spreadLoadAttempts.delete(spread.id);
+        if (disposed || !desiredSpreadIds.has(spread.id)) return;
         recordDiagnostic("spread:load-failed", { documentId: loadingDocumentId, spreadId: spread.id });
-        propsRef.current.onFailure();
+        reportFailure();
+      });
+    };
+    const reconcileResourceWindow = (spreads: Spread[]) => {
+      const nextKey = spreads.map((spread) => spread.id).join(":");
+      if (nextKey === resourceWindowKey) return;
+      resourceWindowKey = nextKey;
+      desiredSpreadIds = new Set(spreads.map((spread) => spread.id));
+      desiredElementIds = new Set(spreads.flatMap((spread) => spread.elements.map((element) => element.id)));
+      spreadLoadAttempts.forEach((_, spreadId) => {
+        if (!desiredSpreadIds.has(spreadId)) spreadLoadAttempts.delete(spreadId);
+      });
+      pendingAssetAttempts.forEach((_, elementId) => {
+        if (desiredElementIds.has(elementId)) return;
+        pendingAssetAttempts.delete(elementId);
+        pendingAssets.delete(elementId);
+      });
+      pagePairs.forEach((pair, spreadId) => {
+        if (desiredSpreadIds.has(spreadId)) return;
+        pair.spread.dispose();
+        pair.overlay.dispose();
+        pagePairs.delete(spreadId);
+      });
+      sceneElements.forEach((sceneElement, elementId) => {
+        if (desiredElementIds.has(elementId)) return;
+        activeElementMounts.delete(elementId);
+        stageScene.remove(sceneElement.root);
+        sceneElement.dispose();
+        sceneElements.delete(elementId);
+        [...failedSceneAssets].forEach((key) => {
+          if (key.startsWith(`${elementId}:`)) failedSceneAssets.delete(key);
+        });
+      });
+      spreads.forEach((spread) => {
+        ensureSpreadLoaded(spread);
+        spread.elements.forEach(mountSceneElement);
       });
     };
     const initialSpreadIndex = propsRef.current.snapshot.session.currentSpreadIndex;
     const initialSpread = propsRef.current.snapshot.document.spreads[initialSpreadIndex];
-    ensureSpreadLoaded(initialSpread);
-    // Keep resource prewarming from the former hidden render loop without
-    // bringing back any offscreen render passes. Mounting creates invisible
-    // scene nodes and starts texture/IndexedDB resolution; the first visible
-    // frame still owns placement and paint.
-    initialSpread.elements.forEach(mountSceneElement);
+    // Load the visible spread first. Its neighbors join the bounded resource
+    // window only after this background is ready.
+    reconcileResourceWindow([initialSpread]);
 
     /**
      * Framing is what the container asks for; pose is what the cover animation
@@ -1271,7 +1397,12 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       // host measures 0x0 until it is revealed. Fitting to that aspect gives an
       // infinite camera distance, which then survives the next real resize as
       // NaN. Keep the last good framing until the element has a size.
-      if (width < 2 || height < 2) return;
+      if (width < 2 || height < 2) {
+        const current = propsRef.current.snapshot;
+        const spread = current.document.spreads[current.session.currentSpreadIndex];
+        if (spread) reconcileResourceWindow([spread]);
+        return;
+      }
       // Guarded on offsetParent so a future layout that repositions the scene
       // against something other than the stage degrades to "no offset" rather
       // than to a confidently wrong one.
@@ -1429,12 +1560,11 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     let renderedEvidenceKey = "";
     let renderedEvidenceCandidate = "";
     let renderedEvidenceFrames = 0;
-    let lastPrefetchedSpreadIndex = -1;
     const lastPageTurnReadiness: Record<"forward" | "backward", boolean | null> = {
       forward: null,
       backward: null,
     };
-    let lastReadinessSpreadIndex = -1;
+    let lastReadinessKey = "";
     const dayPaperColor = new THREE.Color(0xfffbef);
     const nightPaperColor = new THREE.Color(0xf6efe2);
     const dayPageBlockColor = new THREE.Color(0xe8dcc4);
@@ -1466,8 +1596,9 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       const pagePair = pagePairs.get(spread.id);
       const previous = current.document.spreads[current.session.currentSpreadIndex - 1];
       const next = current.document.spreads[current.session.currentSpreadIndex + 1];
-      if (lastReadinessSpreadIndex !== current.session.currentSpreadIndex) {
-        lastReadinessSpreadIndex = current.session.currentSpreadIndex;
+      const readinessKey = `${current.document.id}:${current.document.revision}:${current.session.currentSpreadIndex}`;
+      if (lastReadinessKey !== readinessKey) {
+        lastReadinessKey = readinessKey;
         lastPageTurnReadiness.backward = null;
         lastPageTurnReadiness.forward = null;
       }
@@ -1489,17 +1620,22 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
        * 1536x947 target with 2x MSAA, plus a 1024-square shadow map - for a canvas
        * nobody can see on the app's own landing screen.
        */
-      if (host.clientWidth < 2 || host.clientHeight < 2) return;
-
-      if (!pagePair || lastPrefetchedSpreadIndex !== current.session.currentSpreadIndex) {
-        if (pagePair) lastPrefetchedSpreadIndex = current.session.currentSpreadIndex;
-        spreadLoadIndexes(current.session.currentSpreadIndex, current.document.spreads.length, Boolean(pagePair))
-          .forEach((index) => ensureSpreadLoaded(current.document.spreads[index]));
+      if (host.clientWidth < 2 || host.clientHeight < 2) {
+        reconcileResourceWindow([spread]);
+        return;
       }
+
+      const resourceSpreads = spreadResourceIndexes(
+        current.session.currentSpreadIndex,
+        current.document.spreads.length,
+        Boolean(pagePair),
+      ).map((index) => current.document.spreads[index]);
+      reconcileResourceWindow(resourceSpreads);
       if (pagePair) {
+        const currentSceneReady = sceneAssetsReady(spread);
         const readiness = {
-          backward: !previous || pagePairs.has(previous.id),
-          forward: !next || pagePairs.has(next.id),
+          backward: currentSceneReady && (!previous || (pagePairs.has(previous.id) && sceneAssetsReady(previous))),
+          forward: currentSceneReady && (!next || (pagePairs.has(next.id) && sceneAssetsReady(next))),
         };
         (["backward", "forward"] as const).forEach((direction) => {
           if (lastPageTurnReadiness[direction] === readiness[direction]) return;
@@ -1652,8 +1788,9 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
           const plan = resolveTurnContentPlan(current.session.currentSpreadIndex, currentTurn.direction, current.document.spreads.length);
           const destinationSpread = plan ? current.document.spreads[plan.destinationIndex] : undefined;
           const destinationPair = destinationSpread ? pagePairs.get(destinationSpread.id) : undefined;
+          const destinationReady = destinationSpread && destinationPair && sceneAssetsReady(destinationSpread);
           const themeKey = night ? "night" : "day";
-          if (destinationSpread && destinationPair) {
+          if (destinationSpread && destinationPair && destinationReady) {
             configureStaticStage(destinationSpread);
             renderStageView(destinationPair, destinationSpreadTarget, "full", night);
             const captureKey = `${currentTurn.direction}:${spread.id}:${destinationSpread.id}:${themeKey}`;
@@ -1746,17 +1883,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       seatStack(rightStack, 2.16, THREE.MathUtils.lerp(rightStack.scale.z, blockDepth * (1 - leftShare), delta));
 
       renderer.render(scene, camera);
-      const expectedSceneElements = spread.elements;
-      const sceneAssetsReady = sceneAssetsReadyForEvidence(
-        expectedSceneElements.map((element) => element.id),
-        pendingAssets,
-        failedSceneAssets,
-        new Map(expectedSceneElements.flatMap((element) => {
-          const mounted = sceneElements.get(element.id);
-          return mounted ? [[element.id, { loaded: mounted.loadedFrameIndices.size, total: mounted.frameTextures.length }]] : [];
-        })),
-      );
-      if (pagePair && sceneAssetsReady && !currentTurn && mode === "reader") {
+      const currentSceneAssetsReady = sceneAssetsReady(spread);
+      if (pagePair && currentSceneAssetsReady && !currentTurn && mode === "reader") {
         const evidenceToken = propsRef.current.renderEvidenceToken ?? "";
         const evidenceKey = `${current.document.id}:${current.document.revision}:${spread.id}:${current.session.sceneThemeId}:${evidenceToken}`;
         if (evidenceKey !== renderedEvidenceCandidate) {
@@ -1788,6 +1916,12 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
 
     return () => {
       disposed = true;
+      desiredSpreadIds.clear();
+      desiredElementIds.clear();
+      spreadLoadAttempts.clear();
+      pendingAssetAttempts.clear();
+      pendingAssets.clear();
+      activeElementMounts.clear();
       cancelAnimationFrame(raf);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);

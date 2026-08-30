@@ -17,7 +17,7 @@ vi.stubGlobal("window", {
   localStorage,
 });
 
-const { partitionLibraryBooks } = await import("./App");
+const { partitionLibraryBooks, shelfCoverAssetPlan } = await import("./App");
 
 describe("library shelf sections", () => {
   it("treats any book that is not a sample as the reader's own", () => {
@@ -34,5 +34,13 @@ describe("library shelf sections", () => {
     expect(partitionLibraryBooks([{ id: "guide", sample: true }]).tabbed).toBe(false);
     expect(partitionLibraryBooks([]).tabbed).toBe(false);
     expect(partitionLibraryBooks([{ id: "guide", sample: true }, { id: "mine" }]).tabbed).toBe(true);
+  });
+
+  it("retains local cover URLs only for the shelf section that is mounted", () => {
+    const yours = [{ id: "mine", coverAssetId: "asset:mine" }];
+    const explore = [{ id: "guide", coverAssetId: "asset:guide" }];
+    expect([...shelfCoverAssetPlan(true, yours)]).toEqual([["mine", "asset:mine"]]);
+    expect([...shelfCoverAssetPlan(true, explore)]).toEqual([["guide", "asset:guide"]]);
+    expect([...shelfCoverAssetPlan(false, yours)]).toEqual([]);
   });
 });

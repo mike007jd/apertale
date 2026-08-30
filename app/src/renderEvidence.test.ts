@@ -5,10 +5,17 @@ import {
   fallbackImageLoadKeys,
   fallbackRenderComplete,
   readerRenderMatches,
+  readerSceneStructureKey,
+  resourceAttemptIsCurrent,
+  sceneFailureMatches,
+  resolvedCoverAsset,
   sceneAssetsReadyForEvidence,
   shelfCoverMatches,
+  shelfCoverTarget,
   spreadLoadIndexes,
+  spreadResourceIndexes,
   type ReaderRenderEvidence,
+  type ResolvedCoverAsset,
   type ShelfCoverEvidence,
 } from "./renderEvidence";
 import { isProceduralElement, type Spread } from "./types";
@@ -52,21 +59,51 @@ describe("render evidence readiness", () => {
 
   it("counts only a resolved dedicated cover as shelf cover evidence", () => {
     const personalBook = { sample: false, coverAssetId: "asset:12345678-1234-4234-8234-123456789abc" };
-    expect(dedicatedCoverRendered(personalBook, "blob:cover")).toBe(true);
+    const resolved: ResolvedCoverAsset = { assetId: personalBook.coverAssetId, url: "blob:cover" };
+    expect(dedicatedCoverRendered(personalBook, resolved)).toBe(true);
     // An unresolvable dedicated cover falls back to a bundled placeholder;
     // that load must not satisfy the cover-evidence blocker.
     expect(dedicatedCoverRendered(personalBook, undefined)).toBe(false);
-    expect(dedicatedCoverRendered({ sample: false }, "/assets/generated/day-background.png")).toBe(false);
-    expect(dedicatedCoverRendered({ sample: true, coverAssetId: personalBook.coverAssetId }, "blob:cover")).toBe(false);
+    expect(dedicatedCoverRendered(personalBook, { ...resolved, assetId: "asset:22345678-1234-4234-8234-123456789abc" })).toBe(false);
+    expect(dedicatedCoverRendered({ sample: false }, resolved)).toBe(false);
+    expect(dedicatedCoverRendered({ sample: true, coverAssetId: personalBook.coverAssetId }, resolved)).toBe(false);
+  });
+
+  it("keeps a replacement cover pending until that exact asset resolves", () => {
+    const book = {
+      id: "book-one",
+      revision: 5,
+      sample: false,
+      coverAssetId: "asset:22345678-1234-4234-8234-123456789abc",
+      coverTextureUrl: "/assets/generated/day-background.png",
+    };
+    const stale = {
+      [book.id]: {
+        assetId: "asset:12345678-1234-4234-8234-123456789abc",
+        url: "blob:old-cover",
+      },
+    };
+    expect(resolvedCoverAsset(book, stale)).toBeUndefined();
+    expect(shelfCoverTarget(book, stale)).toBeUndefined();
+    expect(shelfCoverTarget(book, {})).toBeUndefined();
+
+    const current = { [book.id]: { assetId: book.coverAssetId, url: "blob:new-cover" } };
+    expect(shelfCoverTarget(book, current)).toEqual({
+      documentId: book.id,
+      revision: book.revision,
+      assetId: book.coverAssetId,
+      url: "blob:new-cover",
+    });
   });
 
   it("uses the final clean plate and real foreground layers for fallback rendering", () => {
     const plan = fallbackAssetPlan(spread());
     expect(plan.baseAssetId).toBe("/clean.png");
     expect(plan.foreground.map((element) => element.id)).toEqual(["character"]);
-    expect(fallbackRenderComplete(2, new Set(["base", "character"]), false)).toBe(true);
-    expect(fallbackRenderComplete(2, new Set(["base"]), false)).toBe(false);
-    expect(fallbackRenderComplete(2, new Set(["base", "character"]), true)).toBe(false);
+    expect(fallbackRenderComplete(["base", "character"], new Set(["base", "character"]), false)).toBe(true);
+    expect(fallbackRenderComplete(["base", "character"], new Set(["base"]), false)).toBe(false);
+    expect(fallbackRenderComplete(["base", "character"], new Set(["old-base", "old-character"]), false)).toBe(false);
+    expect(fallbackRenderComplete(["base", "character"], new Set(["base", "character"]), true)).toBe(false);
     const collisionSafeKeys = fallbackImageLoadKeys("revision-4", ["base"]);
     expect(collisionSafeKeys).toEqual(["base:revision-4", "layer:base"]);
     expect(new Set(collisionSafeKeys).size).toBe(2);
@@ -106,6 +143,36 @@ describe("render evidence readiness", () => {
     expect(spreadLoadIndexes(2, 4, true)).toEqual([1, 3]);
   });
 
+  it("keeps renderer resources inside the current three-spread window", () => {
+    expect(spreadResourceIndexes(0, 12, false)).toEqual([0]);
+    expect(spreadResourceIndexes(0, 12, true)).toEqual([0, 1]);
+    expect(spreadResourceIndexes(6, 12, true)).toEqual([5, 6, 7]);
+    expect(spreadResourceIndexes(11, 12, true)).toEqual([10, 11]);
+  });
+
+  it("rejects retired async callbacks after an element leaves and re-enters the resource window", () => {
+    const retiredAttempt = Symbol("retired");
+    const currentAttempt = Symbol("current");
+    const desired = new Set(["character"]);
+    const active = new Map([["character", currentAttempt]]);
+
+    expect(resourceAttemptIsCurrent("character", desired, retiredAttempt, active)).toBe(false);
+    expect(resourceAttemptIsCurrent("character", desired, currentAttempt, active)).toBe(true);
+    desired.clear();
+    expect(resourceAttemptIsCurrent("character", desired, currentAttempt, active)).toBe(false);
+  });
+
+  it("does not demote the current scene when a retired renderer reports its own failure", () => {
+    const currentReadiness = { backward: true, forward: true };
+    const afterRetiredFailure = sceneFailureMatches("scene-b", "scene-a")
+      ? { backward: false, forward: false }
+      : currentReadiness;
+    expect(afterRetiredFailure).toBe(currentReadiness);
+    expect(sceneFailureMatches("scene-b", "scene-a")).toBe(false);
+    expect(sceneFailureMatches("scene-b", "scene-b")).toBe(true);
+    expect(sceneFailureMatches(null, "scene-a")).toBe(false);
+  });
+
   it("rejects evidence from a retired reader session or rendering backend", () => {
     const evidence: ReaderRenderEvidence = {
       sceneKey: "reader-scene-after-workshop",
@@ -133,6 +200,36 @@ describe("render evidence readiness", () => {
     expect(readerRenderMatches(evidence, { ...target, surface: "fallback" })).toBe(false);
   });
 
+  it("rebuilds the reader scene when the effective cover changes", () => {
+    const snapshot = {
+      document: {
+        id: "book-one",
+        revision: 4,
+        title: "Book one",
+        coverAssetId: "asset:12345678-1234-4234-8234-123456789abc",
+        spreads: [spread()],
+      },
+      session: {
+        currentSpreadIndex: 0,
+        selectionId: null,
+        sceneThemeId: "paper-atelier" as const,
+        preview: false,
+        quality: "balanced" as const,
+      },
+      lastAction: null,
+    };
+    const before = readerSceneStructureKey(snapshot, "reader");
+    const after = readerSceneStructureKey({
+      ...snapshot,
+      document: {
+        ...snapshot.document,
+        revision: 5,
+        coverAssetId: "asset:22345678-1234-4234-8234-123456789abc",
+      },
+    }, "reader");
+    expect(after).not.toBe(before);
+  });
+
   it("accepts only the currently mounted, decoded, visible shelf cover", () => {
     const rect = (top: number): DOMRect => ({
       x: 20,
@@ -146,6 +243,9 @@ describe("render evidence readiness", () => {
       toJSON: () => ({}),
     });
     const cover: ShelfCoverEvidence = {
+      documentId: "book-one",
+      revision: 4,
+      assetId: "asset:12345678-1234-4234-8234-123456789abc",
       url: "blob:cover",
       renderElement: {
         isConnected: true,
@@ -154,11 +254,19 @@ describe("render evidence readiness", () => {
         getBoundingClientRect: () => rect(40),
       },
     };
+    const target = {
+      documentId: cover.documentId,
+      revision: cover.revision,
+      assetId: cover.assetId,
+      url: cover.url,
+    };
 
-    expect(shelfCoverMatches(cover, "blob:cover", viewport)).toBe(true);
-    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, isConnected: false } }, "blob:cover", viewport)).toBe(false);
-    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, complete: false } }, "blob:cover", viewport)).toBe(false);
-    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, naturalWidth: 0 } }, "blob:cover", viewport)).toBe(false);
-    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, getBoundingClientRect: () => rect(900) } }, "blob:cover", viewport)).toBe(false);
+    expect(shelfCoverMatches(cover, target, viewport)).toBe(true);
+    expect(shelfCoverMatches(cover, { ...target, assetId: "asset:22345678-1234-4234-8234-123456789abc" }, viewport)).toBe(false);
+    expect(shelfCoverMatches(cover, { ...target, revision: 5 }, viewport)).toBe(false);
+    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, isConnected: false } }, target, viewport)).toBe(false);
+    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, complete: false } }, target, viewport)).toBe(false);
+    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, naturalWidth: 0 } }, target, viewport)).toBe(false);
+    expect(shelfCoverMatches({ ...cover, renderElement: { ...cover.renderElement, getBoundingClientRect: () => rect(900) } }, target, viewport)).toBe(false);
   });
 });

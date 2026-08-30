@@ -21,14 +21,56 @@ export type ReaderRenderEvidence = {
 };
 
 export type ShelfCoverEvidence = {
+  documentId: string;
+  revision: number;
+  assetId: string;
   url: string;
   renderElement: RenderElement & Pick<HTMLImageElement, "complete" | "naturalWidth">;
 };
+
+export type ResolvedCoverAsset = {
+  assetId: string;
+  url: string;
+};
+
+export type ShelfCoverTarget = Omit<ShelfCoverEvidence, "renderElement">;
+
+type ShelfBookCover = {
+  id: string;
+  revision: number;
+  sample?: boolean;
+  coverAssetId?: string;
+  coverTextureUrl: string;
+};
+
+export function resolvedCoverAsset(
+  book: ShelfBookCover,
+  resolvedCovers: Readonly<Record<string, ResolvedCoverAsset>>,
+) {
+  const resolved = resolvedCovers[book.id];
+  return resolved?.assetId === book.coverAssetId ? resolved : undefined;
+}
+
+export function shelfCoverTarget(
+  book: ShelfBookCover,
+  resolvedCovers: Readonly<Record<string, ResolvedCoverAsset>>,
+): ShelfCoverTarget | undefined {
+  const resolved = resolvedCoverAsset(book, resolvedCovers);
+  if (!book.sample && !resolved) return undefined;
+  return {
+    documentId: book.id,
+    revision: book.revision,
+    assetId: resolved?.assetId ?? book.coverTextureUrl,
+    url: resolved?.url ?? book.coverTextureUrl,
+  };
+}
 
 export function readerSceneStructureKey(snapshot: BookSnapshot, mode: "reader" | "workshop") {
   return JSON.stringify({
     id: snapshot.document.id,
     mode,
+    coverAssetId: snapshot.document.coverAssetId,
+    coverTextureUrl: snapshot.document.coverTextureUrl,
     spreads: snapshot.document.spreads.map((spread) => ({
       id: spread.id,
       title: spread.title,
@@ -76,13 +118,16 @@ export function readerRenderMatches(
 /** A shelf ACK is tied to the currently mounted, decoded, visible cover node. */
 export function shelfCoverMatches(
   evidence: ShelfCoverEvidence | undefined,
-  expectedUrl: string | undefined,
+  target: ShelfCoverTarget | undefined,
   bounds: RenderBounds,
 ) {
   return Boolean(
     evidence
-    && expectedUrl
-    && evidence.url === expectedUrl
+    && target
+    && evidence.documentId === target.documentId
+    && evidence.revision === target.revision
+    && evidence.assetId === target.assetId
+    && evidence.url === target.url
     && evidence.renderElement.complete
     && evidence.renderElement.naturalWidth > 0
     && renderElementVisible(evidence.renderElement, bounds),
@@ -103,13 +148,18 @@ export function fallbackAssetPlan(spread: Spread) {
  */
 export function dedicatedCoverRendered(
   book: { sample?: boolean; coverAssetId?: string },
-  resolvedDedicatedCoverUrl: string | undefined,
+  resolvedDedicatedCover: ResolvedCoverAsset | undefined,
 ) {
-  return !book.sample && Boolean(book.coverAssetId) && Boolean(resolvedDedicatedCoverUrl);
+  return !book.sample
+    && Boolean(book.coverAssetId)
+    && resolvedDedicatedCover?.assetId === book.coverAssetId
+    && Boolean(resolvedDedicatedCover?.url);
 }
 
-export function fallbackRenderComplete(expectedCount: number, loadedIds: ReadonlySet<string>, failed: boolean) {
-  return !failed && expectedCount > 0 && loadedIds.size === expectedCount;
+export function fallbackRenderComplete(expectedIds: readonly string[], loadedIds: ReadonlySet<string>, failed: boolean) {
+  return !failed
+    && expectedIds.length > 0
+    && expectedIds.every((assetId) => loadedIds.has(assetId));
 }
 
 export function fallbackImageLoadKeys(renderKey: string, foregroundIds: readonly string[]) {
@@ -130,6 +180,38 @@ export function spreadLoadIndexes(currentIndex: number, spreadCount: number, cur
   if (currentIndex < 0 || currentIndex >= spreadCount) return [];
   if (!currentLoaded) return [currentIndex];
   return [currentIndex - 1, currentIndex + 1].filter((index) => index >= 0 && index < spreadCount);
+}
+
+/**
+ * Bounds live renderer resources to the visible spread and its turn neighbors.
+ * The current spread loads alone on a cold start; once ready, the two possible
+ * turn destinations join the window.
+ */
+export function spreadResourceIndexes(currentIndex: number, spreadCount: number, currentLoaded: boolean) {
+  if (currentIndex < 0 || currentIndex >= spreadCount) return [];
+  if (!currentLoaded) return [currentIndex];
+  return [currentIndex - 1, currentIndex, currentIndex + 1]
+    .filter((index) => index >= 0 && index < spreadCount);
+}
+
+/**
+ * Async image callbacks may arrive after a resource leaves and re-enters the
+ * renderer window. Membership alone cannot distinguish that retired request
+ * from the replacement, so both the desired set and the request identity must
+ * still match before a callback may mutate scene state.
+ */
+export function resourceAttemptIsCurrent<T>(
+  resourceId: string,
+  desiredIds: ReadonlySet<string>,
+  attempt: T,
+  activeAttempts: ReadonlyMap<string, T>,
+) {
+  return desiredIds.has(resourceId) && activeAttempts.get(resourceId) === attempt;
+}
+
+/** A retired renderer may fail after another scene has already committed. */
+export function sceneFailureMatches(activeSceneKey: string | null, failedSceneKey: string | null) {
+  return Boolean(activeSceneKey && failedSceneKey === activeSceneKey);
 }
 
 export function sceneAssetsReadyForEvidence(

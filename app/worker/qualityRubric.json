@@ -1,8 +1,8 @@
 {
   "id": "apertale-premium-book-quality",
-  "version": 1,
+  "version": 2,
   "maxReviewRounds": 2,
-  "maxBookUploadedAssets": 49,
+  "maxBookUploadedAssets": 50,
   "spreadAssetPolicies": {
     "illustrated-storybook": {
       "separation": "inpainted-clean-plate",
@@ -29,9 +29,9 @@
     },
     {
       "id": "spread-composition",
-      "label": "2:1 spread composition",
+      "label": "1.62:1 stage composition",
       "mode": "visual",
-      "description": "Each spread reads as one intentional 2:1 composition across the gutter without accidental dead zones or collisions."
+      "description": "Each spread reads as one intentional composition on the approximately 1.62:1 stage across the gutter without accidental dead zones or collisions."
     },
     {
       "id": "text-safety-readability",

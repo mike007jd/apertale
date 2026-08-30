@@ -142,6 +142,10 @@ export const ring = {
   neutral: { day: "0 0 0 3px rgb(25 27 24 / .12)", night: "0 0 0 3px rgb(247 240 227 / .14)" },
   accent: { day: "0 0 0 3px var(--accent-soft)", night: "0 0 0 3px var(--accent-soft)" },
   ok: { day: "0 0 0 3px rgb(71 168 121 / .16)", night: "0 0 0 3px rgb(107 168 143 / .18)" },
+  marker: {
+    day: "0 0 0 4px color-mix(in srgb, var(--marker-color) 35%, transparent)",
+    night: "0 0 0 4px color-mix(in srgb, var(--marker-color) 42%, transparent)",
+  },
   /** Drawn inside the box, for a selected option that must not grow. */
   "inset-accent": {
     day: "inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent)",

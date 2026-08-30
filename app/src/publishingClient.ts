@@ -1,9 +1,18 @@
 import { getStoredAssetBlob, isStoredAssetId } from "./assetStore";
-import { listStoredProjectAssetIds } from "./projectArtifact";
+import {
+  bookLifecycleLockManager,
+  bookLifecycleLockName,
+  storedLibraryDocumentMatches,
+} from "./bookLifecycle";
+import { listStoredPublishedAssetIds } from "./projectArtifact";
 import { assertPublishableQuality, type QualityReport } from "./qualityContract";
 import type { DocumentState } from "./types";
 
-type PublicationStatus = "draft" | "publishing" | "published" | "revoked";
+type PublicationStatus = "draft" | "publishing" | "published" | "revoked" | "deleting";
+type RemotePublicationStatus = PublicationStatus | "deleted";
+type RemoteRecordResolution =
+  | { kind: "owned"; status: RemotePublicationStatus }
+  | { kind: "definitely-not-owned"; error: PublicationError };
 
 export type PublicationRecord = {
   documentId: string;
@@ -22,12 +31,14 @@ const STORAGE_PREFIX = "apertale.publication.v1:";
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f-]{27,35}$/i;
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
-const STATUSES = new Set<PublicationStatus>(["draft", "publishing", "published", "revoked"]);
+const STATUSES = new Set<PublicationStatus>(["draft", "publishing", "published", "revoked", "deleting"]);
+const REMOTE_STATUSES = new Set<RemotePublicationStatus>([...STATUSES, "deleted"]);
 
 type StoredPublicationRecord = PublicationRecord & {
   bookId: string;
   manageToken: string;
   uploadedAssetIds: string[];
+  attemptAssetIds?: string[];
   shareToken?: string;
 };
 
@@ -45,16 +56,40 @@ export class PublicationError extends Error {
   }
 }
 
+class PublicationIntentCleanupError extends Error {
+  readonly originalError: unknown;
+  readonly documentId: string;
+  readonly expectedRaw: string;
+
+  constructor(originalError: unknown, documentId: string, expectedRaw: string) {
+    super("A newly created publication intent must be cleaned up under its lifecycle lock.");
+    this.name = "PublicationIntentCleanupError";
+    this.originalError = originalError;
+    this.documentId = documentId;
+    this.expectedRaw = expectedRaw;
+  }
+}
+
 export function getPublicationRecord(documentId: string): PublicationRecord | null {
   const stored = readStoredRecord(documentId);
   return stored ? toPublicRecord(stored) : null;
 }
 
-export function publishDocument(
+export async function publishDocument(
   documentState: DocumentState,
   qualityReport: QualityReport | null | undefined,
   onProgress?: (progress: PublicationProgress) => void,
 ): Promise<PublicationRecord> {
+  const lockManager = requirePublicationLockManager();
+  try {
+    ensureSynchronousPublicationIntent(documentState, qualityReport);
+  } catch (error) {
+    if (!(error instanceof PublicationIntentCleanupError)) throw error;
+    await lockManager.request(bookLifecycleLockName(error.documentId), { mode: "exclusive" }, () => {
+      clearStoredRecordIfRawMatches(error.documentId, error.expectedRaw);
+    });
+    throw error.originalError;
+  }
   return withPublicationLock(documentState.id, () => publishDocumentLocked(documentState, qualityReport, onProgress));
 }
 
@@ -63,7 +98,10 @@ async function publishDocumentLocked(
   qualityReport: QualityReport | null | undefined,
   onProgress?: (progress: PublicationProgress) => void,
 ): Promise<PublicationRecord> {
-  const existing = readStoredRecord(documentState.id);
+  // The record may have been deleted while this call waited for the Web Lock.
+  // Re-establish it synchronously before any blob or network await so creation
+  // undo always sees publication intent throughout the locked workflow.
+  const existing = ensureSynchronousPublicationIntent(documentState, qualityReport, true);
   if (existing?.status === "published") {
     if (existing.publishedRevision === documentState.revision && existing.shareUrl) {
       return toPublicRecord(existing);
@@ -85,17 +123,34 @@ async function publishDocumentLocked(
       });
     }
     onProgress?.({ phase: "publishing", completed: 0, total: 1 });
-    const reconciled = await requestJson<{ status?: string; shareUrl?: string; publishedRevision?: number }>(
-      `/api/books/${encodeURIComponent(record.bookId)}/publish/reconcile`,
-      {
-        method: "POST",
-        headers: {
-          authorization: bearer(record.manageToken),
-          "content-type": "application/json",
+    let reconciled: { status?: string; shareUrl?: string; publishedRevision?: number };
+    try {
+      reconciled = await requestJson<{ status?: string; shareUrl?: string; publishedRevision?: number }>(
+        `/api/books/${encodeURIComponent(record.bookId)}/publish/reconcile`,
+        {
+          method: "POST",
+          headers: {
+            authorization: bearer(record.manageToken),
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ shareToken }),
         },
-        body: JSON.stringify({ shareToken }),
-      },
-    );
+      );
+    } catch (error) {
+      if (!(error instanceof PublicationError) || error.status !== 404) throw error;
+      // A previous replacement deleted the remote attempt but failed before
+      // its new capability reached localStorage. Mark the missing generation
+      // resumable; the current asset plan below will rotate it to a fresh id.
+      record = {
+        ...record,
+        status: "revoked",
+        shareToken: undefined,
+        shareUrl: undefined,
+        publishedRevision: undefined,
+      };
+      persistRecord(record);
+      reconciled = { status: "revoked" };
+    }
     if (reconciled.status === "published") {
       const shareUrl = readSameOriginShareUrl(reconciled.shareUrl, shareToken);
       const publishedRevision = readPublishedRevision(reconciled.publishedRevision);
@@ -132,22 +187,20 @@ async function publishDocumentLocked(
     }
   }
 
-  try {
-    assertPublishableQuality(documentState, qualityReport);
-  } catch {
-    throw new PublicationError(
-      "This revision must pass the Apertale quality check before it can be published.",
-      { code: "quality_blocked", status: 409, retryable: false },
-    );
-  }
+  requirePublishableQuality(documentState, qualityReport);
 
   const blobs = await loadRequiredBlobs(documentState);
   const localAssetIds = [...blobs.keys()];
+  const attemptAssetIds = canonicalAssetIds(localAssetIds);
 
-  if (!record) {
-    record = createDraftRecord(documentState.id);
-    persistRecord(record);
+  if (record && (
+    record.status === "revoked"
+    || record.status === "deleting"
+    || !sameAssetPlan(record.attemptAssetIds, attemptAssetIds)
+  )) {
+    record = await replaceRemoteAttempt(record, attemptAssetIds);
   }
+
   if (record.status === "draft") {
     onProgress?.({ phase: "creating", completed: 0, total: 1 });
     await ensureDraftRecord(record);
@@ -161,7 +214,8 @@ async function publishDocumentLocked(
     shareToken,
     shareUrl: undefined,
     publishedRevision: undefined,
-    uploadedAssetIds: uniqueAssetIds(record.uploadedAssetIds),
+    attemptAssetIds,
+    uploadedAssetIds: uniqueAssetIds(record.uploadedAssetIds).filter((assetId) => attemptAssetIds.includes(assetId)),
   };
   persistRecord(record);
 
@@ -219,16 +273,29 @@ export async function revokePublication(documentId: string): Promise<Publication
 
 async function revokePublicationLocked(documentId: string): Promise<PublicationRecord> {
   const record = requireStoredRecord(documentId);
+  const shareToken = readShareToken(record.shareToken);
+  if (!shareToken) {
+    throw new PublicationError("The saved publication has no valid share capability to revoke.", {
+      code: "missing_capability",
+      status: 409,
+      retryable: false,
+    });
+  }
   await requestJson(`/api/books/${encodeURIComponent(record.bookId)}/revoke`, {
     method: "POST",
-    headers: { authorization: bearer(record.manageToken) },
+    headers: {
+      authorization: bearer(record.manageToken),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ shareToken }),
   });
   const revoked: StoredPublicationRecord = {
     documentId: record.documentId,
     bookId: record.bookId,
     manageToken: record.manageToken,
     status: "revoked",
-    uploadedAssetIds: uniqueAssetIds(record.uploadedAssetIds),
+    uploadedAssetIds: [],
+    attemptAssetIds: undefined,
   };
   persistRecord(revoked);
   return toPublicRecord(revoked);
@@ -239,16 +306,50 @@ export async function deletePublication(documentId: string): Promise<void> {
 }
 
 async function deletePublicationLocked(documentId: string): Promise<void> {
-  const record = requireStoredRecord(documentId);
+  const record: StoredPublicationRecord = {
+    ...requireStoredRecord(documentId),
+    status: "deleting",
+    shareToken: undefined,
+    shareUrl: undefined,
+    publishedRevision: undefined,
+  };
+  // Persist the terminal intent before the request. If delivery becomes
+  // uncertain, any later publish rotates to a new server generation instead
+  // of racing the delayed DELETE against a reused id.
+  const deletingRaw = persistRecord(record);
+  const remote = await ensureRemoteRecord(record);
+  if (remote.kind === "definitely-not-owned") {
+    clearStoredRecordIfRawMatches(documentId, deletingRaw);
+    return;
+  }
+  if (remote.status !== "deleted") {
+    await deleteRemoteAttempt(record);
+  }
+  clearStoredRecordIfRawMatches(documentId, deletingRaw);
+}
+
+async function deleteRemoteAttempt(record: StoredPublicationRecord) {
   const response = await apiRequest(`/api/books/${encodeURIComponent(record.bookId)}`, {
     method: "DELETE",
     headers: { authorization: bearer(record.manageToken) },
   });
-  if (response.status === 204 || response.status === 404) {
-    clearStoredRecord(documentId);
+  if (response.status === 204) {
     return;
   }
   throw await errorFromResponse(response);
+}
+
+async function replaceRemoteAttempt(record: StoredPublicationRecord, attemptAssetIds: string[]) {
+  const replacement = createDraftRecord(record.documentId, attemptAssetIds);
+  const remote = await ensureRemoteRecord(record);
+  if (remote.kind === "owned" && remote.status !== "deleted") {
+    await deleteRemoteAttempt(record);
+  }
+  // Replace the capability in one write. Keeping the old record until the
+  // remote delete succeeds leaves every interruption resumable and gives
+  // creation undo a publication intent with no empty-key race window.
+  persistRecord(replacement);
+  return replacement;
 }
 
 function storageKey(documentId: string) {
@@ -256,7 +357,11 @@ function storageKey(documentId: string) {
 }
 
 async function withPublicationLock<T>(documentId: string, work: () => Promise<T>): Promise<T> {
-  const lockManager = globalThis.navigator?.locks;
+  return requirePublicationLockManager().request(bookLifecycleLockName(documentId), { mode: "exclusive" }, work);
+}
+
+function requirePublicationLockManager() {
+  const lockManager = bookLifecycleLockManager();
   if (!lockManager) {
     throw new PublicationError("This browser cannot safely coordinate publication across tabs.", {
       code: "locking_unavailable",
@@ -264,7 +369,56 @@ async function withPublicationLock<T>(documentId: string, work: () => Promise<T>
       retryable: false,
     });
   }
-  return lockManager.request(`apertale:publication:${documentId}`, { mode: "exclusive" }, work);
+  return lockManager;
+}
+
+function requirePublishableQuality(
+  documentState: DocumentState,
+  qualityReport: QualityReport | null | undefined,
+) {
+  try {
+    assertPublishableQuality(documentState, qualityReport);
+  } catch {
+    throw new PublicationError(
+      "This revision must pass the Apertale quality check before it can be published.",
+      { code: "quality_blocked", status: 409, retryable: false },
+    );
+  }
+}
+
+function requireCurrentLibraryDocument(documentState: DocumentState) {
+  if (!storedLibraryDocumentMatches(documentState)) {
+    throw new PublicationError(
+      "This book is no longer the current saved library revision. Reopen it before publishing.",
+      { code: "book_unavailable", status: 409, retryable: false },
+    );
+  }
+}
+
+function ensureSynchronousPublicationIntent(
+  documentState: DocumentState,
+  qualityReport: QualityReport | null | undefined,
+  ownsLifecycleLock = false,
+) {
+  requireCurrentLibraryDocument(documentState);
+  const existing = readStoredRecord(documentState.id);
+  if (existing) return existing;
+  requirePublishableQuality(documentState, qualityReport);
+  const created = createDraftRecord(
+    documentState.id,
+    canonicalAssetIds(listStoredPublishedAssetIds(documentState)),
+  );
+  const createdRaw = persistRecord(created);
+  try {
+    requireCurrentLibraryDocument(documentState);
+  } catch (error) {
+    if (ownsLifecycleLock) {
+      clearStoredRecordIfRawMatches(created.documentId, createdRaw);
+      throw error;
+    }
+    throw new PublicationIntentCleanupError(error, created.documentId, createdRaw);
+  }
+  return created;
 }
 
 function toPublicRecord(record: StoredPublicationRecord): PublicationRecord {
@@ -279,6 +433,17 @@ function toPublicRecord(record: StoredPublicationRecord): PublicationRecord {
 
 function uniqueAssetIds(values: string[] | undefined) {
   return [...new Set((values ?? []).filter(isStoredAssetId))];
+}
+
+function canonicalAssetIds(values: string[] | undefined) {
+  return uniqueAssetIds(values).sort();
+}
+
+function sameAssetPlan(left: string[] | undefined, right: string[]) {
+  const normalized = canonicalAssetIds(left);
+  return Array.isArray(left)
+    && normalized.length === right.length
+    && normalized.every((assetId, index) => assetId === right[index]);
 }
 
 function tokenFromBytes(bytes: Uint8Array) {
@@ -377,6 +542,9 @@ function readStoredRecord(documentId: string): StoredPublicationRecord | null {
       uploadedAssetIds: Array.isArray(parsed.uploadedAssetIds)
         ? uniqueAssetIds(parsed.uploadedAssetIds.filter((assetId): assetId is string => typeof assetId === "string"))
         : [],
+      attemptAssetIds: Array.isArray(parsed.attemptAssetIds)
+        ? canonicalAssetIds(parsed.attemptAssetIds.filter((assetId): assetId is string => typeof assetId === "string"))
+        : undefined,
     };
   } catch {
     return null;
@@ -395,18 +563,27 @@ function requireStoredRecord(documentId: string): StoredPublicationRecord {
   return record;
 }
 
+function serializeStoredRecord(record: StoredPublicationRecord) {
+  return JSON.stringify({
+    documentId: record.documentId,
+    bookId: record.bookId,
+    manageToken: record.manageToken,
+    status: record.status,
+    shareToken: record.shareToken,
+    shareUrl: record.shareUrl,
+    publishedRevision: record.publishedRevision,
+    uploadedAssetIds: uniqueAssetIds(record.uploadedAssetIds),
+    attemptAssetIds: record.attemptAssetIds ? canonicalAssetIds(record.attemptAssetIds) : undefined,
+  } satisfies StoredPublicationRecord);
+}
+
 function persistRecord(record: StoredPublicationRecord) {
   try {
-    localStorage.setItem(storageKey(record.documentId), JSON.stringify({
-      documentId: record.documentId,
-      bookId: record.bookId,
-      manageToken: record.manageToken,
-      status: record.status,
-      shareToken: record.shareToken,
-      shareUrl: record.shareUrl,
-      publishedRevision: record.publishedRevision,
-      uploadedAssetIds: uniqueAssetIds(record.uploadedAssetIds),
-    } satisfies StoredPublicationRecord));
+    const raw = serializeStoredRecord(record);
+    const key = storageKey(record.documentId);
+    localStorage.setItem(key, raw);
+    if (localStorage.getItem(key) !== raw) throw new Error("Publication record write was not durable.");
+    return raw;
   } catch {
     throw new PublicationError("The creator capability could not be saved in this browser.", {
       code: "storage_unavailable",
@@ -416,9 +593,12 @@ function persistRecord(record: StoredPublicationRecord) {
   }
 }
 
-function clearStoredRecord(documentId: string) {
+function clearStoredRecordIfRawMatches(documentId: string, expectedRaw: string) {
   try {
-    localStorage.removeItem(storageKey(documentId));
+    const key = storageKey(documentId);
+    if (localStorage.getItem(key) !== expectedRaw) return false;
+    localStorage.removeItem(key);
+    return localStorage.getItem(key) === null;
   } catch {
     throw new PublicationError("The local creator record could not be cleared.", {
       code: "storage_unavailable",
@@ -429,7 +609,7 @@ function clearStoredRecord(documentId: string) {
 }
 
 async function loadRequiredBlobs(documentState: DocumentState) {
-  const assetIds = listStoredProjectAssetIds(documentState);
+  const assetIds = listStoredPublishedAssetIds(documentState);
   const blobs = new Map<string, Blob>();
   const missing: string[] = [];
   for (const assetId of assetIds) {
@@ -457,7 +637,7 @@ async function loadRequiredBlobs(documentState: DocumentState) {
   return blobs;
 }
 
-function createDraftRecord(documentId: string): StoredPublicationRecord {
+function createDraftRecord(documentId: string, attemptAssetIds: string[]): StoredPublicationRecord {
   const bookId = crypto.randomUUID();
   const manageToken = tokenFromBytes(crypto.getRandomValues(new Uint8Array(32)));
   if (!BOOK_ID_PATTERN.test(bookId) || !TOKEN_PATTERN.test(manageToken)) {
@@ -472,25 +652,57 @@ function createDraftRecord(documentId: string): StoredPublicationRecord {
     manageToken,
     status: "draft",
     uploadedAssetIds: [],
+    attemptAssetIds: canonicalAssetIds(attemptAssetIds),
   };
 }
 
 async function ensureDraftRecord(record: StoredPublicationRecord) {
-  const payload = await requestJson<{ bookId?: string; status?: string }>("/api/books", {
-    method: "POST",
-    headers: {
-      authorization: bearer(record.manageToken),
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ bookId: record.bookId }),
-  });
-  if (payload.bookId !== record.bookId || payload.status !== "draft") {
+  const remote = await ensureRemoteRecord(record);
+  if (remote.kind === "definitely-not-owned") {
+    clearStoredRecordIfRawMatches(record.documentId, serializeStoredRecord(record));
+    throw remote.error;
+  }
+  if (remote.status !== "draft") {
     throw new PublicationError("The publishing service returned an invalid draft record.", {
       code: "invalid_draft",
       status: 502,
       retryable: true,
     });
   }
+}
+
+async function ensureRemoteRecord(record: StoredPublicationRecord): Promise<RemoteRecordResolution> {
+  let payload: { bookId?: string; status?: string };
+  try {
+    payload = await requestJson<{ bookId?: string; status?: string }>("/api/books", {
+      method: "POST",
+      headers: {
+        authorization: bearer(record.manageToken),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ bookId: record.bookId }),
+    });
+  } catch (error) {
+    if (error instanceof PublicationError && (
+      (error.status === 409 && error.code === "book_exists")
+      || (error.status === 429 && (error.code === "creation_limit" || error.code === "creation_rate"))
+    )) {
+      return { kind: "definitely-not-owned", error };
+    }
+    throw error;
+  }
+  if (
+    payload.bookId !== record.bookId
+    || typeof payload.status !== "string"
+    || !REMOTE_STATUSES.has(payload.status as RemotePublicationStatus)
+  ) {
+    throw new PublicationError("The publishing service returned an invalid draft record.", {
+      code: "invalid_draft",
+      status: 502,
+      retryable: true,
+    });
+  }
+  return { kind: "owned", status: payload.status as RemotePublicationStatus };
 }
 
 async function uploadAsset(record: StoredPublicationRecord, assetId: string, blob: Blob) {
@@ -571,6 +783,6 @@ async function errorFromResponse(response: Response) {
   return new PublicationError(message, {
     code,
     status: response.status,
-    retryable: response.status === 429 || response.status === 503 || (response.status === 409 && code === "delete_conflict"),
+    retryable: response.status === 429 || response.status >= 500 || (response.status === 409 && code === "delete_conflict"),
   });
 }

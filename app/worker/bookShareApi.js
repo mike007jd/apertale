@@ -1,16 +1,15 @@
 import qualityRubric from "./qualityRubric.json" with { type: "json" };
 import bundledAssetCatalog from "./bundledAssetCatalog.json" with { type: "json" };
 
-const MANAGEABLE_STATUSES = new Set(["draft", "revoked"]);
 const ASSET_ID_PATTERN = /^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f-]{27,35}$/i;
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const MAX_ASSET_BYTES = 1_500_000;
 const MAX_MANIFEST_BYTES = 1_000_000;
-// Derived from the rubric so the client asset directory and this upload quota
-// advertise the same bound: one cover plus, per spread, an original composite,
-// a final base, and two foreground layers at the 12-spread maximum.
+// Derived from the rubric so the client publication plan and this upload quota
+// advertise the same bound for reader-visible cover, final-base, layer, and
+// frame assets. Author-only source provenance is never uploaded.
 const MAX_ASSETS = qualityRubric.maxBookUploadedAssets;
 const MAX_SITE_BOOKS = 2_000;
 const MAX_BOOKS_PER_WINDOW = 40;
@@ -183,8 +182,17 @@ function validateElement(element, spreadNumber, references, elementIds) {
     if (!Array.isArray(element.frameAssetIds) || element.frameAssetIds.length < 2 || element.frameAssetIds.length > 6) {
       throw new HttpError(400, "invalid_manifest", message);
     }
+    if (PROCEDURAL_ASSET_PATTERN.test(element.assetId)) {
+      throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} procedural markers cannot carry image sequences.`);
+    }
+    if (element.frameAssetIds[0] !== element.assetId) {
+      throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} must use each sequence's resting frame as assetId.`);
+    }
     element.frameAssetIds.forEach((assetId) => {
       if (typeof assetId !== "string") throw new HttpError(400, "invalid_manifest", message);
+      if (PROCEDURAL_ASSET_PATTERN.test(assetId)) {
+        throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} image sequences cannot contain procedural markers.`);
+      }
       assertAssetReference(assetId, references);
     });
   }
@@ -206,6 +214,7 @@ function validateManifest(manifest) {
 
   const references = new Set();
   const spreadIds = new Set();
+  const elementIds = new Set();
   assertAssetReference(manifest.coverAssetId, references);
   assertAssetReference(manifest.coverTextureUrl, references);
   manifest.spreads.forEach((spread, order) => {
@@ -232,20 +241,67 @@ function validateManifest(manifest) {
       assertAssetReference(spread.artwork.sourceAssetId, references);
       assertAssetReference(spread.artwork.personalSourceAssetId, references);
     }
-    const elementIds = new Set();
     spread.elements.forEach((element) => validateElement(element, order + 1, references, elementIds));
   });
+  validateBookAssetReferences(manifest);
   return references;
+}
+
+/** Mirrors the client's pure cross-resource contract at the publish boundary. */
+function validateBookAssetReferences(manifest) {
+  const coverAssetId = manifest.coverAssetId ?? manifest.coverTextureUrl;
+  const backgroundOwner = new Map();
+  const backgroundIds = new Set();
+
+  manifest.spreads.forEach((spread, spreadIndex) => {
+    if (!spread.artwork) return;
+    const spreadNumber = spreadIndex + 1;
+    const { sourceAssetId, cleanPlateAssetId, separation } = spread.artwork;
+    if (sourceAssetId && sourceAssetId === cleanPlateAssetId && separation !== "preserved-photo-layout") {
+      throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} must keep its original composite separate from its final clean plate.`);
+    }
+    [sourceAssetId, cleanPlateAssetId].filter(Boolean).forEach((assetId) => {
+      if (assetId === coverAssetId) {
+        throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} cannot reuse the dedicated cover as interior artwork.`);
+      }
+      const owner = backgroundOwner.get(assetId);
+      if (typeof owner === "number" && owner !== spreadIndex) {
+        throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} must use purpose-built background artwork.`);
+      }
+      backgroundOwner.set(assetId, spreadIndex);
+      backgroundIds.add(assetId);
+    });
+  });
+
+  manifest.spreads.forEach((spread, spreadIndex) => {
+    const spreadNumber = spreadIndex + 1;
+    const foregroundOwner = new Map();
+    spread.elements.filter((element) => !PROCEDURAL_ASSET_PATTERN.test(element.assetId)).forEach((element, layerIndex) => {
+      const renderedAssetIds = element.frameAssetIds?.length ? element.frameAssetIds : [element.assetId];
+      new Set(renderedAssetIds).forEach((assetId) => {
+        const owner = foregroundOwner.get(assetId);
+        if (typeof owner === "number" && owner !== layerIndex) {
+          throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} foreground layers must use distinct final assets.`);
+        }
+        foregroundOwner.set(assetId, layerIndex);
+        if (assetId === coverAssetId) {
+          throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} cannot reuse its cover as a foreground layer.`);
+        }
+        if (backgroundIds.has(assetId)) {
+          throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} cannot reuse background artwork as a foreground layer.`);
+        }
+      });
+    });
+  });
 }
 
 function hasMeaningfulInteraction(element) {
   return Boolean(
-    element.motion
-    || (element.interaction && (
+    element.interaction && (
       element.interaction.hover !== "none"
       || element.interaction.focus !== "none"
       || element.interaction.reveal?.kind !== "none"
-    )),
+    ),
   );
 }
 
@@ -289,7 +345,8 @@ function validateCreationBrief(manifest, brief, blocked) {
 
 function validateCreationAssetPolicy(manifest, brief, blocked) {
   const { policy, sourceIds } = validateCreationBrief(manifest, brief, blocked);
-  if (sourceIds.has(manifest.coverAssetId)) blocked("A personal source photo cannot replace the dedicated cover.");
+  const effectiveCoverAssetId = manifest.coverAssetId ?? manifest.coverTextureUrl;
+  if (sourceIds.has(effectiveCoverAssetId)) blocked("A personal source photo cannot replace the dedicated cover.");
   manifest.spreads.forEach((spread, order) => {
     const artwork = spread.artwork;
     if (!artwork || artwork.separation !== policy.separation) blocked(`Spread ${order + 1} does not match the ready creation asset policy.`);
@@ -350,7 +407,7 @@ function validateQualityAttestation(manifest, quality) {
   const blocked = (message) => { throw new HttpError(409, "quality_blocked", message); };
   if (!isRecord(quality)) blocked("A completed quality review is required before publishing.");
   if (
-    quality.contractVersion !== 1
+    quality.contractVersion !== 2
     || quality.rubricVersion !== qualityRubric.version
     || quality.maxRounds !== qualityRubric.maxReviewRounds
     || !isRecord(quality.creationBrief)
@@ -415,8 +472,35 @@ function assetHref(shareToken, assetId) {
   return `/api/shared/${shareToken}/assets/${encodeURIComponent(assetId)}`;
 }
 
+function publicManifest(manifest) {
+  const published = structuredClone(manifest);
+  if (published.coverAssetId) delete published.coverTextureUrl;
+  published.spreads?.forEach((spread) => {
+    spread.elements?.forEach((element) => {
+      if (
+        PROCEDURAL_ASSET_PATTERN.test(element.assetId)
+        || element.frameAssetIds?.some((assetId) => PROCEDURAL_ASSET_PATTERN.test(assetId))
+      ) delete element.frameAssetIds;
+    });
+    if (!spread.artwork) return;
+    const usesGroundedComposite = spread.textureUrl
+      && spread.textureUrl === spread.artwork.sourceAssetId
+      && spread.elements?.every((element) => PROCEDURAL_ASSET_PATTERN.test(element.assetId));
+    const renderedBase = usesGroundedComposite
+      ? spread.textureUrl
+      : spread.artwork.cleanPlateAssetId ?? spread.textureUrl;
+    if (renderedBase) spread.artwork.cleanPlateAssetId = renderedBase;
+    delete spread.textureUrl;
+    delete spread.artwork.sourceAssetId;
+    delete spread.artwork.personalSourceAssetId;
+  });
+  return published;
+}
+
 function hydrateManifest(manifest, shareToken) {
-  const hydrated = structuredClone(manifest);
+  // Sanitizing here also protects links published before private authoring
+  // provenance was split from the reader manifest.
+  const hydrated = publicManifest(manifest);
   const hydrate = (value) => ASSET_ID_PATTERN.test(value ?? "") ? assetHref(shareToken, value) : value;
   if (hydrated.coverAssetId) {
     hydrated.coverTextureUrl = hydrate(hydrated.coverAssetId);
@@ -427,8 +511,6 @@ function hydrateManifest(manifest, shareToken) {
     spread.textureUrl = hydrate(spread.textureUrl);
     if (spread.artwork) {
       spread.artwork.cleanPlateAssetId = hydrate(spread.artwork.cleanPlateAssetId);
-      spread.artwork.sourceAssetId = hydrate(spread.artwork.sourceAssetId);
-      spread.artwork.personalSourceAssetId = hydrate(spread.artwork.personalSourceAssetId);
     }
     spread.elements.forEach((element) => {
       element.assetId = hydrate(element.assetId);
@@ -489,6 +571,9 @@ export function createBookShareApi({
       maxBooksPerWindow,
       windowStart,
     });
+    if (outcome === "deleted") {
+      return json({ ok: true, bookId: id, status: "deleted" });
+    }
     if (outcome === "conflict") {
       throw new HttpError(409, "book_exists", "That book id already belongs to another creator capability.");
     }
@@ -512,8 +597,8 @@ export function createBookShareApi({
     const assetId = decodePathComponent(rawAssetId, "The asset was not found.");
     if (!ASSET_ID_PATTERN.test(assetId)) throw new HttpError(400, "invalid_asset_id", "The asset id is invalid.");
     const { book, manageTokenHash } = await managedBook(request, bookId);
-    if (!MANAGEABLE_STATUSES.has(book.status)) {
-      throw new HttpError(409, "invalid_state", "Only a draft or revoked book accepts new assets.");
+    if (book.status !== "draft") {
+      throw new HttpError(409, "invalid_state", "Only a fresh draft accepts new assets; create a new draft to republish.");
     }
     const currentAssets = await repository.listAssetIds(bookId);
     if (currentAssets.includes(assetId)) {
@@ -554,7 +639,7 @@ export function createBookShareApi({
       });
       if (!inserted) {
         const current = await repository.findManagedBook(bookId, manageTokenHash);
-        if (current && MANAGEABLE_STATUSES.has(current.status)) {
+        if (current?.status === "draft") {
           const assets = await repository.listAssetIds(bookId);
           if (assets.includes(assetId)) {
             throw new HttpError(409, "asset_exists", "Asset ids are immutable; upload changed content with a new asset id.");
@@ -563,7 +648,7 @@ export function createBookShareApi({
             throw new HttpError(409, "asset_limit", `A book may contain at most ${MAX_ASSETS} uploaded assets.`);
           }
         }
-        throw new HttpError(409, "invalid_state", "Only a draft or revoked book accepts new assets.");
+        throw new HttpError(409, "invalid_state", "Only a fresh draft accepts new assets; create a new draft to republish.");
       }
     } catch (error) {
       await objects.delete(objectKey);
@@ -584,13 +669,19 @@ export function createBookShareApi({
 
     if (book.status === "published") {
       if (book.share_token_hash !== shareTokenHash || !Number.isSafeInteger(book.revision)) {
-        throw new HttpError(409, "invalid_state", "Only a draft or revoked book can be published.");
+        throw new HttpError(409, "invalid_state", "Only a fresh draft generation can be published.");
       }
       return json({ ok: true, bookId, status: "published", shareUrl, publishedRevision: book.revision });
     }
 
-    if (!MANAGEABLE_STATUSES.has(book.status)) {
-      throw new HttpError(409, "invalid_state", "Only a draft or revoked book can be published.");
+    if (book.status === "revoked" && await repository.isRetiredShareToken(shareTokenHash)) {
+      throw new HttpError(409, "revoked_share", "A revoked share capability cannot be published again.");
+    }
+    if (book.status !== "draft") {
+      throw new HttpError(409, "invalid_state", "Only a fresh draft can be published.");
+    }
+    if (Number(book.asset_cleanup_pending) === 1) {
+      throw new HttpError(409, "invalid_state", "Finish revoking the previous publication before publishing again.");
     }
     if (await repository.isRetiredShareToken(shareTokenHash)) {
       throw new HttpError(409, "revoked_share", "A revoked share capability cannot be published again.");
@@ -615,7 +706,7 @@ export function createBookShareApi({
       throw new HttpError(409, "publish_conflict", "Another publication attempt already owns this book state.");
     }
     const manifest = payload?.manifest;
-    const references = validateManifest(manifest);
+    validateManifest(manifest);
     // One shared creation-asset policy traversal: the deterministic publish
     // checks and the stored attestation validate the same (manifest, brief)
     // pair, so a second identical pass would only duplicate work.
@@ -623,6 +714,8 @@ export function createBookShareApi({
     validateCreationAssetPolicy(manifest, payload?.quality?.creationBrief, qualityBlocked);
     validateDeterministicPublishQuality(manifest);
     validateQualityAttestation(manifest, payload?.quality);
+    const publishedManifest = publicManifest(manifest);
+    const references = validateManifest(publishedManifest);
     const uploaded = new Set(await repository.listAssetIds(bookId));
     const missing = [...references].filter((assetId) => !uploaded.has(assetId));
     if (missing.length > 0) {
@@ -634,7 +727,7 @@ export function createBookShareApi({
       shareTokenHash,
       title: manifest.title.trim(),
       revision: manifest.revision,
-      manifestJson: JSON.stringify(manifest),
+      manifestJson: JSON.stringify(publishedManifest),
       now: now(),
     });
     if (!published) throw new HttpError(409, "publish_conflict", "The book changed before it could be published.");
@@ -667,8 +760,14 @@ export function createBookShareApi({
         publishedRevision: book.revision,
       });
     }
-    if (!MANAGEABLE_STATUSES.has(book.status)) {
+    if (book.status === "revoked") {
+      return json({ ok: true, bookId, status: "revoked" });
+    }
+    if (book.status !== "draft") {
       throw new HttpError(409, "invalid_state", "This publication cannot be resumed from its current state.");
+    }
+    if (Number(book.asset_cleanup_pending) === 1) {
+      return json({ ok: true, bookId, status: "revoked" });
     }
     if (await repository.isRetiredShareToken(shareTokenHash)) {
       return json({ ok: true, bookId, status: "revoked" });
@@ -716,7 +815,7 @@ export function createBookShareApi({
     const asset = await repository.findPublishedAsset(await hashToken(shareToken), assetId);
     if (!asset?.manifest_json) throw new HttpError(404, "not_found", "The shared asset was not found.");
     try {
-      const currentReferences = validateManifest(JSON.parse(asset.manifest_json));
+      const currentReferences = validateManifest(publicManifest(JSON.parse(asset.manifest_json)));
       if (!currentReferences.has(assetId)) throw new Error("unreferenced asset");
     } catch {
       // Assets left behind by an older revision remain private after republish.
@@ -738,23 +837,74 @@ export function createBookShareApi({
 
   async function revoke(request, bookId) {
     const { book, manageTokenHash } = await managedBook(request, bookId);
+    const payload = await readJsonBody(request);
+    const shareToken = payload?.shareToken;
+    if (typeof shareToken !== "string" || !TOKEN_PATTERN.test(shareToken)) {
+      throw new HttpError(400, "invalid_share_token", "The published share token is required for revocation.");
+    }
+    const shareTokenHash = await hashToken(shareToken);
     // Revocation retains the last public token hash as a tombstone and clears
     // any in-flight publish claim. A retry is therefore idempotent without
     // allowing the revoked URL to become public again.
     if (book.status !== "published" && book.status !== "revoked") {
       throw new HttpError(409, "invalid_state", "Only a published or revoked book can be revoked.");
     }
-    const revoked = await repository.revokeBook({ id: bookId, manageTokenHash, now: now() });
-    if (!revoked) throw new HttpError(409, "revoke_conflict", "The book changed before it could be revoked.");
+    if (book.share_token_hash !== shareTokenHash) {
+      if (await repository.isRetiredShareTokenForBook(shareTokenHash, bookId)) {
+        return json({ ok: true, bookId, status: "revoked" });
+      }
+      throw new HttpError(409, "revoke_conflict", "The publication targeted for revocation is no longer current.");
+    }
+    if (book.status === "revoked" && Number(book.asset_cleanup_pending) === 0) {
+      return json({ ok: true, bookId, status: "revoked" });
+    }
+    const revoked = await repository.revokeBook({
+      id: bookId,
+      manageTokenHash,
+      shareTokenHash,
+      now: now(),
+    });
+    if (!revoked) {
+      const current = await repository.findManagedBook(bookId, manageTokenHash);
+      if (
+        (current?.status === "revoked"
+          && Number(current.asset_cleanup_pending) === 0
+          && current.share_token_hash === shareTokenHash)
+        || (
+          current?.share_token_hash !== shareTokenHash
+          && await repository.isRetiredShareTokenForBook(shareTokenHash, bookId)
+        )
+      ) return json({ ok: true, bookId, status: "revoked" });
+      throw new HttpError(409, "revoke_conflict", "The book changed before it could be revoked.");
+    }
+    const assets = await repository.listAssetsForRevocation({ id: bookId, manageTokenHash, shareTokenHash });
+    const objectKeys = [...new Set(assets.map((asset) => asset.object_key).filter(Boolean))];
+    if (objectKeys.length > 0) await objects.delete(objectKeys);
+    if (!await repository.completeRevocation({
+      id: bookId,
+      manageTokenHash,
+      shareTokenHash,
+      now: now(),
+    })) {
+      throw new HttpError(409, "revoke_conflict", "The share link was revoked, but its asset cleanup must be retried.");
+    }
     return json({ ok: true, bookId, status: "revoked" });
   }
 
   async function remove(request, bookId) {
-    const { manageTokenHash } = await managedBook(request, bookId);
+    const manageTokenHash = await hashToken(bearerToken(request));
+    const book = await repository.findManagedBook(bookId, manageTokenHash);
+    if (!book) {
+      const deleted = await repository.findDeletedBook(bookId);
+      if (deleted?.manage_token_hash === manageTokenHash) {
+        return new Response(null, { status: 204, headers: { "cache-control": "private, no-store" } });
+      }
+      throw new HttpError(409, "delete_conflict", "The draft is not visible yet; confirm its creation before retrying deletion.");
+    }
     if (!await repository.markDeleting({ id: bookId, manageTokenHash, now: now() })) {
       throw new HttpError(409, "delete_conflict", "The book changed before deletion began.");
     }
-    const assets = await repository.listAssets(bookId);
+    const assets = await repository.listAssetsForDeletion({ id: bookId, manageTokenHash });
     const objectKeys = [...new Set(assets.map((asset) => asset.object_key).filter(Boolean))];
     if (objectKeys.length > 0) await objects.delete(objectKeys);
     if (!await repository.deleteBook({ id: bookId, manageTokenHash })) {

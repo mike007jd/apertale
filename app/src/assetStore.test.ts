@@ -1,14 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getStoredAssetBlob, isStoredAssetId, storeLocalImages } from "./assetStore";
+import { acquireAssetUrl, getAssetMetadata, getStoredAssetBlob, isStoredAssetId, listAssetMetadata, releaseAssetUrls, storeLocalImages } from "./assetStore";
 
-const imageOptimizer = vi.hoisted(() => ({ optimizeImportedImage: vi.fn() }));
+const imageOptimizer = vi.hoisted(() => ({ analyzeStoredImage: vi.fn(), optimizeImportedImage: vi.fn() }));
 
 vi.mock("./imageOptimizer", () => ({
   MAX_SOURCE_IMAGE_BYTES: 12_000_000,
+  IMAGE_ANALYSIS_VERSION: 1,
+  analyzeStoredImage: imageOptimizer.analyzeStoredImage,
   optimizeImportedImage: imageOptimizer.optimizeImportedImage,
 }));
 
-function installAssetDatabase() {
+const cutoutAnalysis = {
+  version: 1 as const,
+  hasTransparency: true,
+  hasMeaningfulAlpha: true,
+  transparentPixelRatio: 0.6,
+  transparentBorderRatio: 1,
+  visiblePixelRatio: 0.4,
+};
+
+function installAssetDatabase(options: { forbidGetAll?: boolean; getGate?: Promise<void> } = {}) {
   const records = new Map<string, unknown>();
   const database = {
     objectStoreNames: { contains: () => true },
@@ -22,6 +33,44 @@ function installAssetDatabase() {
             (request.onsuccess as (() => void) | undefined)?.();
             (transaction.oncomplete as (() => void) | undefined)?.();
           });
+          return request;
+        },
+        get: (id: string) => {
+          const request: Record<string, unknown> = {};
+          void (options.getGate ?? Promise.resolve()).then(() => {
+            request.result = records.get(id);
+            (request.onsuccess as (() => void) | undefined)?.();
+            (transaction.oncomplete as (() => void) | undefined)?.();
+          });
+          return request;
+        },
+        getAll: () => {
+          if (options.forbidGetAll) throw new Error("getAll must not materialize the blob store");
+          const request: Record<string, unknown> = {};
+          queueMicrotask(() => {
+            request.result = [...records.values()];
+            (request.onsuccess as (() => void) | undefined)?.();
+            (transaction.oncomplete as (() => void) | undefined)?.();
+          });
+          return request;
+        },
+        openCursor: () => {
+          const request: Record<string, unknown> = {};
+          const values = [...records.values()];
+          let index = 0;
+          const advance = () => {
+            if (index >= values.length) {
+              request.result = null;
+              (request.onsuccess as (() => void) | undefined)?.();
+              (transaction.oncomplete as (() => void) | undefined)?.();
+              return;
+            }
+            const value = values[index];
+            index += 1;
+            request.result = { value, continue: () => queueMicrotask(advance) };
+            (request.onsuccess as (() => void) | undefined)?.();
+          };
+          queueMicrotask(advance);
           return request;
         },
       });
@@ -44,11 +93,71 @@ function installAssetDatabase() {
 }
 
 afterEach(() => {
+  releaseAssetUrls();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  imageOptimizer.analyzeStoredImage.mockReset();
   imageOptimizer.optimizeImportedImage.mockReset();
 });
 
 describe("asset store blob access", () => {
+  it("single-flights concurrent URL leases and revokes after the last release", async () => {
+    const records = installAssetDatabase();
+    const id = "asset:12345678-1234-4234-8234-123456789abc";
+    const blob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" });
+    records.set(id, { id, name: "cover.png", type: "image/png", size: blob.size, createdAt: "2026-08-31T00:00:00.000Z", blob });
+    const createObjectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:shared-cover");
+    const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    const [first, second] = await Promise.all([acquireAssetUrl(id), acquireAssetUrl(id)]);
+
+    expect(first.url).toBe("blob:shared-cover");
+    expect(second.url).toBe(first.url);
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    first.release();
+    expect(revokeObjectUrl).not.toHaveBeenCalled();
+    second.release();
+    expect(revokeObjectUrl).toHaveBeenCalledOnce();
+  });
+
+  it("does not let a pending URL acquisition revive a released generation", async () => {
+    let releaseGet!: () => void;
+    const getGate = new Promise<void>((resolve) => { releaseGet = resolve; });
+    const records = installAssetDatabase({ getGate });
+    const id = "asset:22345678-1234-4234-8234-123456789abc";
+    const blob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" });
+    records.set(id, { id, name: "late.png", type: "image/png", size: blob.size, createdAt: "2026-08-31T00:00:00.000Z", blob });
+    const createObjectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:late");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    const pending = acquireAssetUrl(id);
+    await Promise.resolve();
+    releaseAssetUrls();
+    releaseGet();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(createObjectUrl).not.toHaveBeenCalled();
+  });
+
+  it("does not let an old lease release a replacement generation", async () => {
+    const records = installAssetDatabase();
+    const id = "asset:32345678-1234-4234-8234-123456789abc";
+    const blob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" });
+    records.set(id, { id, name: "replace.png", type: "image/png", size: blob.size, createdAt: "2026-08-31T00:00:00.000Z", blob });
+    vi.spyOn(URL, "createObjectURL").mockReturnValueOnce("blob:old").mockReturnValueOnce("blob:new");
+    const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    const oldLease = await acquireAssetUrl(id);
+    releaseAssetUrls();
+    const newLease = await acquireAssetUrl(id);
+    oldLease.release();
+
+    expect(revokeObjectUrl).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenLastCalledWith("blob:old");
+    newLease.release();
+    expect(revokeObjectUrl).toHaveBeenLastCalledWith("blob:new");
+  });
+
   it("treats bundled and procedural references as non-local without opening IndexedDB", async () => {
     expect(isStoredAssetId("/assets/covers/atlas-of-living-wonders-v2.png")).toBe(false);
     expect(isStoredAssetId("procedural:hotspot:amber")).toBe(false);
@@ -72,11 +181,14 @@ describe("asset store blob access", () => {
       name: "cover.png",
       width: 640,
       height: 960,
+      sourceWidth: 640,
+      sourceHeight: 960,
+      analysis: cutoutAnalysis,
       originalSize: 400,
       optimized: false,
     });
 
-    const result = await storeLocalImages([invalid, valid], 1);
+    const result = await storeLocalImages([invalid, valid], { assetUse: "book-art", limit: 1 });
 
     expect(result).toMatchObject({ rejected: 1, failed: 0 });
     expect(result.assets).toHaveLength(1);
@@ -88,7 +200,11 @@ describe("asset store blob access", () => {
       originalSize: 400,
       width: 640,
       height: 960,
+      sourceWidth: 640,
+      sourceHeight: 960,
+      analysis: cutoutAnalysis,
       optimized: false,
+      assetUse: "book-art",
     });
     expect(records.has(result.assets[0].id)).toBe(true);
   });
@@ -101,7 +217,7 @@ describe("asset store blob access", () => {
     } as File));
     imageOptimizer.optimizeImportedImage.mockRejectedValue(new Error("decode failed"));
 
-    await expect(storeLocalImages(broken, 1)).resolves.toEqual({
+    await expect(storeLocalImages(broken, { assetUse: "source-photo", limit: 1 })).resolves.toEqual({
       assets: [],
       rejected: 2,
       failed: 1,
@@ -121,14 +237,84 @@ describe("asset store blob access", () => {
       name: file.name,
       width: 1_536,
       height: 947,
+      sourceWidth: 1_536,
+      sourceHeight: 947,
+      analysis: { ...cutoutAnalysis, hasTransparency: false, hasMeaningfulAlpha: false },
       originalSize: file.size,
       optimized: false,
     }));
 
-    const result = await storeLocalImages(selected, 2);
+    const result = await storeLocalImages(selected, { assetUse: "book-art", limit: 2 });
 
     expect(result).toMatchObject({ rejected: 1, failed: 0 });
     expect(result.assets).toHaveLength(2);
     expect(imageOptimizer.optimizeImportedImage).toHaveBeenCalledTimes(2);
+  });
+
+  it("lazily analyzes and caches legacy metadata only for requested assets", async () => {
+    const records = installAssetDatabase();
+    const id = "asset:12345678-1234-4234-8234-123456789abc";
+    const blob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" });
+    records.set(id, {
+      id,
+      name: "legacy-cutout.png",
+      type: "image/png",
+      size: blob.size,
+      createdAt: "2026-08-28T00:00:00.000Z",
+      blob,
+    });
+    imageOptimizer.analyzeStoredImage.mockResolvedValue({ width: 800, height: 900, analysis: cutoutAnalysis });
+
+    await expect(getAssetMetadata([id])).resolves.toEqual([
+      expect.objectContaining({ id, width: 800, height: 900, analysis: cutoutAnalysis }),
+    ]);
+    await expect(getAssetMetadata([id])).resolves.toEqual([
+      expect.objectContaining({ id, width: 800, height: 900, analysis: cutoutAnalysis }),
+    ]);
+    expect(imageOptimizer.analyzeStoredImage).toHaveBeenCalledTimes(1);
+    expect(records.get(id)).toMatchObject({ width: 800, height: 900, analysis: cutoutAnalysis });
+  });
+
+  it("backfills original canvas dimensions for a verified unoptimized legacy asset without decoding it again", async () => {
+    const records = installAssetDatabase();
+    const id = "asset:12345678-1234-4234-8234-123456789abd";
+    const blob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" });
+    records.set(id, {
+      id,
+      name: "legacy-original.png",
+      type: "image/png",
+      size: blob.size,
+      createdAt: "2026-08-28T00:00:00.000Z",
+      blob,
+      width: 1_536,
+      height: 947,
+      analysis: cutoutAnalysis,
+      optimized: false,
+    });
+
+    await expect(getAssetMetadata([id])).resolves.toEqual([
+      expect.objectContaining({ id, sourceWidth: 1_536, sourceHeight: 947 }),
+    ]);
+    expect(imageOptimizer.analyzeStoredImage).not.toHaveBeenCalled();
+    expect(records.get(id)).toMatchObject({ sourceWidth: 1_536, sourceHeight: 947 });
+  });
+
+  it("lists only bounded recent metadata without materializing every stored blob", async () => {
+    const records = installAssetDatabase({ forbidGetAll: true });
+    const blob = new Blob([new Uint8Array(1_000_000)], { type: "image/png" });
+    const ids = [1, 2, 3].map((serial) => `asset:${serial.toString().padStart(8, "0")}-1234-4234-8234-123456789abc`);
+    ids.forEach((id, index) => records.set(id, {
+      id,
+      name: `${index}.png`,
+      type: "image/png",
+      size: blob.size,
+      createdAt: `2026-08-${String(28 + index).padStart(2, "0")}T00:00:00.000Z`,
+      blob,
+    }));
+
+    const metadata = await listAssetMetadata(2);
+
+    expect(metadata.map((asset) => asset.id)).toEqual([ids[2], ids[1]]);
+    expect(metadata.every((asset) => !("blob" in asset))).toBe(true);
   });
 });

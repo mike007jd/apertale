@@ -182,6 +182,97 @@ test("D1 creation-rate evidence survives permanent book deletion", async (contex
   }), "rate_limit");
 });
 
+test("D1 deletion makes one creator generation terminal", async (context) => {
+  const database = new NodeD1Database();
+  context.after(() => database.close());
+  const repository = new D1BookRepository(database);
+  const api = createBookShareApi({ repository, objects: new BlockingPutObjects() });
+  const bookId = "19345678-1234-4234-8234-123456789abc";
+  const manageToken = "q".repeat(43);
+  const authorization = `Bearer ${manageToken}`;
+
+  const creating = await api.handle(new Request("https://example.test/api/books", {
+    method: "POST",
+    headers: { authorization, "content-type": "application/json" },
+    body: JSON.stringify({ bookId }),
+  }));
+  assert.equal(creating.status, 201);
+  const created = await repository.findBook(bookId);
+  assert.ok(created?.manage_token_hash);
+  const deleting = await api.handle(new Request(`https://example.test/api/books/${bookId}`, {
+    method: "DELETE",
+    headers: { authorization },
+  }));
+  assert.equal(deleting.status, 204);
+  assert.equal(await repository.findBook(bookId), null);
+  const tombstone = await repository.findDeletedBook(bookId);
+  assert.equal(tombstone?.manage_token_hash, created.manage_token_hash);
+  assert.equal(await repository.createBook({
+    id: bookId,
+    manageTokenHash: created.manage_token_hash,
+    now: "2026-08-30T00:00:00.000Z",
+  }), "deleted");
+  assert.equal(await repository.createBook({
+    id: bookId,
+    manageTokenHash: "another-capability",
+    now: "2026-08-30T00:00:00.000Z",
+  }), "conflict");
+
+  const replayedCreate = await api.handle(new Request("https://example.test/api/books", {
+    method: "POST",
+    headers: { authorization, "content-type": "application/json" },
+    body: JSON.stringify({ bookId }),
+  }));
+  assert.equal(replayedCreate.status, 200);
+  assert.deepEqual(await replayedCreate.json(), { ok: true, bookId, status: "deleted" });
+});
+
+test("D1 triggers preserve revoke and delete invariants for rolling old Workers", async (context) => {
+  const database = new NodeD1Database();
+  context.after(() => database.close());
+  const repository = new D1BookRepository(database);
+  const now = "2026-08-30T00:00:00.000Z";
+  const revokedId = "20345678-1234-4234-8234-123456789abc";
+  const revokedManageHash = "rolling-revoke-manage";
+  assert.equal(await repository.createBook({ id: revokedId, manageTokenHash: revokedManageHash, now }), "created");
+  await database.prepare(`UPDATE living_books
+    SET status = 'published', share_token_hash = ?, updated_at = ?
+    WHERE id = ?`).bind("rolling-share", now, revokedId).run();
+  await database.prepare(`UPDATE living_books
+    SET status = 'revoked', updated_at = ?
+    WHERE id = ?`).bind(now, revokedId).run();
+  assert.equal((await repository.findManagedBook(revokedId, revokedManageHash)).asset_cleanup_pending, 1);
+
+  const deletedId = "21345678-1234-4234-8234-123456789abc";
+  const deletedManageHash = "rolling-delete-manage";
+  assert.equal(await repository.createBook({ id: deletedId, manageTokenHash: deletedManageHash, now }), "created");
+  await database.prepare(`UPDATE living_books
+    SET status = 'deleting', updated_at = ?
+    WHERE id = ?`).bind(now, deletedId).run();
+  await database.prepare("DELETE FROM living_books WHERE id = ?").bind(deletedId).run();
+  const deleted = await repository.findDeletedBook(deletedId);
+  assert.equal(deleted.manage_token_hash, deletedManageHash);
+  assert.equal(deleted.deleted_at, now);
+  const eventsBeforeDelayedCreate = await database.prepare(`SELECT COUNT(*) AS count
+    FROM living_book_creation_events`).first();
+  await assert.rejects(
+    database.prepare(`INSERT INTO living_books (
+      id, manage_token_hash, status, created_at, updated_at
+    ) VALUES (?, ?, 'draft', ?, ?)
+    ON CONFLICT(id) DO NOTHING`).bind(
+      deletedId,
+      deletedManageHash,
+      now,
+      now,
+    ).run(),
+    /deleted generation id is terminal/u,
+  );
+  assert.equal(await repository.findBook(deletedId), null);
+  const eventsAfterDelayedCreate = await database.prepare(`SELECT COUNT(*) AS count
+    FROM living_book_creation_events`).first();
+  assert.equal(eventsAfterDelayedCreate.count, eventsBeforeDelayedCreate.count);
+});
+
 test("D1 publish replay returns the committed revision without replacing its manifest", async (context) => {
   const database = new NodeD1Database();
   context.after(() => database.close());
@@ -251,16 +342,34 @@ test("D1 serializes publish attempts and tombstones the revoked share token", as
     now,
   }), 1);
 
-  assert.equal(await repository.revokeBook({ id, manageTokenHash, now }), true);
+  assert.equal(await repository.revokeBook({ id, manageTokenHash, shareTokenHash: firstShareHash, now }), true);
   const revoked = await repository.findManagedBook(id, manageTokenHash);
   assert.equal(revoked.status, "revoked");
   assert.equal(revoked.share_token_hash, firstShareHash);
   assert.equal(revoked.publish_attempt_token_hash, null);
+  assert.equal(revoked.asset_cleanup_pending, 1);
   assert.equal(await repository.isRetiredShareToken(firstShareHash), true);
+  assert.equal(await repository.isRetiredShareTokenForBook(firstShareHash, id), true);
+  assert.equal(await repository.isRetiredShareTokenForBook(firstShareHash, "92345678-1234-4234-8234-123456789abc"), false);
   assert.equal(await repository.claimPublishAttempt({ id, manageTokenHash, shareTokenHash: firstShareHash, now }), false);
-  assert.equal(await repository.claimPublishAttempt({ id, manageTokenHash, shareTokenHash: nextShareHash, now }), true);
+  assert.equal(await repository.claimPublishAttempt({ id, manageTokenHash, shareTokenHash: nextShareHash, now }), false);
+  assert.equal(await repository.completeRevocation({ id, manageTokenHash, shareTokenHash: firstShareHash, now }), true);
+  assert.equal((await repository.findManagedBook(id, manageTokenHash)).asset_cleanup_pending, 0);
+  assert.equal(await repository.insertAsset({
+    bookId: id,
+    manageTokenHash,
+    assetId: testAssetId(999),
+    objectKey: "revoked/late-upload",
+    contentType: "image/png",
+    byteSize: 8,
+    now,
+  }), false);
+  assert.equal(await repository.claimPublishAttempt({ id, manageTokenHash, shareTokenHash: nextShareHash, now }), false);
+  const nextId = "35345678-1234-4234-8234-123456789abc";
+  assert.equal(await repository.createBook({ id: nextId, manageTokenHash, now }), "created");
+  assert.equal(await repository.claimPublishAttempt({ id: nextId, manageTokenHash, shareTokenHash: nextShareHash, now }), true);
   assert.equal(await repository.publishBook({
-    id,
+    id: nextId,
     manageTokenHash,
     shareTokenHash: nextShareHash,
     title: "Second",
@@ -268,9 +377,107 @@ test("D1 serializes publish attempts and tombstones the revoked share token", as
     manifestJson: JSON.stringify({ revision: 2 }),
     now,
   }), 2);
-  assert.equal(await repository.revokeBook({ id, manageTokenHash, now }), true);
+  assert.equal(await repository.revokeBook({ id: nextId, manageTokenHash, shareTokenHash: nextShareHash, now }), true);
   assert.equal(await repository.isRetiredShareToken(nextShareHash), true);
   assert.equal(await repository.claimPublishAttempt({ id, manageTokenHash, shareTokenHash: firstShareHash, now }), false);
+});
+
+test("D1 revocation cleanup releases the full asset quota to a fresh draft", async (context) => {
+  const database = new NodeD1Database();
+  context.after(() => database.close());
+  const repository = new D1BookRepository(database);
+  let id = "33345678-1234-4234-8234-123456789abc";
+  const manageTokenHash = "manage-hash";
+  const shareTokenHash = "share-hash";
+  const now = "2026-08-30T00:00:00.000Z";
+  await repository.createBook({ id, manageTokenHash, now });
+
+  const insertRange = async (first, last) => {
+    for (let serial = first; serial <= last; serial += 1) {
+      assert.equal(await repository.insertAsset({
+        bookId: id,
+        manageTokenHash,
+        assetId: testAssetId(serial),
+        objectKey: `quota/${serial}`,
+        contentType: "image/png",
+        byteSize: 8,
+        now,
+        maxAssets: 50,
+      }), true);
+    }
+  };
+
+  await insertRange(1, 50);
+  assert.equal((await repository.listAssetIds(id)).length, 50);
+  assert.equal(await repository.claimPublishAttempt({ id, manageTokenHash, shareTokenHash, now }), true);
+  assert.equal(await repository.publishBook({
+    id,
+    manageTokenHash,
+    shareTokenHash,
+    title: "First revision",
+    revision: 1,
+    manifestJson: "{}",
+    now,
+  }), 1);
+  assert.equal(await repository.revokeBook({ id, manageTokenHash, shareTokenHash, now }), true);
+  assert.equal(await repository.completeRevocation({ id, manageTokenHash, shareTokenHash, now }), true);
+  assert.deepEqual(await repository.listAssetIds(id), []);
+  assert.equal(await repository.markDeleting({ id, manageTokenHash, now }), true);
+  assert.equal(await repository.deleteBook({ id, manageTokenHash }), true);
+  id = "34345678-1234-4234-8234-123456789abc";
+  assert.equal(await repository.createBook({ id, manageTokenHash, now }), "created");
+
+  await insertRange(51, 100);
+  assert.equal((await repository.listAssetIds(id)).length, 50);
+});
+
+test("D1 schema keeps revoked generations terminal during a rolling Worker deployment", async (context) => {
+  const database = new NodeD1Database();
+  context.after(() => database.close());
+  const repository = new D1BookRepository(database);
+  const id = "35345678-1234-4234-8234-123456789abc";
+  const manageTokenHash = "manage-hash";
+  const shareTokenHash = "share-hash";
+  const now = "2026-08-30T00:00:00.000Z";
+
+  assert.equal(await repository.createBook({ id, manageTokenHash, now }), "created");
+  assert.equal(await repository.claimPublishAttempt({ id, manageTokenHash, shareTokenHash, now }), true);
+  assert.equal(await repository.publishBook({
+    id,
+    manageTokenHash,
+    shareTokenHash,
+    title: "Terminal generation",
+    revision: 1,
+    manifestJson: "{}",
+    now,
+  }), 1);
+  assert.equal(await repository.revokeBook({ id, manageTokenHash, shareTokenHash, now }), true);
+
+  // These statements model the previous Worker bundle after the new schema is
+  // already live. Database triggers must fail closed until old isolates drain.
+  await assert.rejects(
+    database.prepare(`UPDATE living_books
+      SET publish_attempt_token_hash = ?
+      WHERE id = ?`).bind("old-worker-claim", id).run(),
+    /revoked generation is terminal/u,
+  );
+  await assert.rejects(
+    database.prepare(`UPDATE living_books
+      SET status = 'published'
+      WHERE id = ?`).bind(id).run(),
+    /revoked generation is terminal/u,
+  );
+  await assert.rejects(
+    database.prepare(`INSERT INTO living_book_assets (
+      book_id, asset_id, object_key, content_type, byte_size, created_at
+    ) VALUES (?, ?, ?, 'image/png', 8, ?)`).bind(
+      id,
+      testAssetId(101),
+      "old-worker/late-upload",
+      now,
+    ).run(),
+    /only a draft generation accepts assets/u,
+  );
 });
 
 test("D1 delete cancels an in-flight publish claim before its commit", async (context) => {
@@ -343,7 +550,8 @@ test("D1 upload racing delete rolls back the uncommitted object", async (context
     },
     body: JSON.stringify({ bookId }),
   }));
-  assert.equal(replacement.status, 201);
+  assert.equal(replacement.status, 409);
+  assert.equal((await replacement.json()).code, "book_exists");
 
   objects.putReleased.resolve();
   const uploadResponse = await upload;
@@ -351,7 +559,8 @@ test("D1 upload racing delete rolls back the uncommitted object", async (context
   assert.equal((await uploadResponse.json()).code, "invalid_state");
   assert.equal(objects.values.size, 0);
   const replacementBook = await repository.findBook(bookId);
-  assert.notEqual(replacementBook, null);
+  assert.equal(replacementBook, null);
+  assert.ok(await repository.findDeletedBook(bookId));
   assert.deepEqual(await repository.listAssetIds(bookId), []);
 });
 
@@ -376,7 +585,7 @@ test("D1 admits only one concurrent upload at the per-book asset bound", async (
   assert.equal(draft.status, 201);
   const storedBook = await repository.findBook(bookId);
 
-  for (let serial = 1; serial <= 48; serial += 1) {
+  for (let serial = 1; serial <= 49; serial += 1) {
     assert.equal(await repository.insertAsset({
       bookId,
       manageTokenHash: storedBook.manage_token_hash,
@@ -385,7 +594,7 @@ test("D1 admits only one concurrent upload at the per-book asset bound", async (
       contentType: "image/png",
       byteSize: 8,
       now: "2026-08-30T00:00:00.000Z",
-      maxAssets: 49,
+      maxAssets: 50,
     }), true);
   }
 
@@ -397,7 +606,7 @@ test("D1 admits only one concurrent upload at the per-book asset bound", async (
       body: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
     },
   ));
-  const uploads = [upload(49), upload(50)];
+  const uploads = [upload(50), upload(51)];
   await objects.putStarted.promise;
   assert.equal(objects.values.size, 2);
   objects.putReleased.resolve();
@@ -405,7 +614,7 @@ test("D1 admits only one concurrent upload at the per-book asset bound", async (
   assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409]);
   const rejected = responses.find((response) => response.status === 409);
   assert.equal((await rejected.json()).code, "asset_limit");
-  assert.equal((await repository.listAssetIds(bookId)).length, 49);
+  assert.equal((await repository.listAssetIds(bookId)).length, 50);
   assert.equal(objects.values.size, 1);
 });
 

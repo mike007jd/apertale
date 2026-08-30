@@ -50,7 +50,7 @@ Apertale 让用户在自己的 ChatGPT/Codex 对话中完成理解、故事设�
 - **发布状态机**：`draft/revoked -> publishing claim -> published`。同一 claim 可恢复；不同 share token 不能覆盖它。任意可管理状态也可进入 `deleting` 后完成永久删除。
 - **当前服务端契约**：
   - `POST /api/books`：幂等登记客户端预先生成并本地持久化的 `bookId` 与 256-bit 创作者 capability；服务端不返回 capability。
-  - `PUT /api/books/:bookId/assets/:assetId`：上传已验证 PNG/JPEG/WebP；单文件最多 1.5 MB，每书最多 49 个文件。
+  - `PUT /api/books/:bookId/assets/:assetId`：上传已验证 PNG/JPEG/WebP；单文件最多 1.5 MB，每书最多 50 个文件。
   - `POST /api/books/:bookId/publish`：校验 manifest 和所有本地资产引用后发布，返回专属 `/share/:token`。
   - `POST /api/books/:bookId/publish/reconcile`：恢复已提交的分享 URL 和准确 revision；未提交时以同一 share token 原子认领可恢复的发布尝试，或确认该 token 已撤销。
   - `GET /api/shared/:token` 与 `GET /api/shared/:token/assets/:assetId`：匿名只读读取。

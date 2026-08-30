@@ -5,6 +5,8 @@ export type ThemeId = (typeof THEME_IDS)[number];
 export type QualityTier = "balanced" | "reduced";
 /** Authoring bound shared by persistence validation, create, readiness, and the WebMCP schema. */
 export const MAX_BOOK_SPREADS = 12 as const;
+export const BOOK_ELEMENT_ID_PATTERN_SOURCE = "^[a-z0-9][a-z0-9-]{0,63}$" as const;
+export const BOOK_ELEMENT_ID_PATTERN = new RegExp(BOOK_ELEMENT_ID_PATTERN_SOURCE);
 export const MOTION_PRESETS = ["gentle-float", "fly-across", "water-bob", "soft-pulse", "slow-orbit"] as const;
 export type MotionPreset = (typeof MOTION_PRESETS)[number];
 export type CommandSource = "human" | "agent";
@@ -74,9 +76,22 @@ export type BookElement = {
 
 export const PROCEDURAL_ASSET_PREFIX = "procedural:";
 
+export function isProceduralAssetId(assetId: string) {
+  return assetId.startsWith(PROCEDURAL_ASSET_PREFIX);
+}
+
 /** Procedural markers carry knowledge details without an image asset; every other element is an image foreground layer. */
 export function isProceduralElement(element: Pick<BookElement, "assetId">) {
-  return element.assetId.startsWith(PROCEDURAL_ASSET_PREFIX);
+  return isProceduralAssetId(element.assetId);
+}
+
+/** Assets the renderer actually draws, with assetId serving as the resting frame. */
+export function renderedElementAssetIds(element: Pick<BookElement, "assetId" | "frameAssetIds">) {
+  if (
+    isProceduralAssetId(element.assetId)
+    || element.frameAssetIds?.some(isProceduralAssetId)
+  ) return [element.assetId];
+  return element.frameAssetIds?.length ? element.frameAssetIds : [element.assetId];
 }
 
 /**
@@ -115,6 +130,11 @@ export function spreadBaseAssetId(spread: Pick<Spread, "textureUrl" | "artwork" 
     && spread.elements.every(isProceduralElement);
   if (usesGroundedComposite) return spread.textureUrl;
   return spread.artwork?.cleanPlateAssetId ?? spread.textureUrl;
+}
+
+/** Preserve source-true layouts in full; generated compositions may fill the stage. */
+export function spreadArtworkFit(spread: Pick<Spread, "artwork">): "cover" | "contain" {
+  return spread.artwork?.separation === "preserved-photo-layout" ? "contain" : "cover";
 }
 
 export type DocumentState = {
@@ -156,6 +176,8 @@ export type MutationResult = {
   changedIds: string[];
   undoToken: string;
   summary: string;
+  /** Present only when the mutation creates a new document. */
+  documentId?: string;
 };
 
 type ConflictResult = {
@@ -173,39 +195,50 @@ export type CreationNotReadyResult = {
   readiness: CreationReadinessAssessment;
 };
 
-export type DocumentResult = MutationResult | ConflictResult | CreationNotReadyResult;
+type CreationArtifactIncompleteResult = {
+  ok: false;
+  code: "creation_artifact_incomplete";
+  currentRevision: number;
+  summary: string;
+  issues: string[];
+};
 
-type LiftCommand = {
-  type: "lift";
+export type DocumentResult = MutationResult | ConflictResult | CreationNotReadyResult | CreationArtifactIncompleteResult;
+
+type DocumentMutationPrecondition = {
   requestId: string;
+  expectedDocumentId: string;
   expectedRevision: number;
+};
+
+type LiftCommand = DocumentMutationPrecondition & {
+  type: "lift";
   elementId: string;
 };
 
-export type CreateBookCommand = {
+export type CreateBookCommand = DocumentMutationPrecondition & {
   type: "create-book";
-  requestId: string;
-  expectedRevision: number;
   documentId: string;
   title: string;
-  spreads: Array<Pick<Spread, "id" | "title" | "body" | "kicker">>;
+  coverAssetId: string;
+  spreads: Array<Pick<Spread, "id" | "title" | "body" | "kicker"> & {
+    background: PreparedBookBackground;
+    layers: PreparedBookLayer[];
+  }>;
   creationBrief: CreationBriefPayload;
   validatedSourceAssetIds: string[];
+  validatedLocalAssetIds: string[];
 };
 
-export type SetBookCoverCommand = {
+export type SetBookCoverCommand = DocumentMutationPrecondition & {
   type: "set-book-cover";
-  requestId: string;
-  expectedRevision: number;
   assetId: string;
   /** Asset ids independently resolved by the trusted IndexedDB adapter. */
   validatedLocalAssetIds: string[];
 };
 
-export type ComposeSpreadCommand = {
+export type ComposeSpreadCommand = DocumentMutationPrecondition & {
   type: "compose-spread";
-  requestId: string;
-  expectedRevision: number;
   spreadId: string;
   title?: string;
   body?: string;
@@ -252,46 +285,41 @@ export type ScenePatchOperation =
   | { op: "remove"; elementId: string }
   | { op: "reorder"; elementId: string; index: number };
 
-export type ScenePatchCommand = {
+export type PreparedBookBackground = Omit<Extract<ScenePatchOperation, { op: "set-background" }>, "op" | "separation"> & {
+  separation: LayeredArtwork["separation"];
+};
+export type PreparedBookLayer = Omit<Extract<ScenePatchOperation, { op: "add" }>, "op">;
+
+export type ScenePatchCommand = DocumentMutationPrecondition & {
   type: "scene-patch";
-  requestId: string;
-  expectedRevision: number;
   spreadId: string;
   operations: ScenePatchOperation[];
   /** Local assets independently resolved by the trusted IndexedDB adapter. */
   validatedLocalAssetIds?: string[];
 };
 
-export type EditCommand = {
+export type EditCommand = DocumentMutationPrecondition & {
   type: "edit";
-  requestId: string;
-  expectedRevision: number;
   elementId: string;
   transform?: Partial<Transform2D>;
   depth?: number;
   locked?: boolean;
 };
 
-export type InteractCommand = {
+export type InteractCommand = DocumentMutationPrecondition & {
   type: "interact";
-  requestId: string;
-  expectedRevision: number;
   elementId: string;
   interaction: Partial<Pick<InteractionSpec, "hover" | "focus">> & { revealKind?: RevealKind };
 };
 
-export type AnimateCommand = {
+export type AnimateCommand = DocumentMutationPrecondition & {
   type: "animate";
-  requestId: string;
-  expectedRevision: number;
   elementId: string;
   motion: MotionSpec | null;
 };
 
-type UndoCommand = {
+type UndoCommand = DocumentMutationPrecondition & {
   type: "undo";
-  requestId: string;
-  expectedRevision: number;
   undoToken: string;
 };
 

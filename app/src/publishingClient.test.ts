@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getStoredAssetBlob } from "./assetStore";
-import { listStoredProjectAssetIds } from "./projectArtifact";
+import { getStoredAssetBlob, isStoredAssetId } from "./assetStore";
+import { listStoredPublishedAssetIds } from "./projectArtifact";
 import { QUALITY_RUBRIC, type QualityReport } from "./qualityContract";
 import {
   deletePublication,
@@ -22,7 +22,6 @@ const getBlob = vi.mocked(getStoredAssetBlob);
 const COVER_ID = "asset:12345678-1234-4234-8234-123456789abc";
 const TEXTURE_ID = "asset:22345678-1234-4234-8234-123456789abc";
 const CLEAN_ID = "asset:32345678-1234-4234-8234-123456789abc";
-const ELEMENT_ID = "asset:52345678-1234-4234-8234-123456789abc";
 const FRAME_A_ID = "asset:62345678-1234-4234-8234-123456789abc";
 const FRAME_B_ID = "asset:72345678-1234-4234-8234-123456789abc";
 const NEW_ID = "asset:82345678-1234-4234-8234-123456789abc";
@@ -60,7 +59,7 @@ function documentState(overrides: Partial<DocumentState> = {}): DocumentState {
         id: "photo",
         label: "Family photo",
         kind: "lifted",
-        assetId: ELEMENT_ID,
+        assetId: FRAME_A_ID,
         frameAssetIds: [FRAME_A_ID, FRAME_B_ID],
         page: "right",
         transform: { x: 0.5, y: 0.5, scaleX: 0.8, scaleY: 0.8, rotationDeg: 0 },
@@ -102,8 +101,8 @@ function qualityReport(document: DocumentState, warning = false): QualityReport 
     ...(warning && index === 0 ? { suggestedPatch: "Keep this warning recorded for publication." } : {}),
   }));
   return {
-    contractVersion: 1,
-    rubricVersion: 1,
+    contractVersion: 2,
+    rubricVersion: 2,
     documentId: document.id,
     reviewedRevision: document.revision,
     round: 1,
@@ -130,7 +129,16 @@ function qualityReport(document: DocumentState, warning = false): QualityReport 
 }
 
 function publishReady(document: DocumentState, onProgress?: (progress: PublicationProgress) => void) {
+  storeLibraryDocument(document);
   return publishDocument(document, qualityReport(document), onProgress);
+}
+
+function storeLibraryDocument(document: DocumentState) {
+  localStorage.setItem("apertale.library.v4", JSON.stringify({
+    activeBookId: document.id,
+    documents: [document],
+    sampleSourceVersion: 4,
+  }));
 }
 
 function createMemoryStorage() {
@@ -141,6 +149,12 @@ function createMemoryStorage() {
     removeItem: (key: string) => { storage.delete(key); },
     clear: () => { storage.clear(); },
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((settle) => { resolve = settle; });
+  return { promise, resolve };
 }
 
 function createTestLockManager() {
@@ -162,6 +176,7 @@ type StoredRecordForTest = {
   status: FakeBook["status"];
   shareToken?: string;
   uploadedAssetIds: string[];
+  attemptAssetIds?: string[];
 };
 
 function storedRecord(documentId: string) {
@@ -177,11 +192,17 @@ function jsonResponse(status: number, payload: unknown) {
 
 function installShareApi() {
   const books = new Map<string, FakeBook>();
+  const deletedBooks = new Map<string, string>();
   const requests: Request[] = [];
   let deleteMode: "ok" | "fail" = "ok";
   let dropNextCreateResponse = false;
+  let nextCreateRejection: { status: number; code: string } | null = null;
+  let nextCreateFailureAfterCommit: number | null = null;
   let dropNextPublishResponse = false;
   let dropNextPublishAfterClaim = false;
+  let dropNextRevokeResponse = false;
+  let dropNextDeleteResponse = false;
+  let nextDeleteBlock: { started: ReturnType<typeof deferred<void>>; released: ReturnType<typeof deferred<void>> } | null = null;
 
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request
@@ -198,6 +219,12 @@ function installShareApi() {
       if (typeof bookId !== "string" || typeof manageToken !== "string") {
         return jsonResponse(400, { ok: false, code: "invalid_draft", message: "Invalid draft." });
       }
+      const deletedManageToken = deletedBooks.get(bookId);
+      if (deletedManageToken) {
+        return deletedManageToken === manageToken
+          ? jsonResponse(200, { ok: true, bookId, status: "deleted" })
+          : jsonResponse(409, { ok: false, code: "book_exists", message: "Book exists." });
+      }
       const existing = books.get(bookId);
       if (existing) {
         if (existing.manageToken !== manageToken) {
@@ -205,7 +232,21 @@ function installShareApi() {
         }
         return jsonResponse(200, { ok: true, bookId, status: existing.status });
       }
+      if (nextCreateRejection) {
+        const rejection = nextCreateRejection;
+        nextCreateRejection = null;
+        return jsonResponse(rejection.status, {
+          ok: false,
+          code: rejection.code,
+          message: `Draft creation rejected: ${rejection.code}.`,
+        });
+      }
       books.set(bookId, { manageToken, status: "draft", assets: new Set(), retiredShareTokens: new Set() });
+      if (nextCreateFailureAfterCommit) {
+        const status = nextCreateFailureAfterCommit;
+        nextCreateFailureAfterCommit = null;
+        return jsonResponse(status, { ok: false, code: "storage_unavailable", message: "Create response failed after commit." });
+      }
       if (dropNextCreateResponse) {
         dropNextCreateResponse = false;
         throw new TypeError("Failed to fetch");
@@ -220,11 +261,21 @@ function installShareApi() {
       if (!book || auth !== `Bearer ${book.manageToken}`) {
         return jsonResponse(404, { ok: false, code: "not_found", message: "The book was not found." });
       }
+      if (book.status !== "draft") {
+        return jsonResponse(409, { ok: false, code: "invalid_state", message: "Only a fresh draft accepts assets." });
+      }
       if (book.assets.has(assetId)) {
         return jsonResponse(409, {
           ok: false,
           code: "asset_exists",
           message: "Asset ids are immutable; upload changed content with a new asset id.",
+        });
+      }
+      if (book.assets.size >= 50) {
+        return jsonResponse(409, {
+          ok: false,
+          code: "asset_limit",
+          message: "A book may contain at most 50 uploaded assets.",
         });
       }
       book.assets.add(assetId);
@@ -250,13 +301,13 @@ function installShareApi() {
           publishedRevision: book.revision,
         });
       }
-      if (book.status !== "draft" && book.status !== "revoked") {
+      if (book.status === "revoked") {
+        return jsonResponse(200, { ok: true, bookId: reconcileMatch[1], status: "revoked" });
+      }
+      if (book.status !== "draft") {
         return jsonResponse(409, { ok: false, code: "invalid_state", message: "Publication cannot resume." });
       }
       if (typeof payload.shareToken === "string" && book.retiredShareTokens.has(payload.shareToken)) {
-        return jsonResponse(200, { ok: true, bookId: reconcileMatch[1], status: "revoked" });
-      }
-      if (book.status === "revoked" && !book.pendingShareToken && payload.shareToken === book.shareToken) {
         return jsonResponse(200, { ok: true, bookId: reconcileMatch[1], status: "revoked" });
       }
       if (book.pendingShareToken && book.pendingShareToken !== payload.shareToken) {
@@ -293,7 +344,12 @@ function installShareApi() {
           message: "Only a draft or revoked book can be published.",
         });
       }
-      if (book.status !== "draft" && book.status !== "revoked") {
+      if (book.status === "revoked") {
+        return book.retiredShareTokens.has(shareToken)
+          ? jsonResponse(409, { ok: false, code: "revoked_share", message: "A revoked share capability cannot be reused." })
+          : jsonResponse(409, { ok: false, code: "invalid_state", message: "Create a fresh draft to republish." });
+      }
+      if (book.status !== "draft") {
         return jsonResponse(409, {
           ok: false,
           code: "invalid_state",
@@ -305,13 +361,6 @@ function installShareApi() {
           ok: false,
           code: "revoked_share",
           message: "A revoked share capability cannot be published again.",
-        });
-      }
-      if (book.status === "revoked" && !book.pendingShareToken && book.shareToken === shareToken) {
-        return jsonResponse(409, {
-          ok: false,
-          code: "publish_conflict",
-          message: "A revoked share capability cannot be reused.",
         });
       }
       if (book.pendingShareToken && book.pendingShareToken !== shareToken) {
@@ -362,17 +411,38 @@ function installShareApi() {
       if (!book || auth !== `Bearer ${book.manageToken}`) {
         return jsonResponse(404, { ok: false, code: "not_found", message: "The book was not found." });
       }
-      if (book.status === "published" && book.shareToken) book.retiredShareTokens.add(book.shareToken);
-      book.status = "revoked";
-      book.pendingShareToken = undefined;
+      const payload = await request.json() as { shareToken?: string };
+      if (typeof payload.shareToken !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(payload.shareToken)) {
+        return jsonResponse(400, { ok: false, code: "invalid_share_token", message: "A valid share token is required." });
+      }
+      if (book.status === "published" && book.shareToken === payload.shareToken) {
+        book.retiredShareTokens.add(payload.shareToken);
+        book.status = "revoked";
+        book.pendingShareToken = undefined;
+        book.assets.clear();
+      } else if (!(book.status === "revoked" && book.retiredShareTokens.has(payload.shareToken))) {
+        return jsonResponse(409, { ok: false, code: "revoke_conflict", message: "Publication changed." });
+      }
+      if (dropNextRevokeResponse) {
+        dropNextRevokeResponse = false;
+        throw new TypeError("Failed to fetch");
+      }
       return jsonResponse(200, { ok: true, bookId: revokeMatch[1], status: "revoked" });
     }
 
     const deleteMatch = /^\/api\/books\/([^/]+)$/u.exec(url.pathname);
     if (deleteMatch && request.method === "DELETE") {
+      if (nextDeleteBlock) {
+        const block = nextDeleteBlock;
+        nextDeleteBlock = null;
+        block.started.resolve();
+        await block.released.promise;
+      }
       const book = books.get(deleteMatch[1]);
       if (!book || auth !== `Bearer ${book.manageToken}`) {
-        return jsonResponse(404, { ok: false, code: "not_found", message: "The book was not found." });
+        return deletedBooks.get(deleteMatch[1]) === auth?.replace(/^Bearer /u, "")
+          ? new Response(null, { status: 204, headers: { "cache-control": "private, no-store" } })
+          : jsonResponse(409, { ok: false, code: "delete_conflict", message: "Confirm creation before deleting." });
       }
       if (deleteMode === "fail") {
         return jsonResponse(503, {
@@ -381,7 +451,12 @@ function installShareApi() {
           message: "Book storage is temporarily unavailable.",
         });
       }
+      deletedBooks.set(deleteMatch[1], book.manageToken);
       books.delete(deleteMatch[1]);
+      if (dropNextDeleteResponse) {
+        dropNextDeleteResponse = false;
+        throw new TypeError("Failed to fetch");
+      }
       return new Response(null, { status: 204, headers: { "cache-control": "private, no-store" } });
     }
 
@@ -391,13 +466,23 @@ function installShareApi() {
   vi.stubGlobal("fetch", fetchMock);
   return {
     books,
+    deletedBooks,
     requests,
     fetchMock,
     failDeletes() { deleteMode = "fail"; },
     succeedDeletes() { deleteMode = "ok"; },
     loseNextCreateResponse() { dropNextCreateResponse = true; },
+    rejectNextCreate(status: number, code: string) { nextCreateRejection = { status, code }; },
+    failNextCreateAfterCommit(status: number) { nextCreateFailureAfterCommit = status; },
     loseNextPublishResponse() { dropNextPublishResponse = true; },
     loseNextPublishAfterClaim() { dropNextPublishAfterClaim = true; },
+    loseNextRevokeResponse() { dropNextRevokeResponse = true; },
+    loseNextDeleteResponse() { dropNextDeleteResponse = true; },
+    holdNextDelete() {
+      const block = { started: deferred<void>(), released: deferred<void>() };
+      nextDeleteBlock = block;
+      return { started: block.started.promise, release: () => block.released.resolve() };
+    },
   };
 }
 
@@ -406,8 +491,9 @@ describe("publishing client", () => {
     vi.stubGlobal("location", { origin: "https://apertale.test" });
     vi.stubGlobal("navigator", { locks: createTestLockManager() });
     vi.stubGlobal("localStorage", createMemoryStorage());
+    storeLibraryDocument(documentState());
     getBlob.mockReset();
-    getBlob.mockImplementation(async (assetId: string) => LOCAL_ASSET_PATTERN_TEST(assetId) ? PNG : null);
+    getBlob.mockImplementation(async (assetId: string) => isStoredAssetId(assetId) ? PNG : null);
   });
 
   afterEach(() => {
@@ -432,20 +518,16 @@ describe("publishing client", () => {
     expect(progress.map((item) => item.phase)).toEqual([
       "creating",
       "creating",
-      "uploading",
-      "uploading",
-      "uploading",
-      "uploading",
-      "uploading",
-      "uploading",
-      "uploading",
+      ...Array.from({ length: listStoredPublishedAssetIds(documentState()).length + 1 }, () => "uploading" as const),
       "publishing",
       "publishing",
     ]);
 
     const methods = api.requests.map((request) => `${request.method} ${new URL(request.url, "https://apertale.test").pathname}`);
     expect(methods[0]).toBe("POST /api/books");
-    expect(methods.filter((item) => item.startsWith("PUT "))).toHaveLength(6);
+    expect(methods.filter((item) => item.startsWith("PUT "))).toHaveLength(
+      listStoredPublishedAssetIds(documentState()).length,
+    );
     expect(methods.at(-1)).toBe(`POST /api/books/${stored.bookId}/publish`);
     expect(api.fetchMock.mock.calls.every(([, init]) => init?.cache === "no-store")).toBe(true);
     expect(api.requests.every((request) => !request.url.includes(stored.manageToken))).toBe(true);
@@ -460,12 +542,20 @@ describe("publishing client", () => {
     expect(publishBody.quality).toEqual(qualityReport(documentState()));
     expect(record.shareUrl).toBe(`https://apertale.test/share/${publishBody.shareToken}`);
     expect(stored.shareToken).toBe(publishBody.shareToken);
-    expect(stored.uploadedAssetIds).toHaveLength(6);
+    expect(stored.uploadedAssetIds).toHaveLength(listStoredPublishedAssetIds(documentState()).length);
     expect(getPublicationRecord(record.documentId)).not.toHaveProperty("uploadedAssetIds");
     expect(getPublicationRecord(record.documentId)).not.toHaveProperty("shareToken");
+
+    const lateUpload = await fetch(`/api/books/${stored.bookId}/assets/${NEW_ID}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${stored.manageToken}`, "content-type": "image/png" },
+      body: PNG,
+    });
+    expect(lateUpload.status).toBe(409);
+    await expect(lateUpload.json()).resolves.toMatchObject({ code: "invalid_state" });
   });
 
-  it("serializes cold concurrent publication before either call creates a private draft", async () => {
+  it("shares one synchronously persisted draft across cold concurrent publication", async () => {
     const api = installShareApi();
     const [first, second] = await Promise.all([
       publishReady(documentState()),
@@ -479,6 +569,42 @@ describe("publishing client", () => {
       && new URL(request.url, "https://apertale.test").pathname === "/api/books"
     ))).toHaveLength(1);
     expect(api.requests.filter((request) => new URL(request.url, "https://apertale.test").pathname.endsWith("/publish"))).toHaveLength(1);
+  });
+
+  it("makes first-publication intent visible before the first blob read settles", async () => {
+    const api = installShareApi();
+    let resolveCover: ((blob: Blob) => void) | undefined;
+    const pendingCover = new Promise<Blob>((resolve) => { resolveCover = resolve; });
+    getBlob.mockImplementation(async (assetId: string) => (
+      assetId === COVER_ID ? pendingCover : PNG
+    ));
+
+    const publishing = publishReady(documentState());
+
+    expect(getPublicationRecord("warm-photo-story")).toMatchObject({ status: "draft" });
+    expect(api.fetchMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(getBlob).toHaveBeenCalledWith(COVER_ID));
+    resolveCover?.(PNG);
+    await expect(publishing).resolves.toMatchObject({ status: "published" });
+  });
+
+  it("clears its own draft intent when the saved book disappears before the first async boundary", async () => {
+    const api = installShareApi();
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    vi.spyOn(localStorage, "setItem").mockImplementation((key: string, value: string) => {
+      originalSetItem(key, value);
+      if (key === "apertale.publication.v1:warm-photo-story") {
+        localStorage.removeItem("apertale.library.v4");
+      }
+    });
+
+    await expect(publishDocument(documentState(), qualityReport(documentState()))).rejects.toMatchObject({
+      code: "book_unavailable",
+      retryable: false,
+    });
+    expect(getPublicationRecord("warm-photo-story")).toBeNull();
+    expect(api.fetchMock).not.toHaveBeenCalled();
+    expect(getBlob).not.toHaveBeenCalled();
   });
 
   it("fails closed before persistence when cross-tab publication locking is unavailable", async () => {
@@ -518,6 +644,49 @@ describe("publishing client", () => {
     expect(creates[0].headers.get("authorization")).toBe(creates[1].headers.get("authorization"));
   });
 
+  it.each([
+    [409, "book_exists"],
+    [429, "creation_limit"],
+    [429, "creation_rate"],
+  ])("clears a definitely unowned draft after %i %s and retries with a fresh identity", async (status, code) => {
+    const api = installShareApi();
+    api.rejectNextCreate(status, code);
+
+    await expect(publishReady(documentState())).rejects.toMatchObject({ status, code });
+    expect(getPublicationRecord("warm-photo-story")).toBeNull();
+
+    await expect(publishReady(documentState())).resolves.toMatchObject({ status: "published" });
+    const creates = api.requests.filter((request) => (
+      request.method === "POST"
+      && new URL(request.url, "https://apertale.test").pathname === "/api/books"
+    ));
+    expect(creates).toHaveLength(2);
+    const [firstBody, secondBody] = await Promise.all(creates.map((request) => request.clone().json() as Promise<{ bookId: string }>));
+    expect(secondBody.bookId).not.toBe(firstBody.bookId);
+    expect(creates[1].headers.get("authorization")).not.toBe(creates[0].headers.get("authorization"));
+  });
+
+  it.each([500, 503])("preserves the exact capability after an uncertain %i create response", async (status) => {
+    const api = installShareApi();
+    api.failNextCreateAfterCommit(status);
+
+    await expect(publishReady(documentState())).rejects.toMatchObject({
+      code: "storage_unavailable",
+      status,
+      retryable: true,
+    });
+    const interrupted = storedRecord("warm-photo-story");
+    await expect(publishReady(documentState())).resolves.toMatchObject({ status: "published" });
+    expect(storedRecord("warm-photo-story")).toMatchObject({
+      bookId: interrupted.bookId,
+      manageToken: interrupted.manageToken,
+    });
+    const creates = api.requests.filter((request) => new URL(request.url, "https://apertale.test").pathname === "/api/books");
+    expect(creates).toHaveLength(2);
+    await expect(creates[0].clone().json()).resolves.toEqual(await creates[1].clone().json());
+    expect(creates[0].headers.get("authorization")).toBe(creates[1].headers.get("authorization"));
+  });
+
   it("returns the existing share link when the published revision is unchanged", async () => {
     const api = installShareApi();
     const first = await publishReady(documentState());
@@ -534,7 +703,9 @@ describe("publishing client", () => {
     const published = await publishReady(documentState());
     api.fetchMock.mockClear();
     getBlob.mockClear();
-    const revisionError = await publishDocument(documentState({ revision: 5 }), null).catch((error: unknown) => error);
+    const changed = documentState({ revision: 5 });
+    storeLibraryDocument(changed);
+    const revisionError = await publishDocument(changed, null).catch((error: unknown) => error);
     expect(revisionError).toBeInstanceOf(PublicationError);
     expect(revisionError).toMatchObject({ code: "revision_changed" });
     expect(getPublicationRecord("warm-photo-story")?.shareUrl).toBe(published.shareUrl);
@@ -542,7 +713,7 @@ describe("publishing client", () => {
     expect(getBlob).not.toHaveBeenCalled();
   });
 
-  it("revokes the share URL, keeps the capability, and republishes without re-uploading immutable assets", async () => {
+  it("revokes the share URL, clears remote copies, and republishes the current asset set", async () => {
     const api = installShareApi();
     const published = await publishReady(documentState());
     const publishedPrivate = storedRecord("warm-photo-story");
@@ -554,11 +725,12 @@ describe("publishing client", () => {
     expect(storedRecord("warm-photo-story")).toMatchObject({
       manageToken: publishedPrivate.manageToken,
       bookId: publishedPrivate.bookId,
+      uploadedAssetIds: [],
     });
 
     const putCountAfterFirst = api.requests.filter((request) => request.method === "PUT").length;
     getBlob.mockImplementation(async (assetId: string) => (
-      [...listStoredProjectAssetIds(documentState()), NEW_ID].includes(assetId) ? PNG : null
+      [...listStoredPublishedAssetIds(documentState()), NEW_ID].includes(assetId) ? PNG : null
     ));
     const republishDocument = documentState({
       revision: 5,
@@ -573,18 +745,59 @@ describe("publishing client", () => {
     const republished = await publishReady(republishDocument);
     expect(republished.status).toBe("published");
     expect(republished.shareUrl).not.toBe(published.shareUrl);
-    expect(storedRecord("warm-photo-story")).toMatchObject({
-      manageToken: publishedPrivate.manageToken,
-      bookId: publishedPrivate.bookId,
-    });
+    const republishedPrivate = storedRecord("warm-photo-story");
+    expect(republishedPrivate.manageToken).not.toBe(publishedPrivate.manageToken);
+    expect(republishedPrivate.bookId).not.toBe(publishedPrivate.bookId);
     const putRequests = api.requests.filter((request) => request.method === "PUT");
-    expect(putRequests).toHaveLength(putCountAfterFirst + 1);
+    expect(putRequests).toHaveLength(putCountAfterFirst + listStoredPublishedAssetIds(republishDocument).length);
     expect(decodeURIComponent(new URL(putRequests.at(-1)!.url, "https://apertale.test").pathname)).toContain(NEW_ID);
+  });
+
+  it("retries revocation with the same share capability after the response is lost", async () => {
+    const api = installShareApi();
+    await publishReady(documentState());
+    const shareToken = storedRecord("warm-photo-story").shareToken;
+    api.loseNextRevokeResponse();
+
+    await expect(revokePublication("warm-photo-story")).rejects.toMatchObject({
+      code: "storage_unavailable",
+      retryable: true,
+    });
+    expect(storedRecord("warm-photo-story")).toMatchObject({ status: "published", shareToken });
+    await expect(revokePublication("warm-photo-story")).resolves.toMatchObject({ status: "revoked" });
+
+    const revokeRequests = api.requests.filter((request) => new URL(request.url).pathname.endsWith("/revoke"));
+    expect(revokeRequests).toHaveLength(2);
+    await expect(Promise.all(revokeRequests.map((request) => request.json()))).resolves.toEqual([
+      { shareToken },
+      { shareToken },
+    ]);
+  });
+
+  it("fails safely when a legacy published record has no revocation capability", async () => {
+    const api = installShareApi();
+    localStorage.setItem("apertale.publication.v1:warm-photo-story", JSON.stringify({
+      documentId: "warm-photo-story",
+      bookId: "123e4567-e89b-42d3-a456-426614174099",
+      manageToken: "z".repeat(43),
+      status: "published",
+      shareUrl: `https://apertale.test/share/${"y".repeat(43)}`,
+      publishedRevision: 4,
+      uploadedAssetIds: [],
+    }));
+
+    await expect(revokePublication("warm-photo-story")).rejects.toMatchObject({
+      code: "missing_capability",
+      retryable: false,
+    });
+    expect(api.fetchMock).not.toHaveBeenCalled();
+    expect(storedRecord("warm-photo-story")).toMatchObject({ status: "published" });
   });
 
   it("keeps the local capability after a failed delete and clears it only after success", async () => {
     const api = installShareApi();
-    const published = await publishReady(documentState());
+    await publishReady(documentState());
+    const privateRecord = storedRecord("warm-photo-story");
     api.failDeletes();
     const deleteError = await deletePublication("warm-photo-story").catch((error: unknown) => error);
     expect(deleteError).toBeInstanceOf(PublicationError);
@@ -592,11 +805,115 @@ describe("publishing client", () => {
       code: "storage_unavailable",
       retryable: true,
     });
-    expect(getPublicationRecord("warm-photo-story")).toEqual(published);
+    expect(getPublicationRecord("warm-photo-story")).toMatchObject({ status: "deleting" });
+    expect(getPublicationRecord("warm-photo-story")?.shareUrl).toBeUndefined();
+    expect(storedRecord("warm-photo-story")).toMatchObject({
+      status: "deleting",
+      bookId: privateRecord.bookId,
+      manageToken: privateRecord.manageToken,
+    });
 
     api.succeedDeletes();
     await deletePublication("warm-photo-story");
     expect(getPublicationRecord("warm-photo-story")).toBeNull();
+  });
+
+  it("finishes an acknowledged remote deletion after its response is lost", async () => {
+    const api = installShareApi();
+    await publishReady(documentState());
+    const privateRecord = storedRecord("warm-photo-story");
+    api.loseNextDeleteResponse();
+
+    await expect(deletePublication("warm-photo-story")).rejects.toMatchObject({
+      code: "storage_unavailable",
+      retryable: true,
+    });
+    expect(api.books.has(privateRecord.bookId)).toBe(false);
+    expect(api.deletedBooks.get(privateRecord.bookId)).toBe(privateRecord.manageToken);
+    expect(getPublicationRecord("warm-photo-story")).toMatchObject({ status: "deleting" });
+
+    await deletePublication("warm-photo-story");
+    expect(getPublicationRecord("warm-photo-story")).toBeNull();
+    expect(api.requests.filter((request) => request.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("confirms a local-only draft before permanently deleting it", async () => {
+    const api = installShareApi();
+    const bookId = "123e4567-e89b-42d3-a456-426614174088";
+    const manageToken = "x".repeat(43);
+    localStorage.setItem("apertale.publication.v1:warm-photo-story", JSON.stringify({
+      documentId: "warm-photo-story",
+      bookId,
+      manageToken,
+      status: "draft",
+      uploadedAssetIds: [],
+      attemptAssetIds: [],
+    }));
+
+    await deletePublication("warm-photo-story");
+
+    expect(getPublicationRecord("warm-photo-story")).toBeNull();
+    expect(api.books.has(bookId)).toBe(false);
+    expect(api.deletedBooks.get(bookId)).toBe(manageToken);
+    expect(api.requests.slice(-2).map((request) => request.method)).toEqual(["POST", "DELETE"]);
+  });
+
+  it.each([
+    [409, "book_exists"],
+    [429, "creation_limit"],
+    [429, "creation_rate"],
+  ])("clears a definitely unowned legacy draft after %i %s without deleting a foreign book", async (status, code) => {
+    const api = installShareApi();
+    api.rejectNextCreate(status, code);
+    localStorage.setItem("apertale.publication.v1:warm-photo-story", JSON.stringify({
+      documentId: "warm-photo-story",
+      bookId: "123e4567-e89b-42d3-a456-426614174087",
+      manageToken: "w".repeat(43),
+      status: "draft",
+      uploadedAssetIds: [],
+      attemptAssetIds: [],
+    }));
+
+    await expect(deletePublication("warm-photo-story")).resolves.toBeUndefined();
+    expect(getPublicationRecord("warm-photo-story")).toBeNull();
+    expect(api.requests.filter((request) => request.method === "DELETE")).toHaveLength(0);
+  });
+
+  it("rotates to a fresh server generation before publishing after a post-commit delete response is lost", async () => {
+    const api = installShareApi();
+    await publishReady(documentState());
+    const previous = storedRecord("warm-photo-story");
+    api.loseNextDeleteResponse();
+    await expect(deletePublication("warm-photo-story")).rejects.toMatchObject({ code: "storage_unavailable" });
+    expect(api.deletedBooks.get(previous.bookId)).toBe(previous.manageToken);
+
+    await expect(publishReady(documentState())).resolves.toMatchObject({ status: "published" });
+    const replacement = storedRecord("warm-photo-story");
+    expect(replacement.bookId).not.toBe(previous.bookId);
+    expect(replacement.manageToken).not.toBe(previous.manageToken);
+    expect(api.books.has(previous.bookId)).toBe(false);
+    expect(api.books.get(replacement.bookId)?.status).toBe("published");
+    expect(api.requests.filter((request) => request.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("recreates publication intent before blob work after waiting behind deletion", async () => {
+    const api = installShareApi();
+    await publishReady(documentState());
+    const heldDelete = api.holdNextDelete();
+    const deleting = deletePublication("warm-photo-story");
+    await heldDelete.started;
+
+    let resolveCover: ((blob: Blob) => void) | undefined;
+    const pendingCover = new Promise<Blob>((resolve) => { resolveCover = resolve; });
+    getBlob.mockImplementation(async (assetId: string) => assetId === COVER_ID ? pendingCover : PNG);
+    const republishing = publishReady(documentState());
+    heldDelete.release();
+    await deleting;
+    await vi.waitFor(() => expect(getBlob).toHaveBeenCalledWith(COVER_ID));
+
+    expect(getPublicationRecord("warm-photo-story")).toMatchObject({ status: "draft" });
+    resolveCover?.(PNG);
+    await expect(republishing).resolves.toMatchObject({ status: "published" });
   });
 
   it("ignores malformed local publication state instead of using a broken capability", () => {
@@ -612,14 +929,14 @@ describe("publishing client", () => {
     expect(getPublicationRecord("warm-photo-story")).toBeNull();
   });
 
-  it("fails before creating a draft when a referenced local blob is missing", async () => {
+  it("keeps a recoverable local draft when a referenced local blob is missing", async () => {
     const api = installShareApi();
     getBlob.mockImplementation(async (assetId: string) => assetId === COVER_ID ? null : PNG);
     const missingError = await publishReady(documentState()).catch((error: unknown) => error);
     expect(missingError).toBeInstanceOf(PublicationError);
     expect(missingError).toMatchObject({ code: "missing_assets" });
     expect(api.fetchMock).not.toHaveBeenCalled();
-    expect(getPublicationRecord("warm-photo-story")).toBeNull();
+    expect(getPublicationRecord("warm-photo-story")).toMatchObject({ status: "draft" });
   });
 
   it("fails the quality gate before reading blobs or creating a draft", async () => {
@@ -652,10 +969,12 @@ describe("publishing client", () => {
     };
     expect(stored.shareToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const putCount = api.requests.filter((request) => request.method === "PUT").length;
-    expect(putCount).toBe(6);
+    expect(putCount).toBe(listStoredPublishedAssetIds(documentState()).length);
 
     getBlob.mockClear();
-    const recovered = await publishDocument(documentState({ revision: 5 }), null);
+    const changed = documentState({ revision: 5 });
+    storeLibraryDocument(changed);
+    const recovered = await publishDocument(changed, null);
     expect(recovered.status).toBe("published");
     expect(recovered.publishedRevision).toBe(4);
     expect(recovered.shareUrl).toBe(`https://apertale.test/share/${stored.shareToken}`);
@@ -691,6 +1010,82 @@ describe("publishing client", () => {
     expect(new Set(publishBodies.map((body) => body.shareToken))).toEqual(new Set([originalToken]));
   });
 
+  it("replaces an interrupted draft when its legal reader asset plan changes", async () => {
+    const api = installShareApi();
+    const interruptedDocument = documentState();
+    expect(listStoredPublishedAssetIds(interruptedDocument)).toHaveLength(4);
+    api.loseNextPublishAfterClaim();
+    await expect(publishReady(interruptedDocument)).rejects.toMatchObject({ code: "storage_unavailable", retryable: true });
+    const interrupted = storedRecord(interruptedDocument.id);
+    expect(interrupted.uploadedAssetIds).toHaveLength(4);
+    expect(api.books.get(interrupted.bookId)?.assets.size).toBe(4);
+
+    const replacementAssetId = "asset:0000ffff-1234-4234-8234-123456789abc";
+    const changed = documentState({
+      revision: 5,
+      spreads: [{
+        ...interruptedDocument.spreads[0],
+        elements: [{
+          ...interruptedDocument.spreads[0].elements[0],
+          frameAssetIds: [FRAME_A_ID, replacementAssetId],
+        }, interruptedDocument.spreads[0].elements[1]],
+      }],
+    });
+    expect(listStoredPublishedAssetIds(changed)).toHaveLength(4);
+    const published = await publishReady(changed);
+
+    expect(published).toMatchObject({ status: "published", publishedRevision: 5 });
+    const replacement = storedRecord(changed.id);
+    expect(replacement.bookId).not.toBe(interrupted.bookId);
+    expect(replacement.manageToken).not.toBe(interrupted.manageToken);
+    expect(api.books.has(interrupted.bookId)).toBe(false);
+    expect(api.books.get(replacement.bookId)?.assets.size).toBe(4);
+    expect(api.requests.filter((request) => request.method === "PUT")).toHaveLength(8);
+  });
+
+  it("rotates a definitely unowned changed-plan draft without deleting a foreign book", async () => {
+    const api = installShareApi();
+    api.rejectNextCreate(409, "book_exists");
+    const foreignBookId = "123e4567-e89b-42d3-a456-426614174086";
+    localStorage.setItem("apertale.publication.v1:warm-photo-story", JSON.stringify({
+      documentId: "warm-photo-story",
+      bookId: foreignBookId,
+      manageToken: "v".repeat(43),
+      status: "draft",
+      uploadedAssetIds: [],
+      attemptAssetIds: [NEW_ID],
+    }));
+
+    await expect(publishReady(documentState())).resolves.toMatchObject({ status: "published" });
+    expect(storedRecord("warm-photo-story").bookId).not.toBe(foreignBookId);
+    expect(api.requests.filter((request) => request.method === "DELETE")).toHaveLength(0);
+  });
+
+  it("rotates a legacy draft with no asset-plan fingerprint before uploading", async () => {
+    const api = installShareApi();
+    const legacyBookId = "123e4567-e89b-42d3-a456-426614174099";
+    const legacyManageToken = "z".repeat(43);
+    api.books.set(legacyBookId, {
+      manageToken: legacyManageToken,
+      status: "draft",
+      assets: new Set(listStoredPublishedAssetIds(documentState())),
+      retiredShareTokens: new Set(),
+    });
+    localStorage.setItem("apertale.publication.v1:warm-photo-story", JSON.stringify({
+      documentId: "warm-photo-story",
+      bookId: legacyBookId,
+      manageToken: legacyManageToken,
+      status: "draft",
+      uploadedAssetIds: listStoredPublishedAssetIds(documentState()),
+    }));
+
+    const published = await publishReady(documentState());
+
+    expect(published.status).toBe("published");
+    expect(api.books.has(legacyBookId)).toBe(false);
+    expect(storedRecord("warm-photo-story").bookId).not.toBe(legacyBookId);
+  });
+
   it("uses a new share capability when recovery finds that the interrupted link was revoked", async () => {
     const api = installShareApi();
     api.loseNextPublishResponse();
@@ -714,7 +1109,9 @@ describe("publishing client", () => {
       shareUrl: `https://apertale.test/share/${saved.shareToken}`,
       publishedRevision: 4,
     }));
-    await expect(publishDocument(documentState({ revision: 5 }), null)).rejects.toMatchObject({ code: "quality_blocked" });
+    const changed = documentState({ revision: 5 });
+    storeLibraryDocument(changed);
+    await expect(publishDocument(changed, null)).rejects.toMatchObject({ code: "quality_blocked" });
     expect(getPublicationRecord("warm-photo-story")).toEqual({
       documentId: "warm-photo-story",
       status: "revoked",
@@ -729,7 +1126,3 @@ describe("publishing client", () => {
     expect(republished.shareUrl).not.toBe(`https://apertale.test/share/${saved.shareToken}`);
   });
 });
-
-function LOCAL_ASSET_PATTERN_TEST(assetId: string) {
-  return /^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assetId);
-}

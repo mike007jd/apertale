@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ArrowCounterClockwise,
   ArrowClockwise,
@@ -26,7 +26,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
-import { releaseAssetUrls, resolveAssetUrl, storeLocalImages } from "./assetStore";
+import { acquireAssetUrl, releaseAssetUrls, storeLocalImages, type AssetUrlLease } from "./assetStore";
 import {
   CREATION_LENGTHS,
   CREATION_PHOTO_USES,
@@ -34,6 +34,7 @@ import {
   CREATION_STYLES,
   INITIAL_CREATION_WORKSHOP,
   MAX_WORKSHOP_ASSETS,
+  admitWorkshopAssets,
   buildCreationWorkshopBrief,
   importCreationWorkshopAssets,
   persistCreationWorkshopAssetOrder,
@@ -47,18 +48,20 @@ import { announce, supportsWebGl2 } from "./readerShell";
 import { spreadFraction } from "./stageGeometry";
 import { Panel, Toast } from "./design/primitives";
 import { ThemeSwitch } from "./design/ThemeSwitch";
+import { FallbackBook } from "./FallbackBook";
 import { completeImageHandoff, currentImageHandoff, describePartialImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
 import { useFocusTrap } from "./focusTrap";
 import {
   dedicatedCoverRendered,
-  fallbackAssetPlan,
-  fallbackImageLoadKeys,
-  fallbackRenderComplete,
   readerRenderMatches,
   readerSceneStructureKey,
+  sceneFailureMatches,
+  resolvedCoverAsset,
   shelfCoverMatches,
+  shelfCoverTarget,
   type ReaderRenderEvidence,
+  type ResolvedCoverAsset,
   type ShelfCoverEvidence,
 } from "./renderEvidence";
 import {
@@ -69,12 +72,12 @@ import {
   hasReveal,
   resolveInteraction,
 } from "./interaction";
-import { canTurnPage, createPageTurnSession, pageTurnNavDisabled } from "./pageTurn";
-import { PublicationPanel } from "./PublicationPanel";
+import { canTurnPage, createPageTurnSession, pageTurnNavDisabled, pageTurnWaitState, type TurnDirection, type TurnReadiness, type TurnWaitState } from "./pageTurn";
+import { PublicationPanel, commitPublicationRecordIfCurrent, publicationLauncherPresentation, publicationRecordForDocument } from "./PublicationPanel";
 import { getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
 import { MAX_BOOK_UPLOADED_ASSETS } from "./qualityContract";
-import type { BookSnapshot, FocusResponse, HoverResponse, MotionPreset, Spread, ThemeId, TurnState } from "./types";
+import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
 import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
 import { registerWebMcpTools } from "./webmcp";
 
@@ -107,7 +110,6 @@ const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: 
 type OpeningBook = {
   id: string;
   title: string;
-  coverUrl: string;
 };
 
 type LibraryMotion = "idle" | "opening-book" | "closing-book";
@@ -115,6 +117,8 @@ type LibraryTab = "yours" | "explore";
 
 type PendingAuthoringSurface = {
   request: AuthoringSurfaceRequest;
+  signal: AbortSignal;
+  settling: boolean;
   resolve: () => void;
   reject: (error: Error) => void;
   cleanup: () => void;
@@ -138,6 +142,15 @@ export function partitionLibraryBooks<Book extends { sample?: boolean }>(books: 
   const personal = books.filter((book) => !book.sample);
   const curated = books.filter((book) => Boolean(book.sample));
   return { personal, curated, tabbed: personal.length > 0 };
+}
+
+export function shelfCoverAssetPlan<Book extends { id: string; coverAssetId?: string }>(
+  shelfVisible: boolean,
+  books: readonly Book[],
+) {
+  return new Map(shelfVisible
+    ? books.flatMap((book) => (book.coverAssetId ? [[book.id, book.coverAssetId] as const] : []))
+    : []);
 }
 
 async function copyPlainText(text: string): Promise<boolean> {
@@ -208,163 +221,13 @@ function BookLoadingFeedback({ title, placement, stage, reducedMotion }: {
 }
 
 /** Joins announcement fragments without producing the doubled `..` of naive concatenation. */
-type FallbackLayer = {
-  id: string;
-  url: string;
-  element: Spread["elements"][number];
-};
-
-function FallbackBook({ snapshot, spread, sceneKey, renderEvidenceToken, onReady, onUnavailable, onRendered }: {
-  snapshot: BookSnapshot;
-  spread: Spread;
-  sceneKey: string;
-  renderEvidenceToken?: string;
-  onReady: (documentId: string) => void;
-  onUnavailable: (documentId: string) => void;
-  onRendered: (evidence: ReaderRenderEvidence & { surface: "fallback" }) => void;
-}) {
-  const evidenceKey = `${snapshot.document.id}:${snapshot.document.revision}:${spread.id}:${snapshot.session.sceneThemeId}`;
-  const [resolved, setResolved] = useState<{ key: string; baseUrl: string; layers: FallbackLayer[] } | null>(null);
-  const [loadedIds, setLoadedIds] = useState<Set<string>>(() => new Set());
-  const [failed, setFailed] = useState(false);
-  const reportedKey = useRef("");
-
-  useEffect(() => {
-    let canceled = false;
-    const { baseAssetId, foreground } = fallbackAssetPlan(spread);
-    setResolved(null);
-    setLoadedIds(new Set());
-    setFailed(false);
-    if (!baseAssetId) {
-      setFailed(true);
-      onUnavailable(snapshot.document.id);
-      recordDiagnostic("fallback:final-base-missing", {
-        documentId: snapshot.document.id,
-        revision: snapshot.document.revision,
-        spreadId: spread.id,
-      });
-      return () => { canceled = true; };
-    }
-    void Promise.all([
-      resolveAssetUrl(baseAssetId),
-      ...foreground.map(async (element): Promise<FallbackLayer> => ({
-        id: element.id,
-        url: await resolveAssetUrl(element.assetId),
-        element,
-      })),
-    ]).then(([baseUrl, ...layers]) => {
-      if (!canceled) setResolved({ key: evidenceKey, baseUrl, layers });
-    }).catch(() => {
-      if (canceled) return;
-      setFailed(true);
-      onUnavailable(snapshot.document.id);
-      recordDiagnostic("fallback:asset-resolve-failed", {
-        documentId: snapshot.document.id,
-        revision: snapshot.document.revision,
-        spreadId: spread.id,
-      });
-    });
-    return () => { canceled = true; };
-  }, [evidenceKey, onUnavailable, snapshot.document.id, snapshot.document.revision, spread]);
-
-  const loadKeys = resolved
-    ? fallbackImageLoadKeys(resolved.key, resolved.layers.map((layer) => layer.id))
-    : [];
-  const expectedCount = loadKeys.length;
-  useEffect(() => {
-    const reportKey = `${resolved?.key ?? ""}:${renderEvidenceToken ?? ""}`;
-    if (
-      !resolved
-      || !fallbackRenderComplete(expectedCount, loadedIds, failed)
-      || reportedKey.current === reportKey
-    ) return;
-    reportedKey.current = reportKey;
-    onReady(snapshot.document.id);
-    onRendered({
-      sceneKey,
-      renderEvidenceToken,
-      documentId: snapshot.document.id,
-      revision: snapshot.document.revision,
-      spreadId: spread.id,
-      theme: snapshot.session.sceneThemeId,
-      surface: "fallback",
-      locator: ".fallback-book.is-composited",
-    });
-  }, [expectedCount, failed, loadedIds, onReady, onRendered, renderEvidenceToken, resolved, sceneKey, snapshot.document.id, snapshot.document.revision, snapshot.session.sceneThemeId, spread.id]);
-
-  const markLoaded = (id: string) => setLoadedIds((current) => {
-    if (current.has(id)) return current;
-    return new Set([...current, id]);
-  });
-  const markFailed = (id: string) => {
-    setFailed(true);
-    onUnavailable(snapshot.document.id);
-    recordDiagnostic("fallback:asset-load-failed", {
-      documentId: snapshot.document.id,
-      revision: snapshot.document.revision,
-      spreadId: spread.id,
-      asset: id,
-    });
-  };
-
-  if (failed) {
-    return (
-      <div className="fallback-book" aria-label={`Two-dimensional fallback for ${spread.title}`}>
-        <article className="fallback-plate" role="status">
-          <h2>Visual review unavailable</h2>
-          <p>One or more final scene assets could not be loaded. Re-import the missing asset before critique.</p>
-        </article>
-      </div>
-    );
-  }
-  if (!resolved) return <div className="fallback-book is-loading" aria-label={`Loading two-dimensional fallback for ${spread.title}`} />;
-
-  return (
-    <div className="fallback-book is-composited" aria-label={`Two-dimensional fallback for ${spread.title}`}>
-      <img
-        className="fallback-composite-base"
-        src={resolved.baseUrl}
-        alt=""
-        role="presentation"
-        onLoad={() => markLoaded(loadKeys[0])}
-        onError={() => markFailed(loadKeys[0])}
-      />
-      {resolved.layers.map(({ id, url, element }, index) => {
-        const x = spreadFraction(element) * 100;
-        const style = {
-          left: `${x}%`,
-          top: `${element.transform.y * 100}%`,
-          zIndex: Math.max(1, Math.round(element.depth * 100)),
-          transform: `translate(-50%, -50%) rotate(${element.transform.rotationDeg}deg) scale(${element.transform.scaleX}, ${element.transform.scaleY})`,
-        } satisfies CSSProperties;
-        return (
-          <img
-            key={id}
-            className="fallback-composite-layer"
-            src={url}
-            alt=""
-            role="presentation"
-            style={style}
-            onLoad={() => markLoaded(loadKeys[index + 1])}
-            onError={() => markFailed(loadKeys[index + 1])}
-          />
-        );
-      })}
-      <article className="fallback-composite-copy">
-        {spread.kicker && <p>{spread.kicker}</p>}
-        <h2>{spread.title}</h2>
-        <p>{spread.body}</p>
-      </article>
-    </div>
-  );
-}
-
 function createRequestId() {
   return crypto.randomUUID();
 }
 
 export function App() {
   const snapshot = useSyncExternalStore(bookEngine.subscribe, bookEngine.getSnapshot, bookEngine.getSnapshot);
+  const pageTurnNavigationKey = `${snapshot.document.id}:${snapshot.document.revision}:${snapshot.session.currentSpreadIndex}`;
   const [turn, setTurn] = useState<TurnState>(null);
   const [webMcpAvailable, setWebMcpAvailable] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -387,8 +250,8 @@ export function App() {
   const [sceneLoadingBookId, setSceneLoadingBookId] = useState<string | null>(null);
   const [reducedMotion, setReducedMotion] = useState(() => forceReducedMotion || motionPreference.matches);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [sceneFailed, setSceneFailed] = useState(false);
-  const [resolvedCoverUrls, setResolvedCoverUrls] = useState<Record<string, string>>({});
+  const [failedSceneKey, setFailedSceneKey] = useState<string | null>(null);
+  const [resolvedCoverUrls, setResolvedCoverUrls] = useState<Record<string, ResolvedCoverAsset>>({});
   const [loadStage, setLoadStage] = useState<LoadStage>("warming");
   const [workshopImportError, setWorkshopImportError] = useState<string | null>(null);
   const [showPublication, setShowPublication] = useState(false);
@@ -396,6 +259,11 @@ export function App() {
   const [authoringSurfaceRequest, setAuthoringSurfaceRequest] = useState<ActiveAuthoringSurfaceRequest | null>(null);
   const [lastReaderRender, setLastReaderRender] = useState<ReaderRenderEvidence | null>(null);
   const [renderedShelfCovers, setRenderedShelfCovers] = useState<Record<string, ShelfCoverEvidence>>({});
+  const [pageTurnReadiness, setPageTurnReadiness] = useState<TurnReadiness>(() => ({
+    navigationKey: pageTurnNavigationKey,
+    backward: false,
+    forward: false,
+  }));
   const creationSpreadCount = creationWorkshop.spreadCount;
   const creationStyle = creationWorkshop.visualDirection;
   const creationSource = creationWorkshop.mode;
@@ -405,6 +273,8 @@ export function App() {
   const pageTurnCountRef = useRef(snapshot.document.spreads.length);
   const pageTurnDocumentRef = useRef(snapshot.document.id);
   const reducedMotionRef = useRef(reducedMotion);
+  const rendererAvailableRef = useRef(false);
+  const waitingForRendererRef = useRef<TurnWaitState>({ backward: true, forward: true });
   const fileInput = useRef<HTMLInputElement | null>(null);
   const addPhotoButton = useRef<HTMLButtonElement | null>(null);
   const stage = useRef<HTMLElement | null>(null);
@@ -415,8 +285,14 @@ export function App() {
   const elementAgentCard = useRef<HTMLDivElement | null>(null);
   const elementAgentOpener = useRef<HTMLElement | null>(null);
   const publicationOpener = useRef<HTMLElement | null>(null);
+  const activeDocumentIdRef = useRef(snapshot.document.id);
+  activeDocumentIdRef.current = snapshot.document.id;
   const pendingAuthoringSurface = useRef<PendingAuthoringSurface | null>(null);
-  const prewarmedBooks = useRef(new Map<string, { renderer: Promise<unknown>; media: Promise<unknown> }>());
+  const lastPrewarm = useRef<{ key: string; entry: { renderer: Promise<unknown>; media: Promise<unknown> } } | null>(null);
+  const coverAssetLeases = useRef(new Map<string, { assetId: string; lease: AssetUrlLease }>());
+  const workshopAssetLeases = useRef(new Map<string, AssetUrlLease>());
+  const workshopAssetsRef = useRef(workshopAssets);
+  const workshopImportInFlight = useRef(false);
   const loadToken = useRef(0);
   const openingBookRef = useRef<OpeningBook | null>(null);
   const openingFrame = useRef<number | null>(null);
@@ -426,17 +302,33 @@ export function App() {
   pageTurnDocumentRef.current = snapshot.document.id;
   reducedMotionRef.current = reducedMotion;
 
+  useLayoutEffect(() => {
+    workshopAssetsRef.current = workshopAssets;
+  }, [workshopAssets]);
+
+  const commitSpread = useCallback((direction: TurnDirection) => {
+    const waitsForRenderer = rendererAvailableRef.current;
+    waitingForRendererRef.current = { backward: waitsForRenderer, forward: waitsForRenderer };
+    setPageTurnReadiness({ navigationKey: "", backward: false, forward: false });
+    bookEngine.setSpread(pageTurnIndexRef.current + (direction === "forward" ? 1 : -1));
+  }, []);
+
   const turnController = useMemo(() => createPageTurnSession({
     surface: "editor",
     now: () => performance.now(),
     requestFrame: (callback) => requestAnimationFrame(callback),
     cancelFrame: (handle) => cancelAnimationFrame(handle),
     setTurn,
-    commit: (direction) => bookEngine.setSpread(pageTurnIndexRef.current + (direction === "forward" ? 1 : -1)),
+    commit: commitSpread,
     navigationKey: () => `${pageTurnDocumentRef.current}:${pageTurnIndexRef.current}`,
     reducedMotion: () => reducedMotionRef.current,
-    canTurn: (direction) => canTurnPage(direction, pageTurnIndexRef.current, pageTurnCountRef.current),
-  }), []);
+    canTurn: (direction) => canTurnPage(
+      direction,
+      pageTurnIndexRef.current,
+      pageTurnCountRef.current,
+      waitingForRendererRef.current[direction],
+    ),
+  }), [commitSpread]);
 
   useEffect(() => {
     turnController.activate();
@@ -445,9 +337,29 @@ export function App() {
 
   const turnPage = turnController.turnPage;
   const onPageGesture = turnController.onPageGesture;
+  const workshopSnapshot = useMemo<BookSnapshot>(() => ({
+    document: {
+      id: "apertale-new-book-workshop",
+      revision: 1,
+      title: "Untitled Apertale",
+      spreads: [{ id: "blank-workshop-spread", order: 0, title: "", body: "", elements: [] }],
+    },
+    session: {
+      currentSpreadIndex: 0,
+      selectionId: null,
+      sceneThemeId: snapshot.session.sceneThemeId,
+      preview: true,
+      quality: snapshot.session.quality,
+    },
+    lastAction: null,
+  }), [snapshot.session.quality, snapshot.session.sceneThemeId]);
   const webGlAvailable = useMemo(() => supportsWebGl2(forceFallback), []);
-  const renderWebGl = webGlAvailable && !sceneFailed;
   const readerSceneKey = readerSceneStructureKey(snapshot, "reader");
+  const activeSceneKey = showCreateGuide ? readerSceneStructureKey(workshopSnapshot, "workshop") : readerSceneKey;
+  const renderWebGl = webGlAvailable && !sceneFailureMatches(activeSceneKey, failedSceneKey);
+  rendererAvailableRef.current = renderWebGl;
+  const waitingForRenderer = pageTurnWaitState(renderWebGl, pageTurnNavigationKey, pageTurnReadiness);
+  waitingForRendererRef.current = waitingForRenderer;
 
   /**
    * 1 is a fully open book, 0 is the closed case facing the reader. The library
@@ -541,29 +453,20 @@ export function App() {
   // is shown directly rather than parking the reader on an empty tab.
   const activeLibraryTab: LibraryTab = libraryTabbed ? libraryTab : "explore";
   const shelfBooks = activeLibraryTab === "yours" ? personalBooks : curatedBooks;
-  const workshopSnapshot = useMemo<BookSnapshot>(() => ({
-    document: {
-      id: "apertale-new-book-workshop",
-      revision: 1,
-      title: "Untitled Apertale",
-      spreads: [{ id: "blank-workshop-spread", order: 0, title: "", body: "", elements: [] }],
-    },
-    session: {
-      currentSpreadIndex: 0,
-      selectionId: null,
-      sceneThemeId: snapshot.session.sceneThemeId,
-      preview: true,
-      quality: snapshot.session.quality,
-    },
-    lastAction: null,
-  }), [snapshot.session.quality, snapshot.session.sceneThemeId]);
-
   useEffect(() => {
     if (!showCreateGuide || workshopHydrated) return undefined;
     let canceled = false;
     restoreCreationWorkshopAssets()
-      .then((assets) => {
-        if (canceled) return;
+      .then(({ assets, leases }) => {
+        if (canceled) {
+          leases.forEach((lease) => lease.release());
+          return;
+        }
+        leases.forEach((lease) => {
+          const previous = workshopAssetLeases.current.get(lease.assetId);
+          if (previous) lease.release();
+          else workshopAssetLeases.current.set(lease.assetId, lease);
+        });
         dispatchCreationWorkshop({ type: "restore-assets", assets });
         setWorkshopHydrated(true);
       })
@@ -587,24 +490,49 @@ export function App() {
 
   useEffect(() => {
     let canceled = false;
-    // Only a successfully resolved dedicated cover earns an entry. A missing or
-    // unresolvable cover keeps the bundled placeholder visible but must not
-    // satisfy the deterministic cover-evidence blocker.
-    Promise.all(library.books.map(async (book) => {
-      if (!book.coverAssetId) return null;
-      try {
-        return [book.id, await resolveAssetUrl(book.coverAssetId)] as const;
-      } catch {
-        recordDiagnostic("asset:cover-resolve-failed", { bookId: book.id });
-        return null;
-      }
-    })).then((entries) => {
-      if (!canceled) {
-        setResolvedCoverUrls(Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry !== null)));
-      }
+    const plannedAssets = shelfCoverAssetPlan(
+      showLibrary && !snapshot.session.preview && !showCreateGuide,
+      shelfBooks,
+    );
+    coverAssetLeases.current.forEach((retained, bookId) => {
+      if (plannedAssets.get(bookId) === retained.assetId) return;
+      retained.lease.release();
+      coverAssetLeases.current.delete(bookId);
     });
+    // Remove stale bindings synchronously. A slow replacement cover must never
+    // let the previous asset satisfy presentation or render evidence.
+    setResolvedCoverUrls((current) => {
+      const retained = Object.fromEntries(Object.entries(current).filter(
+        ([bookId, resolved]) => plannedAssets.get(bookId) === resolved.assetId,
+      ));
+      return Object.keys(retained).length === Object.keys(current).length ? current : retained;
+    });
+    for (const [bookId, assetId] of plannedAssets) {
+      const retained = coverAssetLeases.current.get(bookId);
+      if (retained?.assetId === assetId) continue;
+      void acquireAssetUrl(assetId).then((lease) => {
+        if (canceled) {
+          lease.release();
+          return;
+        }
+        const previous = coverAssetLeases.current.get(bookId);
+        if (previous?.assetId === assetId) {
+          lease.release();
+          return;
+        }
+        previous?.lease.release();
+        coverAssetLeases.current.set(bookId, { assetId, lease });
+        setResolvedCoverUrls((current) => {
+          const previous = current[bookId];
+          if (previous?.assetId === assetId && previous.url === lease.url) return current;
+          return { ...current, [bookId]: { assetId, url: lease.url } };
+        });
+      }).catch(() => {
+        if (!canceled) recordDiagnostic("asset:cover-resolve-failed", { bookId });
+      });
+    }
     return () => { canceled = true; };
-  }, [library]);
+  }, [shelfBooks, showCreateGuide, showLibrary, snapshot.session.preview]);
 
   const spread = snapshot.document.spreads[snapshot.session.currentSpreadIndex];
   const selected = snapshot.session.selectionId
@@ -657,12 +585,19 @@ export function App() {
     turn,
     snapshot.session.currentSpreadIndex,
     snapshot.document.spreads.length,
+    waitingForRenderer,
   );
   const stageIsLoading = readyBookId !== snapshot.document.id || sceneLoadingBookId === snapshot.document.id;
   const libraryBusy = Boolean(openingBook || libraryMotion !== "idle");
 
   const isCreatorBook = Boolean(activeLibraryBook) && activeLibraryBook?.sample === false;
   const qualityGate = bookEngine.getQualityGate();
+  const visiblePublicationRecord = publicationRecordForDocument(snapshot.document.id, publicationRecord);
+  const publicationLauncher = publicationLauncherPresentation(
+    visiblePublicationRecord,
+    qualityGate.status,
+    snapshot.document.revision,
+  );
 
   /**
    * The mobile reader sheet scrolls its own copy. Turning the page swaps the
@@ -675,12 +610,22 @@ export function App() {
   }, [snapshot.document.id, snapshot.session.currentSpreadIndex]);
 
   useEffect(() => {
+    setShowPublication(false);
     if (!isCreatorBook) {
       setPublicationRecord(null);
       return;
     }
     setPublicationRecord(getPublicationRecord(snapshot.document.id));
   }, [isCreatorBook, snapshot.document.id]);
+
+  const handlePublicationRecordChange = useCallback((expectedDocumentId: string, next: PublicationRecord | null) => (
+    commitPublicationRecordIfCurrent(
+      activeDocumentIdRef.current,
+      expectedDocumentId,
+      next,
+      setPublicationRecord,
+    )
+  ), []);
 
   /**
    * Prewarm exactly what the next screen needs, and only after a reader shows
@@ -689,24 +634,31 @@ export function App() {
    * background stay off the cold path.
    */
   const prewarmReader = useCallback((bookId: string) => {
-    const cached = prewarmedBooks.current.get(bookId);
-    if (cached) return cached;
+    const info = bookEngine.getPrewarmMedia(bookId);
+    const prewarmKey = `${bookId}:${info?.spreadId ?? ""}:${info?.mediaRef ?? ""}`;
+    if (lastPrewarm.current?.key === prewarmKey) return lastPrewarm.current.entry;
     const renderer: Promise<unknown> = import("./ThreeBook")
       .catch(() => recordDiagnostic("book:prewarm-renderer-failed", { documentId: bookId }));
-    const info = bookEngine.getPrewarmMedia(bookId);
     const media: Promise<unknown> = info?.mediaRef
-      ? resolveAssetUrl(info.mediaRef)
-        .then((url) => {
-          const image = new Image();
-          image.decoding = "async";
-          image.src = url;
-          return image.decode();
+      ? acquireAssetUrl(info.mediaRef)
+        .then(async (lease) => {
+          try {
+            const image = new Image();
+            image.decoding = "async";
+            image.src = lease.url;
+            await image.decode();
+          } finally {
+            lease.release();
+          }
         })
         .then(() => recordDiagnostic("book:prewarmed", { documentId: bookId, spreadId: info.spreadId }))
         .catch(() => recordDiagnostic("book:prewarm-media-failed", { documentId: bookId }))
       : Promise.resolve();
     const entry = { renderer, media };
-    prewarmedBooks.current.set(bookId, entry);
+    // Dynamic imports are cached by the module loader. Keeping only the latest
+    // media intent bounds our own cache while a changed spread/asset identity
+    // naturally produces a fresh decode.
+    lastPrewarm.current = { key: prewarmKey, entry };
     return entry;
   }, []);
 
@@ -717,15 +669,6 @@ export function App() {
 
   const handleReaderRendered = useCallback((evidence: ReaderRenderEvidence) => {
     setLastReaderRender(evidence);
-    bookEngine.recordRenderEvidence({
-      documentId: evidence.documentId,
-      revision: evidence.revision,
-      spreadId: evidence.spreadId,
-      theme: evidence.theme,
-      surface: evidence.surface,
-      locator: evidence.locator,
-      scope: "spread",
-    });
   }, []);
 
   useEffect(() => {
@@ -914,7 +857,8 @@ export function App() {
     setShowCreateGuide(true);
   }, []);
 
-  const closePublication = useCallback(() => {
+  const closePublication = useCallback((expectedDocumentId?: string) => {
+    if (expectedDocumentId && activeDocumentIdRef.current !== expectedDocumentId) return;
     setShowPublication(false);
     window.setTimeout(() => publicationOpener.current?.focus(), 0);
   }, []);
@@ -975,7 +919,6 @@ export function App() {
     const nextOpening: OpeningBook = {
       id: book.id,
       title: book.title,
-      coverUrl: resolvedCoverUrls[book.id] ?? book.coverTextureUrl,
     };
 
     if (bookId === snapshot.document.id && readyBookId === bookId) {
@@ -994,17 +937,19 @@ export function App() {
     if (bookId === snapshot.document.id) return;
     openingFrame.current = window.requestAnimationFrame(() => {
       openingFrame.current = null;
-      if (!bookEngine.openBook(bookId)) {
-        openingBookRef.current = null;
-        setOpeningBook(null);
-        return;
-      }
-      setTurn(null);
-      setHoveredId(null);
-      setShowMore(false);
-      setShowOutline(false);
+      void bookEngine.openBookCoordinated(bookId).then((result) => {
+        if (!result.ok) {
+          openingBookRef.current = null;
+          setOpeningBook(null);
+          return;
+        }
+        setTurn(null);
+        setHoveredId(null);
+        setShowMore(false);
+        setShowOutline(false);
+      });
     });
-  }, [advanceLoadStage, beginOpenTransition, library.books, prewarmReader, readyBookId, resolvedCoverUrls, snapshot.document.id]);
+  }, [advanceLoadStage, beginOpenTransition, library.books, prewarmReader, readyBookId, snapshot.document.id]);
 
   const presentAuthoringSurface = useCallback((request: AuthoringSurfaceRequest, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
     const current = bookEngine.getSnapshot();
@@ -1033,6 +978,8 @@ export function App() {
     signal.addEventListener("abort", onAbort, { once: true });
     pendingAuthoringSurface.current = {
       request,
+      signal,
+      settling: false,
       resolve,
       reject,
       cleanup: () => {
@@ -1076,8 +1023,8 @@ export function App() {
     const visibleShelfIds = shelfBooks.map((book) => book.id);
     const requestedSpreadId = authoringSurfaceRequest.spreadId ?? activeSpreadId;
     const requestedShelfBook = shelfBooks.find((book) => book.id === authoringSurfaceRequest.documentId);
-    const requestedCoverUrl = requestedShelfBook
-      ? resolvedCoverUrls[requestedShelfBook.id] ?? requestedShelfBook.coverTextureUrl
+    const requestedCover = requestedShelfBook
+      ? shelfCoverTarget(requestedShelfBook, resolvedCoverUrls)
       : undefined;
     const viewportBounds = { top: 0, right: window.innerWidth, bottom: window.innerHeight, left: 0 };
     const contentRendered = authoringSurfaceRequest.surface === "reader"
@@ -1092,7 +1039,7 @@ export function App() {
       })
       : shelfCoverMatches(
         renderedShelfCovers[authoringSurfaceRequest.documentId],
-        requestedCoverUrl,
+        requestedCover,
         viewportBounds,
       );
     const ready = authoringSurfaceReady(authoringSurfaceRequest, {
@@ -1112,12 +1059,52 @@ export function App() {
     if (!ready) return undefined;
     const pending = pendingAuthoringSurface.current;
     if (pending?.request.requestId !== authoringSurfaceRequest.requestId) return undefined;
-    pending.cleanup();
-    pendingAuthoringSurface.current = null;
-    setAuthoringSurfaceRequest(null);
-    pending.resolve();
+    if (pending.settling) return undefined;
+    pending.settling = true;
+    const libraryBook = library.books.find((book) => book.id === authoringSurfaceRequest.documentId);
+    const recordVisibleEvidence = async () => {
+      if (!libraryBook || libraryBook.sample) return;
+      const input = authoringSurfaceRequest.surface === "reader"
+        ? lastReaderRender && {
+          documentId: lastReaderRender.documentId,
+          revision: lastReaderRender.revision,
+          spreadId: lastReaderRender.spreadId,
+          theme: lastReaderRender.theme,
+          surface: lastReaderRender.surface,
+          locator: lastReaderRender.locator,
+          scope: "spread" as const,
+        }
+        : requestedShelfBook
+          && requestedCover
+          && dedicatedCoverRendered(requestedShelfBook, resolvedCoverAsset(requestedShelfBook, resolvedCoverUrls))
+          ? {
+              documentId: requestedCover.documentId,
+              revision: requestedCover.revision,
+              theme: authoringSurfaceRequest.theme,
+              surface: "shelf" as const,
+              locator: `[data-book-id="${requestedCover.documentId}"] .library-cover-frame img`,
+              scope: "cover" as const,
+            }
+          : null;
+      if (!input || !await bookEngine.recordRenderEvidenceCoordinated(input, pending.signal)) {
+        throw new Error("The visible authoring frame could not be recorded for quality review.");
+      }
+    };
+    void recordVisibleEvidence().then(() => {
+      if (pendingAuthoringSurface.current !== pending) return;
+      pending.cleanup();
+      pendingAuthoringSurface.current = null;
+      setAuthoringSurfaceRequest(null);
+      pending.resolve();
+    }, (error: unknown) => {
+      if (pendingAuthoringSurface.current !== pending) return;
+      pending.cleanup();
+      pendingAuthoringSurface.current = null;
+      setAuthoringSurfaceRequest(null);
+      pending.reject(error instanceof Error ? error : new Error("The visible authoring frame could not be recorded."));
+    });
     return undefined;
-  }, [authoringSurfaceRequest, lastReaderRender, libraryMotion, openingBook, readerSceneKey, renderWebGl, renderedShelfCovers, resolvedCoverUrls, shelfBooks, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.document.revision, snapshot.document.spreads, snapshot.session.currentSpreadIndex, snapshot.session.preview, snapshot.session.sceneThemeId]);
+  }, [authoringSurfaceRequest, lastReaderRender, library.books, libraryMotion, openingBook, readerSceneKey, renderWebGl, renderedShelfCovers, resolvedCoverUrls, shelfBooks, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.document.revision, snapshot.document.spreads, snapshot.session.currentSpreadIndex, snapshot.session.preview, snapshot.session.sceneThemeId]);
 
   useEffect(() => () => {
     const pending = pendingAuthoringSurface.current;
@@ -1144,8 +1131,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!renderWebGl) recordDiagnostic("fallback:activated", { forced: forceFallback, initializationFailed: sceneFailed });
-  }, [renderWebGl, sceneFailed]);
+    if (!renderWebGl) recordDiagnostic("fallback:activated", { forced: forceFallback, initializationFailed: sceneFailureMatches(activeSceneKey, failedSceneKey) });
+  }, [activeSceneKey, failedSceneKey, renderWebGl]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = isNight ? "night" : "day";
@@ -1216,40 +1203,44 @@ export function App() {
   useEffect(() => () => {
     if (openingFrame.current) cancelAnimationFrame(openingFrame.current);
     if (libraryFrame.current) cancelAnimationFrame(libraryFrame.current);
+    coverAssetLeases.current.forEach(({ lease }) => lease.release());
+    coverAssetLeases.current.clear();
+    workshopAssetLeases.current.forEach((lease) => lease.release());
+    workshopAssetLeases.current.clear();
     releaseAssetUrls();
   }, []);
 
   const liftSelected = () => {
     if (!selected) return;
-    bookEngine.dispatch({ type: "lift", requestId: createRequestId(), expectedRevision: snapshot.document.revision, elementId: selected.id }, "human");
+    void bookEngine.dispatchCoordinated({ type: "lift", requestId: createRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId: selected.id }, "human");
   };
 
   const toggleLock = () => {
     if (!selected) return;
-    bookEngine.dispatch({ type: "edit", requestId: createRequestId(), expectedRevision: snapshot.document.revision, elementId: selected.id, locked: !selected.locked }, "human");
+    void bookEngine.dispatchCoordinated({ type: "edit", requestId: createRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId: selected.id, locked: !selected.locked }, "human");
   };
 
   const applyMotion = (preset: MotionPreset | "none") => {
     if (!selected) return;
-    humanAnimate(selected.id, preset === "none" ? null : { preset, durationMs: preset === "fly-across" ? 5200 : preset === "water-bob" ? 4200 : 3600, loop: true });
+    void humanAnimate(selected.id, preset === "none" ? null : { preset, durationMs: preset === "fly-across" ? 5200 : preset === "water-bob" ? 4200 : 3600, loop: true });
   };
 
   const setHoverResponse = (hover: HoverResponse) => {
     if (!selected) return;
-    humanInteract(selected.id, { hover });
+    void humanInteract(selected.id, { hover });
   };
 
   const setFocusResponse = (focus: FocusResponse) => {
     if (!selected) return;
-    humanInteract(selected.id, { focus });
+    void humanInteract(selected.id, { focus });
   };
 
   const adjustSelected = (kind: "scale" | "rotate", amount: number) => {
     if (!selected || selected.locked) return;
     if (kind === "scale") {
       const scale = Math.max(0.3, Math.min(1.8, selected.transform.scaleX + amount));
-      humanEdit(selected.id, { scaleX: scale, scaleY: scale });
-    } else humanEdit(selected.id, { rotationDeg: selected.transform.rotationDeg + amount });
+      void humanEdit(selected.id, { scaleX: scale, scaleY: scale });
+    } else void humanEdit(selected.id, { rotationDeg: selected.transform.rotationDeg + amount });
   };
 
   const setTheme = (theme: ThemeId) => bookEngine.setTheme(theme, "human");
@@ -1311,8 +1302,15 @@ export function App() {
     window.setTimeout(() => addPhotoButton.current?.focus(), 60);
   }), []);
 
-  const importWorkshopPhotos = async (files: FileList | null) => {
-    if (!files?.length) return;
+  const importWorkshopPhotos = async (files: Iterable<File> | null) => {
+    // FileList is live: clearing the picker empties it while an awaited import
+    // is still iterating. Freeze the selection before the first async boundary.
+    const selectedFiles = Array.from(files ?? []);
+    if (selectedFiles.length === 0) return;
+    if (workshopImportInFlight.current) {
+      setWorkshopImportError("Wait for the current image import to finish before adding another batch.");
+      return;
+    }
     // Bind the eventual completion to the request visible when this import
     // began. A newer Agent request may supersede it while images are decoded.
     const handoffRequestId = handoffRequest?.requestId ?? null;
@@ -1322,32 +1320,53 @@ export function App() {
       setWorkshopImportError("Wait for saved photos to finish restoring before adding new images.");
       return;
     }
-    const room = isBookArt ? MAX_BOOK_UPLOADED_ASSETS : MAX_WORKSHOP_ASSETS - workshopAssets.length;
+    const room = isBookArt ? MAX_BOOK_UPLOADED_ASSETS : MAX_WORKSHOP_ASSETS - workshopAssetsRef.current.length;
     if (room <= 0) {
       setWorkshopImportError(isBookArt
         ? `A book may reference at most ${MAX_BOOK_UPLOADED_ASSETS} uploaded images.`
         : `This brief already holds ${MAX_WORKSHOP_ASSETS} photos. Remove one to add another.`);
       return;
     }
+    workshopImportInFlight.current = true;
     setAssetImporting(true);
     setWorkshopImportError(null);
     try {
-      const photoBatch = isBookArt ? null : await importCreationWorkshopAssets(files, room);
-      const bookArtBatch = isBookArt ? await storeLocalImages(files, room) : null;
+      const photoBatch = isBookArt ? null : await importCreationWorkshopAssets(selectedFiles, room);
+      const bookArtBatch = isBookArt ? await storeLocalImages(selectedFiles, { assetUse: "book-art", limit: room }) : null;
       const stored = photoBatch?.stored ?? bookArtBatch?.assets ?? [];
-      const assetIds = photoBatch?.imported.map((asset) => asset.id) ?? bookArtBatch?.assets.map((asset) => asset.id) ?? [];
+      let deliveredAssetIds = bookArtBatch?.assets.map((asset) => asset.id) ?? [];
       const failed = photoBatch?.failed ?? bookArtBatch?.failed ?? 0;
-      const rejected = photoBatch?.rejected ?? bookArtBatch?.rejected ?? 0;
+      let rejected = photoBatch?.rejected ?? bookArtBatch?.rejected ?? 0;
+      if (photoBatch) {
+        const admitted = admitWorkshopAssets(workshopAssetsRef.current, photoBatch.imported);
+        const admittedIds = new Set(admitted.map((asset) => asset.id));
+        rejected += photoBatch.imported.length - admitted.length;
+        deliveredAssetIds = admitted.map((asset) => asset.id);
+        photoBatch.leases.forEach((lease) => {
+          if (!admittedIds.has(lease.assetId)) {
+            lease.release();
+            return;
+          }
+          const previous = workshopAssetLeases.current.get(lease.assetId);
+          if (previous) lease.release();
+          else workshopAssetLeases.current.set(lease.assetId, lease);
+        });
+        if (admitted.length > 0) {
+          workshopAssetsRef.current = [...workshopAssetsRef.current, ...admitted];
+          dispatchCreationWorkshop({ type: "append-assets", assets: admitted });
+        }
+      }
+      const deliveredIds = new Set(deliveredAssetIds);
       // Files keep their picked order, and each import appends to the end of the strip.
       for (const asset of stored) {
+        if (!deliveredIds.has(asset.id)) continue;
         recordDiagnostic("workbench:asset-handed-off", { assetId: asset.id, assetUse: requestAtStart?.assetUse ?? "source-photo", originalSize: asset.originalSize ?? asset.size, size: asset.size, optimized: asset.optimized ?? false });
       }
-      if (assetIds.length > 0) {
-        if (photoBatch) dispatchCreationWorkshop({ type: "append-assets", assets: photoBatch.imported });
+      if (deliveredAssetIds.length > 0) {
         // The pending tool call resolves with real ids, so the Agent resumes
         // immediately instead of waiting to be told the upload finished.
         const outcome = handoffRequestId
-          ? completeImageHandoff(handoffRequestId, { assetIds, rejected, failed })
+          ? completeImageHandoff(handoffRequestId, { assetIds: deliveredAssetIds, rejected, failed })
           : null;
         if (outcome) {
           recordDiagnostic(outcome.status === "partial" ? "handoff:partial" : "handoff:provided", {
@@ -1363,7 +1382,7 @@ export function App() {
             if (isBookArt) setShowCreateGuide(false);
           }
         } else if (handoffRequestId === null && (rejected > 0 || failed > 0)) {
-          setWorkshopImportError(describePartialImageHandoff({ accepted: assetIds.length, rejected, failed }));
+          setWorkshopImportError(describePartialImageHandoff({ accepted: deliveredAssetIds.length, rejected, failed }));
         }
       } else if (failed > 0) {
         setWorkshopImportError("This browser could not store those images. Free some space, then try again.");
@@ -1373,6 +1392,7 @@ export function App() {
         setWorkshopImportError("No image was added.");
       }
     } finally {
+      workshopImportInFlight.current = false;
       setAssetImporting(false);
     }
   };
@@ -1387,6 +1407,8 @@ export function App() {
   const removeWorkshopAsset = (assetId: string) => {
     // This is a brief-level edit only. The blob stays in IndexedDB so existing
     // books and WebMCP asset lookups keep working.
+    workshopAssetLeases.current.get(assetId)?.release();
+    workshopAssetLeases.current.delete(assetId);
     dispatchCreationWorkshop({ type: "remove-asset", assetId });
     recordDiagnostic("workbench:asset-removed-from-brief", { assetId });
     window.setTimeout(() => addPhotoButton.current?.focus(), 0);
@@ -1411,7 +1433,9 @@ export function App() {
   };
 
   const confirmReset = () => {
-    if (window.confirm("Restore the original Apertale sample book? Your local edits will be replaced.")) bookEngine.reset();
+    if (window.confirm("Restore the original Apertale sample book? Your local edits will be replaced.")) {
+      void bookEngine.resetCoordinated();
+    }
   };
 
   const selectLibraryTab = (tab: LibraryTab, tablist: HTMLElement | null) => {
@@ -1432,9 +1456,10 @@ export function App() {
   const undoLastAction = () => {
     const undoToken = snapshot.lastAction?.undoToken;
     if (!undoToken) return;
-    bookEngine.dispatch({
+    void bookEngine.dispatchCoordinated({
       type: "undo",
       requestId: createRequestId(),
+      expectedDocumentId: snapshot.document.id,
       expectedRevision: snapshot.document.revision,
       undoToken,
     }, "human");
@@ -1534,29 +1559,25 @@ export function App() {
                   >
                     <span className="library-cover-frame">
                       <img
-                        src={resolvedCoverUrls[book.id] ?? book.coverTextureUrl}
+                        key={`${book.id}:${book.revision}:${book.coverAssetId ?? book.coverTextureUrl}:${resolvedCoverAsset(book, resolvedCoverUrls)?.url ?? "unresolved"}`}
+                        src={resolvedCoverAsset(book, resolvedCoverUrls)?.url ?? book.coverTextureUrl}
                         alt={`${book.title} cover`}
                         loading={index < 4 ? "eager" : "lazy"}
                         decoding="async"
                         fetchPriority={index === 0 ? "high" : "auto"}
                         onLoad={(event) => {
-                          const renderedCoverUrl = resolvedCoverUrls[book.id] ?? book.coverTextureUrl;
+                          const target = shelfCoverTarget(book, resolvedCoverUrls);
+                          if (!target) return;
                           const renderElement = event.currentTarget;
-                          const renderedCover = { url: renderedCoverUrl, renderElement };
-                          setRenderedShelfCovers((current) => current[book.id]?.url === renderedCoverUrl
+                          const expectedUrl = new URL(target.url, window.location.href).href;
+                          if ((renderElement.currentSrc || renderElement.src) !== expectedUrl) return;
+                          const renderedCover = { ...target, renderElement };
+                          setRenderedShelfCovers((current) => current[book.id]?.assetId === target.assetId
+                            && current[book.id]?.revision === target.revision
+                            && current[book.id]?.url === target.url
                             && current[book.id]?.renderElement === renderElement
                             ? current
                             : { ...current, [book.id]: renderedCover });
-                          if (dedicatedCoverRendered(book, resolvedCoverUrls[book.id])) {
-                            bookEngine.recordRenderEvidence({
-                              documentId: book.id,
-                              revision: book.revision,
-                              scope: "cover",
-                              theme: snapshot.session.sceneThemeId,
-                              surface: "shelf",
-                              locator: `[data-book-id="${book.id}"] .library-cover-frame img`,
-                            });
-                          }
                         }}
                       />
                       {openingBook?.id === book.id && <span className="library-opening-badge" aria-hidden="true"><SpinnerGap size={15} weight="bold" /> Opening</span>}
@@ -1618,12 +1639,21 @@ export function App() {
               handoffRect={handoffRect}
               onSelect={showCreateGuide ? () => undefined : (elementId) => { bookEngine.setSelection(elementId); setShowMore(false); }}
               onHover={showCreateGuide ? () => undefined : setHoveredId}
-              onMoveElement={showCreateGuide ? () => undefined : (elementId, x, y) => humanEdit(elementId, { x, y })}
+              onMoveElement={showCreateGuide ? () => undefined : (elementId, x, y) => { void humanEdit(elementId, { x, y }); }}
               onPageGesture={showCreateGuide ? () => undefined : onPageGesture}
+              onPageTurnReady={showCreateGuide ? undefined : (direction, ready) => setPageTurnReadiness((current) => (
+                current.navigationKey === pageTurnNavigationKey
+                  ? current[direction] === ready ? current : { ...current, [direction]: ready }
+                  : { navigationKey: pageTurnNavigationKey, backward: false, forward: false, [direction]: ready }
+              ))}
               onLoading={showCreateGuide ? () => undefined : handleBookLoading}
               onReady={showCreateGuide ? () => undefined : handleBookReady}
               onRendered={showCreateGuide ? undefined : handleReaderRendered}
-              onFailure={() => setSceneFailed(true)}
+              onFailure={(failureSceneKey) => {
+                if (!sceneFailureMatches(activeSceneKey, failureSceneKey)) return;
+                setPageTurnReadiness({ navigationKey: pageTurnNavigationKey, backward: false, forward: false });
+                setFailedSceneKey(failureSceneKey);
+              }}
             />
           </Suspense>
         ) : showCreateGuide ? (
@@ -1636,6 +1666,7 @@ export function App() {
             renderEvidenceToken={authoringSurfaceRequest?.surface === "reader"
               ? authoringSurfaceRequest.renderEvidenceToken
               : undefined}
+            onSelect={(elementId) => { bookEngine.setSelection(elementId); setShowMore(false); }}
             onReady={handleBookReady}
             onUnavailable={handleBookUnavailable}
             onRendered={handleReaderRendered}
@@ -1792,18 +1823,25 @@ export function App() {
             <button className="outline-button" onClick={() => setShowOutline(!showOutline)} aria-expanded={showOutline}>Story</button>
             {isCreatorBook && (
               <button
-                className={`publish-button ${publicationRecord?.status === "published" ? "is-live" : ""}`}
+                className={`publish-button ${publicationLauncher.state === "shared" ? "is-live" : ""}`}
                 onClick={openPublication}
                 aria-haspopup="dialog"
               >
-                {publicationRecord?.status === "published" ? <LinkSimple size={17} weight="bold" /> : <UploadSimple size={17} weight="bold" />}
-                <span>{publicationRecord?.status === "published" ? "Shared" : "Publish"}</span>
+                {publicationLauncher.state === "shared"
+                  ? <LinkSimple size={17} weight="bold" />
+                  : publicationLauncher.state === "checking"
+                    ? <SpinnerGap size={17} weight="bold" className="is-spinning" />
+                    : publicationLauncher.state === "attention"
+                      ? <WarningCircle size={17} weight="fill" />
+                      : <UploadSimple size={17} weight="bold" />}
+                <span>{publicationLauncher.label}</span>
               </button>
             )}
           </div>
-          <button className="agent-prompt" onClick={openCodexGuide}>
+          <button className="agent-prompt" onClick={openCodexGuide} aria-label="Create your own">
             <Sparkle size={17} weight="fill" />
-            <span>Create your own</span>
+            <span className="agent-prompt-label agent-prompt-label-full" aria-hidden="true">Create your own</span>
+            <span className="agent-prompt-label agent-prompt-label-compact" aria-hidden="true">Create</span>
           </button>
           <div className="page-progress"><strong>{snapshot.session.currentSpreadIndex + 1}</strong><span>/</span>{snapshot.document.spreads.length}</div>
         </footer>
@@ -2044,10 +2082,11 @@ export function App() {
 
       {showPublication && isCreatorBook && !snapshot.session.preview && (
         <PublicationPanel
+          key={snapshot.document.id}
           document={snapshot.document}
-          record={publicationRecord}
+          record={visiblePublicationRecord}
           qualityGate={qualityGate}
-          onRecordChange={setPublicationRecord}
+          onRecordChange={handlePublicationRecordChange}
           onClose={closePublication}
         />
       )}

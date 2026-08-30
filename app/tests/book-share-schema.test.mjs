@@ -103,3 +103,39 @@ test("migration 0003 backfills creation-rate evidence without duplicating bootst
   assert.equal(events[0].book_id, "22345678-1234-4234-8234-123456789abc");
   assert.equal(events[0].created_at, "2026-08-30T00:00:00.000Z");
 });
+
+test("migration 0004 marks only revoked generations that still own remote assets", async (context) => {
+  const database = new DatabaseSync(":memory:");
+  context.after(() => database.close());
+  const migrationDirectory = new URL("../drizzle/", import.meta.url);
+  for (const migration of [
+    "0001_living_book_sharing.sql",
+    "0002_publish_attempt_token.sql",
+    "0003_creation_events.sql",
+  ]) database.exec(await readFile(new URL(migration, migrationDirectory), "utf8"));
+
+  const now = "2026-08-30T00:00:00.000Z";
+  const withAsset = "32345678-1234-4234-8234-123456789abc";
+  const withoutAsset = "42345678-1234-4234-8234-123456789abc";
+  const insertBook = database.prepare(`INSERT INTO living_books (
+    id, manage_token_hash, status, created_at, updated_at, revoked_at
+  ) VALUES (?, 'manage-hash', 'revoked', ?, ?, ?)`);
+  insertBook.run(withAsset, now, now, now);
+  insertBook.run(withoutAsset, now, now, now);
+  database.prepare(`INSERT INTO living_book_assets (
+    book_id, asset_id, object_key, content_type, byte_size, created_at
+  ) VALUES (?, ?, 'books/old-object', 'image/png', 8, ?)`).run(
+    withAsset,
+    "asset:12345678-1234-4234-8234-123456789abc",
+    now,
+  );
+
+  database.exec(await readFile(new URL("0004_revoked_asset_cleanup.sql", migrationDirectory), "utf8"));
+
+  const rows = database.prepare(`SELECT id, asset_cleanup_pending
+    FROM living_books ORDER BY id`).all().map((row) => ({ ...row }));
+  assert.deepEqual(rows, [
+    { id: withAsset, asset_cleanup_pending: 1 },
+    { id: withoutAsset, asset_cleanup_pending: 0 },
+  ]);
+});
