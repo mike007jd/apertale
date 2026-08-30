@@ -31,6 +31,14 @@ export const LIVING_BOOK_SCHEMA_STATEMENTS = [
     book_id TEXT NOT NULL,
     retired_at TEXT NOT NULL
   )`,
+  // No foreign key by design: creation-rate evidence must survive deletion.
+  `CREATE TABLE IF NOT EXISTS living_book_creation_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS living_book_creation_events_created_at
+    ON living_book_creation_events (created_at)`,
   `CREATE TRIGGER IF NOT EXISTS retire_living_book_share_token
     AFTER UPDATE OF status ON living_books
     WHEN OLD.status = 'published'
@@ -42,5 +50,11 @@ export const LIVING_BOOK_SCHEMA_STATEMENTS = [
       ) VALUES (
         OLD.share_token_hash, OLD.id, NEW.updated_at
       );
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS record_living_book_creation
+    AFTER INSERT ON living_books
+    BEGIN
+      INSERT INTO living_book_creation_events (book_id, created_at)
+      VALUES (NEW.id, NEW.created_at);
     END`,
 ];

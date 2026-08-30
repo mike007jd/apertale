@@ -480,31 +480,38 @@ export function createBookShareApi({
       throw new HttpError(400, "invalid_book_id", "A valid client-generated book id is required.");
     }
     const manageTokenHash = await hashToken(bearerToken(request));
-    const existing = await repository.findBook(id);
-    if (existing) {
-      if (existing.manage_token_hash !== manageTokenHash) {
-        throw new HttpError(409, "book_exists", "That book id already belongs to another creator capability.");
-      }
-      return json({ ok: true, bookId: id, status: existing.status }, { status: 200 });
-    }
-    if (await repository.countBooks() >= maxSiteBooks) {
-      throw new HttpError(429, "creation_limit", "This Site has reached its book storage bound.");
-    }
     const windowStart = new Date(clock().getTime() - creationWindowMs).toISOString();
-    if (await repository.countBooksCreatedSince(windowStart) >= maxBooksPerWindow) {
-      throw new HttpError(429, "creation_rate", "Too many books are being created right now. Try again later.");
-    }
-    const outcome = await repository.createBook({ id, manageTokenHash, now: now() });
+    const outcome = await repository.createBook({
+      id,
+      manageTokenHash,
+      now: now(),
+      maxSiteBooks,
+      maxBooksPerWindow,
+      windowStart,
+    });
     if (outcome === "conflict") {
       throw new HttpError(409, "book_exists", "That book id already belongs to another creator capability.");
     }
-    return json({ ok: true, bookId: id, status: "draft" }, { status: outcome === "created" ? 201 : 200 });
+    if (outcome === "site_limit") {
+      throw new HttpError(429, "creation_limit", "This Site has reached its book storage bound.");
+    }
+    if (outcome === "rate_limit") {
+      throw new HttpError(429, "creation_rate", "Too many books are being created right now. Try again later.");
+    }
+    const existing = outcome === "existing"
+      ? await repository.findManagedBook(id, manageTokenHash)
+      : null;
+    return json({
+      ok: true,
+      bookId: id,
+      status: existing?.status ?? "draft",
+    }, { status: outcome === "created" ? 201 : 200 });
   }
 
   async function uploadAsset(request, bookId, rawAssetId) {
     const assetId = decodePathComponent(rawAssetId, "The asset was not found.");
     if (!ASSET_ID_PATTERN.test(assetId)) throw new HttpError(400, "invalid_asset_id", "The asset id is invalid.");
-    const { book } = await managedBook(request, bookId);
+    const { book, manageTokenHash } = await managedBook(request, bookId);
     if (!MANAGEABLE_STATUSES.has(book.status)) {
       throw new HttpError(409, "invalid_state", "Only a draft or revoked book accepts new assets.");
     }
@@ -535,7 +542,29 @@ export function createBookShareApi({
     const objectKey = `books/${bookId}/${assetId.slice("asset:".length)}/${crypto.randomUUID()}`;
     await objects.put(objectKey, bytes, { httpMetadata: { contentType } });
     try {
-      await repository.insertAsset({ bookId, assetId, objectKey, contentType, byteSize: bytes.byteLength, now: now() });
+      const inserted = await repository.insertAsset({
+        bookId,
+        manageTokenHash,
+        assetId,
+        objectKey,
+        contentType,
+        byteSize: bytes.byteLength,
+        now: now(),
+        maxAssets: MAX_ASSETS,
+      });
+      if (!inserted) {
+        const current = await repository.findManagedBook(bookId, manageTokenHash);
+        if (current && MANAGEABLE_STATUSES.has(current.status)) {
+          const assets = await repository.listAssetIds(bookId);
+          if (assets.includes(assetId)) {
+            throw new HttpError(409, "asset_exists", "Asset ids are immutable; upload changed content with a new asset id.");
+          }
+          if (assets.length >= MAX_ASSETS) {
+            throw new HttpError(409, "asset_limit", `A book may contain at most ${MAX_ASSETS} uploaded assets.`);
+          }
+        }
+        throw new HttpError(409, "invalid_state", "Only a draft or revoked book accepts new assets.");
+      }
     } catch (error) {
       await objects.delete(objectKey);
       throw error;

@@ -21,15 +21,38 @@ export class D1BookRepository {
     await pending;
   }
 
-  async createBook({ id, manageTokenHash, now }) {
+  async createBook({
+    id,
+    manageTokenHash,
+    now,
+    maxSiteBooks = Number.MAX_SAFE_INTEGER,
+    maxBooksPerWindow = Number.MAX_SAFE_INTEGER,
+    windowStart = "",
+  }) {
     await this.ensureSchema();
     const result = await this.db.prepare(`INSERT INTO living_books (
       id, manage_token_hash, status, created_at, updated_at
-    ) VALUES (?, ?, 'draft', ?, ?)
-    ON CONFLICT(id) DO NOTHING`).bind(id, manageTokenHash, now, now).run();
+    ) SELECT ?, ?, 'draft', ?, ?
+      WHERE (SELECT COUNT(*) FROM living_books) < ?
+        AND (
+          SELECT COUNT(*) FROM living_book_creation_events
+          WHERE created_at >= ?
+        ) < ?
+    ON CONFLICT(id) DO NOTHING`).bind(
+      id,
+      manageTokenHash,
+      now,
+      now,
+      maxSiteBooks,
+      windowStart,
+      maxBooksPerWindow,
+    ).run();
     if (changes(result) === 1) return "created";
     const existing = await this.findBook(id);
-    return existing?.manage_token_hash === manageTokenHash ? "existing" : "conflict";
+    if (existing) return existing.manage_token_hash === manageTokenHash ? "existing" : "conflict";
+    if (await this.countBooks() >= maxSiteBooks) return "site_limit";
+    if (await this.countBooksCreatedSince(windowStart) >= maxBooksPerWindow) return "rate_limit";
+    return "conflict";
   }
 
   async findBook(id) {
@@ -69,6 +92,10 @@ export class D1BookRepository {
             OR share_token_hash <> ?
           )
         )
+        OR EXISTS (
+          SELECT 1 FROM living_book_retired_share_tokens
+          WHERE share_token_hash = living_books.publish_attempt_token_hash
+        )
       )`).bind(
       shareTokenHash,
       now,
@@ -89,18 +116,40 @@ export class D1BookRepository {
     return row?.retired === 1;
   }
 
-  async insertAsset({ bookId, assetId, objectKey, contentType, byteSize, now }) {
+  async insertAsset({
+    bookId,
+    manageTokenHash,
+    assetId,
+    objectKey,
+    contentType,
+    byteSize,
+    now,
+    maxAssets = Number.MAX_SAFE_INTEGER,
+  }) {
     await this.ensureSchema();
-    await this.db.prepare(`INSERT INTO living_book_assets (
+    const result = await this.db.prepare(`INSERT OR IGNORE INTO living_book_assets (
       book_id, asset_id, object_key, content_type, byte_size, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?)`).bind(
+    ) SELECT ?, ?, ?, ?, ?, ?
+      FROM living_books
+      WHERE id = ?
+        AND manage_token_hash = ?
+        AND status IN ('draft', 'revoked')
+        AND (
+          SELECT COUNT(*) FROM living_book_assets
+          WHERE book_id = ?
+        ) < ?`).bind(
       bookId,
       assetId,
       objectKey,
       contentType,
       byteSize,
       now,
+      bookId,
+      manageTokenHash,
+      bookId,
+      maxAssets,
     ).run();
+    return changes(result) === 1;
   }
 
   async listAssetIds(bookId) {
@@ -120,7 +169,7 @@ export class D1BookRepository {
   async countBooksCreatedSince(isoTimestamp) {
     await this.ensureSchema();
     const row = await this.db.prepare(`SELECT COUNT(*) AS count
-      FROM living_books
+      FROM living_book_creation_events
       WHERE created_at >= ?`).bind(isoTimestamp).first();
     return Number(row?.count ?? 0);
   }
@@ -140,7 +189,11 @@ export class D1BookRepository {
     WHERE id = ?
       AND manage_token_hash = ?
       AND status IN ('draft', 'revoked')
-      AND publish_attempt_token_hash = ?`).bind(
+      AND publish_attempt_token_hash = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM living_book_retired_share_tokens
+        WHERE share_token_hash = ?
+      )`).bind(
       shareTokenHash,
       title,
       revision,
@@ -149,6 +202,7 @@ export class D1BookRepository {
       now,
       id,
       manageTokenHash,
+      shareTokenHash,
       shareTokenHash,
     ).run();
     if (changes(result) === 1) return revision;

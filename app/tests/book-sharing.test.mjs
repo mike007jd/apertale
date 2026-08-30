@@ -7,10 +7,21 @@ class MemoryRepository {
   books = new Map();
   assets = new Map();
   retiredShareTokenHashes = new Set();
+  creationEvents = [];
 
-  async createBook({ id, manageTokenHash, now }) {
+  async createBook({
+    id,
+    manageTokenHash,
+    now,
+    maxSiteBooks = Number.MAX_SAFE_INTEGER,
+    maxBooksPerWindow = Number.MAX_SAFE_INTEGER,
+    windowStart = "",
+  }) {
     const existing = this.books.get(id);
     if (existing) return existing.manageTokenHash === manageTokenHash ? "existing" : "conflict";
+    if (this.books.size >= maxSiteBooks) return "site_limit";
+    const recentBooks = this.creationEvents.filter((createdAt) => createdAt >= windowStart).length;
+    if (recentBooks >= maxBooksPerWindow) return "rate_limit";
     this.books.set(id, {
       id,
       manageTokenHash,
@@ -19,6 +30,7 @@ class MemoryRepository {
       publish_attempt_token_hash: null,
       created_at: now,
     });
+    this.creationEvents.push(now);
     return "created";
   }
 
@@ -33,13 +45,22 @@ class MemoryRepository {
   }
 
   async insertAsset(asset) {
-    if (this.assets.has(`${asset.bookId}:${asset.assetId}`)) throw new Error("duplicate asset id");
+    const book = this.books.get(asset.bookId);
+    if (
+      !book
+      || book.manageTokenHash !== asset.manageTokenHash
+      || !["draft", "revoked"].includes(book.status)
+    ) return false;
+    const bookAssetCount = [...this.assets.values()].filter((entry) => entry.bookId === asset.bookId).length;
+    if (bookAssetCount >= (asset.maxAssets ?? Number.MAX_SAFE_INTEGER)) return false;
+    if (this.assets.has(`${asset.bookId}:${asset.assetId}`)) return false;
     this.assets.set(`${asset.bookId}:${asset.assetId}`, {
       ...asset,
       object_key: asset.objectKey,
       content_type: asset.contentType,
       byte_size: asset.byteSize,
     });
+    return true;
   }
 
   async listAssetIds(bookId) {
@@ -51,7 +72,7 @@ class MemoryRepository {
   }
 
   async countBooksCreatedSince(isoTimestamp) {
-    return [...this.books.values()].filter((book) => book.created_at >= isoTimestamp).length;
+    return this.creationEvents.filter((createdAt) => createdAt >= isoTimestamp).length;
   }
 
   async claimPublishAttempt({ id, manageTokenHash, shareTokenHash }) {
@@ -59,7 +80,10 @@ class MemoryRepository {
     if (!book || !["draft", "revoked"].includes(book.status)) return false;
     if (this.retiredShareTokenHashes.has(shareTokenHash)) return false;
     if (book.publish_attempt_token_hash === shareTokenHash) return true;
-    if (book.publish_attempt_token_hash != null) return false;
+    if (
+      book.publish_attempt_token_hash != null
+      && !this.retiredShareTokenHashes.has(book.publish_attempt_token_hash)
+    ) return false;
     if (book.status === "revoked" && book.share_token_hash === shareTokenHash) return false;
     book.publish_attempt_token_hash = shareTokenHash;
     return true;
@@ -75,6 +99,7 @@ class MemoryRepository {
     if (
       ["draft", "revoked"].includes(book.status)
       && book.publish_attempt_token_hash === shareTokenHash
+      && !this.retiredShareTokenHashes.has(shareTokenHash)
     ) {
       Object.assign(book, {
         share_token_hash: shareTokenHash,
@@ -369,6 +394,10 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   }));
   assert.equal(publishResponse.status, 200);
   assert.equal((await publishResponse.json()).shareUrl, `https://example.test/share/${shareToken}`);
+
+  const publishedCreateReplay = await api.handle(draftCreationRequest(manageToken, draft.bookId));
+  assert.equal(publishedCreateReplay.status, 200);
+  assert.equal((await publishedCreateReplay.json()).status, "published");
 
   const sharedResponse = await api.handle(new Request(`https://example.test/api/shared/${shareToken}`));
   assert.equal(sharedResponse.status, 200);
@@ -814,7 +843,12 @@ test("bounds anonymous book creation without storing network identity", async ()
     clock: () => new Date("2026-08-28T00:00:00.000Z"),
     limits: { maxSiteBooks: 50, maxBooksPerWindow: 1, creationWindowMs: 60 * 60 * 1000 },
   });
-  assert.equal((await rateApi.handle(draftCreationRequest("g".repeat(43)))).status, 201);
+  const rateBookId = crypto.randomUUID();
+  assert.equal((await rateApi.handle(draftCreationRequest("g".repeat(43), rateBookId))).status, 201);
+  assert.equal((await rateApi.handle(new Request(`https://example.test/api/books/${rateBookId}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${"g".repeat(43)}` },
+  }))).status, 204);
   const rateLimited = await rateApi.handle(draftCreationRequest("g".repeat(43)));
   assert.equal(rateLimited.status, 429);
   assert.equal((await rateLimited.json()).code, "creation_rate");
