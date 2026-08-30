@@ -14,7 +14,14 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # A persistent self-hosted runner is private-repository infrastructure.
+    # It also refuses fork PRs; migrate back to hosted or an ephemeral runner
+    # before making this repository public.
+    if: >-
+      github.event.repository.private &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, Linux, X64, gmk-ci, apertale-ci]
     timeout-minutes: 20
     defaults:
       run:
