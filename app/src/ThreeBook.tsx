@@ -191,8 +191,8 @@ function createPageOverlayCanvas(background: HTMLCanvasElement, spread: Spread, 
        * the eye as an edge.
        */
       const across = context.createLinearGradient(0, 0, 880, 0);
-      across.addColorStop(0, darkSpread ? "rgba(9, 14, 13, .80)" : "rgba(255, 251, 242, .90)");
-      across.addColorStop(0.55, darkSpread ? "rgba(9, 14, 13, .52)" : "rgba(255, 251, 242, .66)");
+      across.addColorStop(0, darkSpread ? "rgba(9, 14, 13, .94)" : "rgba(255, 251, 242, .90)");
+      across.addColorStop(0.72, darkSpread ? "rgba(9, 14, 13, .78)" : "rgba(255, 251, 242, .66)");
       across.addColorStop(1, darkSpread ? "rgba(9, 14, 13, 0)" : "rgba(255, 251, 242, 0)");
       context.fillStyle = across;
       context.fillRect(0, 0, 880, canvas.height);
@@ -223,7 +223,7 @@ function createPageOverlayCanvas(background: HTMLCanvasElement, spread: Spread, 
     bodyLines.forEach((bodyLine, index) => context.fillText(bodyLine, 114, top + index * bodyLeading));
 
     if (!spread.textureUrl) {
-      const rule = top + bodyLines.length * 45 + 46;
+      const rule = top + bodyLines.length * bodyLeading + 46;
       context.globalAlpha = 0.16;
       context.fillRect(116, rule, 300, 2);
       context.globalAlpha = 0.6;
