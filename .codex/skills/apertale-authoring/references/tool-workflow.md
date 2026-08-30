@@ -22,28 +22,30 @@ Use `request_image_handoff` only when direct host media transfer is unavailable.
 
 The browser requires the reader's own click to open the file picker. Do not claim success while the request is pending. After a `provided` result, refresh `get_project_context(detail: "assets")` and bind only the returned browser-local asset ids. After a `dismissed` result, stop or re-plan without retrying the same request automatically.
 
-## 3. Open, create, or set the cover
+## 3. Open or atomically create a complete book
 
 Use `manage_book`:
 
 - `action: "open"` with a library `bookId`;
-- `action: "create"` with a complete 1–12 spread plan;
+- `action: "create"` with the readiness-passed brief, a verified `coverAssetId`, and one complete, publishable 1–12 spread finished-book manifest;
 - `action: "adopt-creation-brief"` once for a legacy personal book that has no stored brief, using the same readiness-passed brief and inspected revision;
-- `action: "set-cover"` with `expectedRevision` and a validated browser-local `coverAssetId`.
+- `action: "set-cover"` only for a later cover correction, with `expectedDocumentId` and `expectedRevision` from one current context plus a validated browser-local `coverAssetId`;
 - `action: "begin-critique"` before inspecting and recording one quality-review round;
 - `action: "record-critique"` with every visual rubric criterion after inspecting actual rendered frames.
 
-Draft all spread titles, kickers, and body copy before `create`. A normal first pass is 4–8 spreads. The maximum is 12. Pass the same creation brief that returned `ready: true`; Apertale runs that readiness gate again before mutation.
+Draft all spread titles, kickers, and body copy before `create`. A normal first pass is 4–8 spreads. The maximum is 12. Pass the same creation brief that returned `ready: true`; Apertale runs that readiness gate again before mutation. Every spread must also include a prepared `background` (`sourceAssetId`, `cleanPlateAssetId`, book-type `separation`, and `personalSourceAssetId` when declared) plus 2–4 prepared native-alpha `layers`. At least one layer per spread needs an authored hover, focus, or click reveal; idle motion may support that response but cannot replace it. Compose full-spread images for the approximately 1.62:1 stage target; 1.45–2.10 is only the compatible admission range.
 
-Image generation does not happen inside this tool. Generate the cover and illustrated spreads in the user's current Agent conversation. For a preserved-photo album, prepare source-true layouts and keep identity/crop/colour within the approved policy. Prefer a host-supported media transfer; when it is unavailable, follow the image-handoff step above with a PNG/JPEG/WebP source no larger than 12 MB. Apertale resizes and compresses the source locally to at most 1.5 MB before storage. Then refresh assets and bind the returned optimized ids.
+Image generation does not happen inside this tool. Generate the cover, composites, final bases, and cutouts in the user's current Agent conversation. For a preserved-photo album, prepare source-true layouts and keep identity/crop/colour within the approved policy. Prefer a host-supported media transfer; when it is unavailable, follow the image-handoff step above with PNG/JPEG/WebP sources no larger than 12 MB each. Apertale resizes and compresses each source locally to at most 1.5 MB before storage. Refresh assets and bind only returned ids. Deduplicate the reader-visible cover, resolved final base for each spread, rendered layer assets, and frame assets; at most 50 distinct assets may be uploaded. Author-only source and personal-photo provenance stays private and is excluded unless selected for rendering. If any planned reader-visible asset is absent or the upload plan exceeds that limit, do not call create: a text-only or deferred-art shell is not a completed book.
+
+If a mutation returns `ok: true` with `presentation.status: "pending"`, the document is already saved but the exact visible frame was not confirmed. Retry the same `requestId` until presentation completes. A new request id would create a duplicate instead of resuming.
 
 ## 4. Refine copy
 
 Use `compose_spread` to change one existing spread's title, kicker, or body without disturbing its scene. Refresh context after each call because every document mutation advances the revision.
 
-## 5. Build the scene
+## 5. Refine the scene after visual critique
 
-Use one atomic `apply_scene_patch` per coherent spread edit. It can add, update, remove, or reorder up to 24 elements.
+The initial scene already arrives in the atomic create manifest. Use one atomic `apply_scene_patch` per coherent post-create critique fix. It can add, update, remove, or reorder up to 24 elements.
 
 The only supported scene source is a validated browser-local or bundled asset id. Every image-led spread records the original composite in `sourceAssetId` and the final repaired/preserved base in `cleanPlateAssetId`. A declared user photo belongs in `personalSourceAssetId`; this keeps identity provenance separate from the generated composite. Use `inpainted-clean-plate` for generated illustrated separations and `preserved-photo-layout` for an approved source-true album base. Generate native-alpha transparent cutouts in the user's current conversation before patching the scene. For GPT-Image-2 request `background: "transparent"` with PNG or WebP output. When direct host transfer is unavailable, call `request_image_handoff` with `assetUse: "book-art"`, wait for its result, then refresh asset context.
 
@@ -62,7 +64,7 @@ Use a reveal when interaction teaches, identifies, or advances the story. Keep i
 
 ## 6. Present
 
-Use `set_presentation` for `paper-atelier` (Day), `midnight-desk` (Night), Preview, `surface: "shelf"` cover inspection, and `spreadId` reader navigation during visual review. The call returns only after the requested shelf or reader surface is visible; rendering evidence remains separately observable in quality context. Presentation changes do not advance the document revision.
+Use `set_presentation` for `paper-atelier` (Day), `midnight-desk` (Night), Preview, `surface: "shelf"` cover inspection, and `spreadId` reader navigation during visual review. A non-pending result confirms that the requested shelf or reader surface is visible; `presentation.status: "pending"` is not visual evidence and must be resumed with the same `requestId`. Rendering evidence remains separately observable in quality context. Presentation changes do not advance the document revision.
 
 ## 7. Critique, patch, and publish gate
 

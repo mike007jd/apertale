@@ -19,9 +19,10 @@ Host-side prompt/photo-to-complete-book authoring is the required Create Your Ow
    - **both:** written idea plus selected photos.
 4. Read `get_project_context(detail: "authoring-guide")`, then call `get_project_context(detail: "creation-readiness")` with a versioned brief.
 5. Ask the returned blocking questions together in one concise turn. Re-check readiness after the user answers. Use recommendations as optional defaults only when they do not change identity, source-photo treatment, audience, or the book's central promise.
-6. Reuse the exact brief that returned `ready: true` in `manage_book(action: "create")`. The command engine enforces the same gate and returns `creation_not_ready` when material information is missing.
-7. Collect the user's story, audience, and source images in the Agent conversation. Do not ask them to repeat the same brief inside Apertale. Treat the workshop's selected length, visual direction, authoring mode, photo treatment, and ordered source-asset ids as constraints.
-8. Follow the creation and review contract below. Complete asset preparation before book mutation.
+6. Reuse the exact brief that returned `ready: true` in `manage_book(action: "create")`. Submit one complete, publishable finished book in that call: the verified cover and every complete spread manifest. The engine returns `creation_not_ready` for an incomplete brief and refuses an incomplete creation artifact without adding it to the shelf.
+7. Treat `ok: true` with `presentation.status: "pending"` as a saved mutation awaiting visual confirmation. Retry the exact same `requestId`; do not create again with a new id.
+8. Collect the user's story, audience, and source images in the Agent conversation. Do not ask them to repeat the same brief inside Apertale. Treat the workshop's selected length, visual direction, authoring mode, photo treatment, and ordered source-asset ids as constraints.
+9. Follow the creation and review contract below. Complete asset preparation before book mutation.
 
 Read [tool workflow](references/tool-workflow.md) before changing the project. For idea, photo, and illustrated patterns, read [authoring recipes](references/authoring-recipes.md).
 
@@ -35,8 +36,8 @@ Complete this phase in the current Codex conversation before any `manage_book` c
 2. Define audience or the assumption used, then a complete story arc with beginning, development, turn, and ending.
 3. Plan the title, dedicated generated portrait cover, every spread, and ordered provenance.
 4. Use the host ImageGen/image editing capability to make a dedicated portrait cover.
-5. For `illustrated-storybook` and `photo-led-keepsake`, make one purpose-built generated full-spread artwork per spread. Use personal photos as identity-faithful references under the agreed policy.
-6. For `preserved-photo-album`, prepare one source-true 2:1 original-photo layout per spread. Preserve people and photo geometry, apply only the authorised crop/colour policy, and use `preserved-photo-layout` when setting the background.
+5. For `illustrated-storybook` and `photo-led-keepsake`, make one purpose-built generated full-spread artwork per spread. Compose for the stage's approximately 1.62:1 target; 1.45–2.10 is only the compatible admission range. Use personal photos as identity-faithful references under the agreed policy.
+6. For `preserved-photo-album`, prepare one source-true original-photo layout per spread using the same stage target and admission range. Preserve people and photo geometry, apply only the authorised crop/colour policy, and use `preserved-photo-layout` when setting the background.
 7. For every image-led spread, retain the original composite in `sourceAssetId` and the final plate in `cleanPlateAssetId`. When a declared personal photo informed the spread, record that photo separately in `personalSourceAssetId`; never overload the composite field with identity provenance.
 
 Required generated-art and provenance counts:
@@ -53,22 +54,22 @@ Hard rejection: placing an uploaded source photo on the right page, or treating 
 Only after the complete asset plan and generated art set exist:
 
 1. Import exact assets through supported host transfer. When direct transfer is unavailable, call `request_image_handoff` with a unique `requestId`, the correct `assetUse`, and a plain-language reason. Use `source-photo` only for reader-supplied references that belong in the next brief; use `book-art` for generated covers, spreads, clean plates, and cutouts. Wait for the reader to choose or dismiss. Treat a `partial` result as incomplete, use only its returned asset ids, and arrange replacements for its rejected or failed count. Then refresh `get_project_context(detail: "assets")`.
-2. Re-check `creation-readiness`, then create the book with the same completed brief. Successful create moves the page from the workshop to the new book.
+2. Re-check `creation-readiness`, refresh the asset registry, and confirm that every planned cover, composite, final base, cutout, and frame id is present. Deduplicate the reader-visible cover, resolved final base for each spread, rendered layers, and frames; at most 50 distinct assets may be uploaded. Author-only source and personal-photo provenance stays private and does not count unless it is also selected for rendering.
+3. Create the book once with the same completed brief, `coverAssetId`, and every spread's complete manifest: `background.sourceAssetId`, `background.cleanPlateAssetId`, the book-type `separation`, `personalSourceAssetId` when declared, and 2–4 native-alpha `layers` with meaningful interaction. Successful create atomically moves one complete, publishable finished artifact from the workshop to the new book.
    For an existing personal book that predates the lifecycle metadata, use the one-time `adopt-creation-brief` action at the inspected revision instead of recreating or guessing its brief.
-3. Set the dedicated portrait cover.
-4. Apply full-spread backgrounds and meaningful interactions.
-5. Visit the shelf cover with `set_presentation(surface: "shelf")`, then every spread with `set_presentation(spreadId)`, so Apertale records the current revision's real render evidence without changing document revision.
-6. Read `get_project_context(detail: "quality-review")`, then call `manage_book(action: "begin-critique")`. Use the deterministic checks and render manifest, then inspect the actual browser frames for every visual rubric item.
-7. Record the structured critique with `manage_book(action: "record-critique")`. Apply suggested patches, render again, and explicitly begin the next check. Complete at most two critique rounds.
-8. When blockers remain after round two, stop and tell the user which source material or decision is required. Publish only when the returned report says `publishAllowed: true`.
+4. Visit the shelf cover with `set_presentation(surface: "shelf")`, then every spread with `set_presentation(spreadId)`, so Apertale records the current revision's real render evidence without changing document revision.
+5. Read `get_project_context(detail: "quality-review")`, then call `manage_book(action: "begin-critique")`. Use the deterministic checks and render manifest, then inspect the actual browser frames for every visual rubric item.
+6. Record the structured critique with `manage_book(action: "record-critique")`. Use `set-cover` or `apply_scene_patch` only for a later critique fix, render again, and explicitly begin the next check. Complete at most two critique rounds.
+7. When blockers remain after round two, stop and tell the user which source material or decision is required. Publish only when the returned report says `publishAllowed: true`.
 
 Never claim generation or import succeeded without evidence: returned asset ids, tool results, or an explicit pending-handoff report.
 
 ## Authoring contract
 
-- Create a dedicated portrait cover. Never reuse an interior crop, flat color, or CSS stand-in. Prefer direct host media transfer from the Agent conversation. If the current host cannot transfer image bytes through WebMCP, call `request_image_handoff` with `assetUse: "book-art"`, wait for the returned asset ids, refresh assets, then use `manage_book` with `action: "set-cover"`.
+- Create a dedicated portrait cover. Never reuse an interior crop, flat color, or CSS stand-in. Prefer direct host media transfer from the Agent conversation. If the current host cannot transfer image bytes through WebMCP, call `request_image_handoff` with `assetUse: "book-art"`, wait for the returned asset ids, refresh assets, then pass the cover id in the atomic `manage_book(action: "create")` manifest. Reserve `set-cover` for a later critique fix.
 - Make every showcase spread intentional. Use the page as a composition, not a template slot. A preserved-photo album keeps its approved source-true layout rather than reillustrating the people in it.
 - Treat each spread as one full-width illustration shared by both paper pages. Design across the gutter; keep important copy and faces clear of the fold. Use foreground, midground, and background layers to create depth without shipping runtime models.
+- Compose full-spread artwork for the approximately 1.62:1 stage. The 1.45–2.10 input range is compatibility tolerance, not an art-direction target. Count each distinct reader-visible cover, resolved final base, rendered layer, and frame once; at most 50 may be uploaded. Source and personal-photo provenance remains private unless the renderer uses it as the final base or a visible layer.
 - Give every non-guide spread at least one meaningful hover/focus/click response. Vary the interaction according to the content.
 - Infer a coherent visual grammar from the user's sources—materials, edge language, palette, lighting, and depth—and apply it to generated backgrounds, isolated subjects, motion, and reveals. Do not reduce a tactile or illustrated style to generic SVG-like shapes.
 - Keep prose concise enough to coexist with imagery. Prefer one idea per spread and a visible beginning, development, turn, and ending.
@@ -76,7 +77,7 @@ Never claim generation or import succeeded without evidence: returned asset ids,
 - For GPT-Image-2 cutouts, explicitly request a transparent background and preserve the generated alpha. Make one separate ImageGen request for every final semantic subject; one request must produce exactly one asset. Never generate an atlas, contact sheet, sprite sheet, multi-object grid, or grouped cutout and crop it into finals. Reject an opaque canvas, baked checkerboard, empty subject, backing rectangle, chroma spill, detached crop fragments, or baked glow; verify the file has a real alpha channel and regenerate instead of color-keying it.
 - Use only image asset ids returned by `get_project_context(detail: "assets")`. Never pass arbitrary URLs, executable content, HTML, JavaScript, shader code, or model references. WebMCP does not yet standardize binary attachment transfer across every host; report this boundary and request the smallest explicit handoff instead of pretending an attachment was imported. The fallback accepts PNG/JPEG/WebP sources up to 12 MB and optimizes them locally to at most 1.5 MB before the asset id is exposed.
 - Negotiate capabilities from `get_project_context`; never assume a site-owner credential or an external generation backend. Image generation and analysis happen in the user's active Codex/ChatGPT conversation.
-- Preserve `requestId` on every mutating call. For document mutations, also preserve `expectedRevision`, stable spread ids, and returned undo tokens. Refresh context after every document mutation. On a revision conflict, refresh and re-plan; do not brute-force retries.
+- Preserve `requestId` on every mutating call. For book and presentation mutations, carry `expectedDocumentId` and `expectedRevision` together from the same `get_project_context` response, plus stable spread ids and returned undo tokens. Refresh context after every document mutation. On a conflict, refresh and re-plan; do not brute-force retries.
 - Request explicit user approval before publication or deployment. Once approved, keep Share fail-closed until the current revision's quality report allows publication.
 
 ## Finish

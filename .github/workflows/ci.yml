@@ -14,14 +14,14 @@ concurrency:
 
 jobs:
   verify:
-    # A persistent self-hosted runner is private-repository infrastructure.
-    # It also refuses fork PRs; migrate back to hosted or an ephemeral runner
-    # before making this repository public.
+    # Private same-repository changes use the isolated gmk runner. Public
+    # repositories, including fork PRs, use a fresh GitHub-hosted VM so
+    # untrusted code never reaches persistent infrastructure.
     if: >-
-      github.event.repository.private &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, Linux, X64, gmk-ci, apertale-ci]
+      !github.event.repository.private ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ github.event.repository.private && 'gmk-ci' || 'ubuntu-latest' }}
     timeout-minutes: 20
     defaults:
       run:

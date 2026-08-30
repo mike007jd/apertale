@@ -1,13 +1,28 @@
 import { bookEngine } from "./bookEngine";
+import { BoundedMap } from "./boundedMap";
 import { getAssetMetadata, listAssetMetadata } from "./assetStore";
+import {
+  backgroundAssetUseIssues,
+  backgroundPairAssetRoleIssues,
+  coverAssetRoleIssues,
+  documentAssetRoleIssues,
+  foregroundAssetRoleIssues,
+  frameSequenceAssetRoleIssues,
+  fullSpreadAssetRoleIssues,
+  preparedBookAssetIssues,
+  sourcePhotoAssetRoleIssues,
+} from "./bookAssetContract";
+import { isStoredAssetId } from "./assetId";
 import { IMAGE_HANDOFF_ASSET_USES, abortImageHandoff, requestImageHandoff } from "./imageHandoff";
 import type { AuthoringSurfaceRequest } from "./authoringSurface";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
-import { MOTION_PRESETS, MAX_BOOK_SPREADS } from "./types";
-import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
+import { listProjectAssetReferences } from "./projectArtifact";
+import { BOOK_ELEMENT_ID_PATTERN, BOOK_ELEMENT_ID_PATTERN_SOURCE, MOTION_PRESETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
+import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, PreparedBookBackground, PreparedBookLayer, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 import {
   QUALITY_CONTRACT_VERSION,
+  MAX_BOOK_UPLOADED_ASSETS,
   QUALITY_REVIEW_MAX_ROUNDS,
   QUALITY_RUBRIC,
   QUALITY_VISUAL_CRITERION_IDS,
@@ -53,6 +68,21 @@ function requiredRevision(input: ToolInput) {
   return Number(value);
 }
 
+function requiredDocumentId(input: ToolInput) {
+  return requiredString(input, "expectedDocumentId");
+}
+
+function documentPreconditionConflict(expectedDocumentId: string, expectedRevision: number) {
+  const currentDocument = bookEngine.getSnapshot().document;
+  if (expectedDocumentId === currentDocument.id && expectedRevision === currentDocument.revision) return null;
+  return {
+    ok: false as const,
+    code: "revision_conflict" as const,
+    currentRevision: currentDocument.revision,
+    summary: `Expected ${expectedDocumentId} at revision ${expectedRevision}; refresh context before changing this book.`,
+  };
+}
+
 function boundedString(input: ToolInput, key: string, maximum: number): string;
 function boundedString(input: ToolInput, key: string, maximum: number, optional: true): string | undefined;
 function boundedString(input: ToolInput, key: string, maximum: number, optional = false): string | undefined {
@@ -77,6 +107,148 @@ function optionalBoundedNumber(input: ToolInput, key: string, minimum: number, m
   return value;
 }
 
+function pick<T extends string>(value: unknown, name: string, allowed: readonly T[]) {
+  if (typeof value === "undefined") return undefined;
+  if (typeof value !== "string" || !allowed.includes(value as T)) invalid(`${name} is not supported.`);
+  return value as T;
+}
+
+function parseTransform(raw: unknown) {
+  if (typeof raw === "undefined") return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("transform must be an object.");
+  const value = raw as ToolInput;
+  assertOnly(value, ["x", "y", "scaleX", "scaleY", "rotationDeg"]);
+  const transform: Partial<Transform2D> = {
+    x: optionalBoundedNumber(value, "x", 0, 1),
+    y: optionalBoundedNumber(value, "y", 0, 1),
+    scaleX: optionalBoundedNumber(value, "scaleX", 0.3, 1.8),
+    scaleY: optionalBoundedNumber(value, "scaleY", 0.3, 1.8),
+    rotationDeg: optionalBoundedNumber(value, "rotationDeg", -180, 180),
+  };
+  Object.keys(transform).forEach((key) => typeof transform[key as keyof Transform2D] === "undefined" && delete transform[key as keyof Transform2D]);
+  if (Object.keys(transform).length === 0) invalid("transform must include at least one field.");
+  return transform;
+}
+
+function parseReveal(raw: unknown): RevealSpec | undefined {
+  if (typeof raw === "undefined") return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("reveal must be an object.");
+  const value = raw as ToolInput;
+  assertOnly(value, ["kind", "title", "summary", "facts", "source"]);
+  const kind = pick<RevealKind>(value.kind, "reveal.kind", REVEAL_KINDS);
+  if (!kind) invalid("reveal.kind is required.");
+  const title = boundedString(value, "title", 100, true) ?? "";
+  const summary = boundedString(value, "summary", 500, true) ?? "";
+  if (kind !== "none" && title.length === 0) invalid("reveal.title is required for a visible reveal.");
+  const facts = typeof value.facts === "undefined" ? [] : value.facts;
+  if (!Array.isArray(facts) || facts.length > 8) invalid("reveal.facts must contain at most 8 facts.");
+  return {
+    kind,
+    title,
+    summary,
+    facts: facts.map((rawFact, factIndex) => {
+      if (!rawFact || typeof rawFact !== "object" || Array.isArray(rawFact)) invalid(`reveal.facts[${factIndex}] must be an object.`);
+      const fact = rawFact as ToolInput;
+      assertOnly(fact, ["label", "value"]);
+      return { label: boundedString(fact, "label", 64), value: boundedString(fact, "value", 160) };
+    }),
+    source: boundedString(value, "source", 200, true),
+  };
+}
+
+function parseMotion(raw: unknown): MotionSpec | null | undefined {
+  if (typeof raw === "undefined" || raw === null) return raw;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("motion must be an object or null.");
+  const value = raw as ToolInput;
+  assertOnly(value, ["preset", "durationMs", "loop"]);
+  const preset = pick<MotionPreset>(value.preset, "motion.preset", [...MOTION_PRESETS]);
+  const durationMs = optionalBoundedNumber(value, "durationMs", 400, 20000);
+  if (!preset || !Number.isInteger(durationMs) || typeof value.loop !== "boolean") invalid("motion requires preset, integer durationMs, and loop.");
+  return { preset, durationMs: Number(durationMs), loop: value.loop };
+}
+
+function parseFrames(raw: unknown): string[] | null | undefined {
+  if (typeof raw === "undefined" || raw === null) return raw;
+  if (!Array.isArray(raw) || raw.length < 2 || raw.length > 6 || raw.some((item) => typeof item !== "string" || item.trim().length === 0)) {
+    invalid("frameAssetIds must contain 2–6 asset ids.");
+  }
+  return raw.map((item) => String(item));
+}
+
+function stableElementId(value: ToolInput, field: string) {
+  const id = boundedString(value, field, 64);
+  if (!BOOK_ELEMENT_ID_PATTERN.test(id)) {
+    invalid(`${field} must start with a lowercase letter or digit and contain only lowercase letters, digits, and hyphens.`);
+  }
+  return id;
+}
+
+const sceneOperationKeys = ["op", "cleanPlateAssetId", "sourceAssetId", "personalSourceAssetId", "separation", "id", "elementId", "label", "assetId", "frameAssetIds", "page", "kind", "transform", "depth", "locked", "motion", "hover", "focus", "reveal", "index"];
+
+function parseSceneOperation(raw: unknown, index: number): ScenePatchOperation {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`operations[${index}] must be an object.`);
+  const value = raw as ToolInput;
+  const op = requiredString(value, "op");
+  assertOnly(value, sceneOperationKeys);
+  if (op === "set-background") {
+    return {
+      op,
+      cleanPlateAssetId: requiredString(value, "cleanPlateAssetId"),
+      sourceAssetId: boundedString(value, "sourceAssetId", 200),
+      personalSourceAssetId: boundedString(value, "personalSourceAssetId", 200, true),
+      separation: pick(value.separation, "separation", ["inpainted-clean-plate", "preserved-photo-layout"] as const),
+    };
+  }
+  if (op === "remove") return { op, elementId: requiredString(value, "elementId") };
+  if (op === "reorder") {
+    const order = optionalBoundedNumber(value, "index", 0, 23);
+    if (!Number.isInteger(order)) invalid("reorder index must be an integer.");
+    return { op, elementId: requiredString(value, "elementId"), index: Number(order) };
+  }
+  const transform = parseTransform(value.transform);
+  const hover = pick<HoverResponse>(value.hover, "hover", HOVER_RESPONSES);
+  const focus = pick<FocusResponse>(value.focus, "focus", FOCUS_RESPONSES);
+  const reveal = parseReveal(value.reveal);
+  const depth = optionalBoundedNumber(value, "depth", 0, 0.5);
+  if (typeof value.locked !== "undefined" && typeof value.locked !== "boolean") invalid("locked must be boolean.");
+  const motion = parseMotion(value.motion);
+  const frameAssetIds = parseFrames(value.frameAssetIds);
+  if (frameAssetIds?.some(isProceduralAssetId)) {
+    invalid(`operations[${index}].frameAssetIds must contain image assets, not procedural markers.`);
+  }
+  if (op === "add") {
+    const page = pick(value.page, "page", ["left", "right"] as const);
+    if (!page) invalid("add requires page.");
+    const id = stableElementId(value, "id");
+    const assetId = requiredString(value, "assetId");
+    if (frameAssetIds?.length && frameAssetIds[0] !== assetId) {
+      invalid(`operations[${index}].frameAssetIds[0] must equal assetId so the resting frame is stable.`);
+    }
+    return {
+      op,
+      id,
+      label: boundedString(value, "label", 64),
+      assetId,
+      frameAssetIds: frameAssetIds ?? undefined,
+      page,
+      kind: pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const),
+      transform,
+      depth,
+      locked: value.locked as boolean | undefined,
+      motion: motion ?? undefined,
+      hover,
+      focus,
+      reveal,
+    };
+  }
+  if (op !== "update") invalid("op must be set-background, add, update, remove, or reorder.");
+  const kind = pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const);
+  if (!kind && !transform && typeof depth === "undefined" && typeof value.locked === "undefined" && typeof motion === "undefined" && typeof frameAssetIds === "undefined" && !hover && !focus && !reveal) {
+    invalid("update requires at least one change.");
+  }
+  return { op, elementId: requiredString(value, "elementId"), kind, transform, depth, locked: value.locked as boolean | undefined, motion, frameAssetIds, hover, focus, reveal };
+}
+
 async function runTool(name: string, signal: AbortSignal, operation: () => unknown) {
   recordDiagnostic("webmcp:tool-start", { name });
   try {
@@ -97,8 +269,11 @@ async function runTool(name: string, signal: AbortSignal, operation: () => unkno
 
 const requiredMutation = {
   requestId: { type: "string", description: "Unique idempotency key for this change." },
+  expectedDocumentId: { type: "string", description: "Document id returned by get_project_context together with expectedRevision." },
   expectedRevision: { type: "integer", minimum: 1, description: "Document revision returned by get_project_context." },
 };
+
+const requiredMutationFields = ["requestId", "expectedDocumentId", "expectedRevision"];
 
 const revealSchema = {
   type: "object",
@@ -123,6 +298,64 @@ const revealSchema = {
     source: { type: "string", maxLength: 200 },
   },
   required: ["kind", "title", "summary"],
+  additionalProperties: false,
+};
+
+const transformSchema = {
+  type: "object",
+  properties: {
+    x: { type: "number", minimum: 0, maximum: 1 },
+    y: { type: "number", minimum: 0, maximum: 1 },
+    scaleX: { type: "number", minimum: 0.3, maximum: 1.8 },
+    scaleY: { type: "number", minimum: 0.3, maximum: 1.8 },
+    rotationDeg: { type: "number", minimum: -180, maximum: 180 },
+  },
+  additionalProperties: false,
+};
+
+const motionSchema = {
+  type: "object",
+  properties: {
+    preset: { type: "string", enum: [...MOTION_PRESETS] },
+    durationMs: { type: "integer", minimum: 400, maximum: 20000 },
+    loop: { type: "boolean" },
+  },
+  required: ["preset", "durationMs", "loop"],
+  additionalProperties: false,
+};
+
+const preparedBackgroundSchema = {
+  type: "object",
+  description: "Prepared full-spread composite, final base, and optional personal-photo provenance.",
+  properties: {
+    cleanPlateAssetId: { type: "string", description: "Verified final base composed for the approximately 1.62:1 stage." },
+    sourceAssetId: { type: "string", description: "Verified original full-spread composite asset." },
+    personalSourceAssetId: { type: "string", description: "Declared source photo when the brief uses personal photos." },
+    separation: { type: "string", enum: ["inpainted-clean-plate", "preserved-photo-layout"] },
+  },
+  required: ["cleanPlateAssetId", "sourceAssetId", "separation"],
+  additionalProperties: false,
+};
+
+const preparedLayerSchema = {
+  type: "object",
+  description: "Prepared native-alpha foreground layer with an authored interaction.",
+  properties: {
+    id: { type: "string", minLength: 1, maxLength: 64, pattern: BOOK_ELEMENT_ID_PATTERN_SOURCE, description: "Stable lowercase id using only letters, digits, and hyphens." },
+    label: { type: "string", minLength: 1, maxLength: 64 },
+    assetId: { type: "string", description: "Verified browser-local cutout asset." },
+    frameAssetIds: { type: "array", minItems: 2, maxItems: 6, items: { type: "string" }, description: "Optional animation frames; the first item must equal assetId and is the resting frame." },
+    page: { type: "string", enum: ["left", "right"] },
+    kind: { type: "string", enum: ["embedded", "lifted", "decoration"] },
+    transform: transformSchema,
+    depth: { type: "number", minimum: 0, maximum: 0.5 },
+    locked: { type: "boolean" },
+    motion: motionSchema,
+    hover: { type: "string", enum: HOVER_RESPONSES },
+    focus: { type: "string", enum: FOCUS_RESPONSES },
+    reveal: revealSchema,
+  },
+  required: ["id", "label", "assetId", "page"],
   additionalProperties: false,
 };
 
@@ -211,6 +444,36 @@ function canceled(signal: AbortSignal) {
   if (signal.aborted) throw new DOMException("Tool execution was canceled.", "AbortError");
 }
 
+async function inspectCurrentDocumentAssetRoles(
+  creationBrief: CreationBriefPayload | undefined,
+  signal: AbortSignal,
+) {
+  const snapshot = bookEngine.getSnapshot();
+  const declaredSourceAssetIds = creationBriefSourceAssetIds(creationBrief);
+  const localAssetIds = [...new Set([
+    ...listProjectAssetReferences(snapshot.document).map((reference) => reference.assetId),
+    ...declaredSourceAssetIds,
+  ].filter(isStoredAssetId))];
+  const metadata = await getAssetMetadata(localAssetIds);
+  canceled(signal);
+  return {
+    validatedSourceAssetIds: metadata
+      .filter((asset) => asset.assetUse === "source-photo" && declaredSourceAssetIds.includes(asset.id))
+      .map((asset) => asset.id),
+    issues: documentAssetRoleIssues(snapshot.document, metadata, declaredSourceAssetIds),
+  };
+}
+
+function assetRoleFailure(issues: readonly string[]) {
+  return {
+    ok: false as const,
+    code: "creation_artifact_incomplete" as const,
+    currentRevision: bookEngine.getSnapshot().document.revision,
+    summary: "This book contains assets whose stored roles do not match their reader-facing use.",
+    issues: [...issues],
+  };
+}
+
 export function registerWebMcpTools(
   onStatus: (available: boolean) => void,
   presentAuthoringSurface: (request: AuthoringSurfaceRequest, signal: AbortSignal) => void | Promise<void> = () => undefined,
@@ -227,7 +490,7 @@ export function registerWebMcpTools(
   const register: typeof registerTool = (tool, options) => registerTool(tool, options).then(() => {
     registeredCount += 1;
   });
-  const sessionResults = new Map<string, unknown>();
+  const sessionResults = new BoundedMap<string, unknown>(128);
   type PendingPresentation = {
     result: unknown;
     target: {
@@ -239,7 +502,7 @@ export function registerWebMcpTools(
       preview: boolean;
     };
   };
-  const pendingPresentations = new Map<string, PendingPresentation>();
+  const pendingPresentations = new BoundedMap<string, PendingPresentation>(16);
   const activeImageHandoffs = new Map<string, ReturnType<typeof requestImageHandoff>>();
   const cancelActiveImageHandoffs = () => {
     activeImageHandoffs.forEach((_, requestId) => abortImageHandoff(requestId));
@@ -250,7 +513,8 @@ export function registerWebMcpTools(
     const pending = pendingPresentations.get(requestId);
     if (!pending) return undefined;
     if (bookEngine.getSnapshot().document.id !== pending.target.documentId) {
-      if (!bookEngine.openBook(pending.target.documentId, "agent")) {
+      const openResult = await bookEngine.openBookCoordinated(pending.target.documentId, "agent", signal);
+      if (!openResult.ok) {
         invalid("The book targeted by this presentation is no longer present in the library.");
       }
     }
@@ -270,15 +534,30 @@ export function registerWebMcpTools(
       if (spreadIndex !== presented.session.currentSpreadIndex) bookEngine.setSpread(spreadIndex);
     }
     presented = bookEngine.getSnapshot();
-    await presentAuthoringSurface({
-      requestId,
-      surface: pending.target.surface,
-      documentId: pending.target.documentId,
-      revision: pending.target.revision,
-      spreadId: pending.target.surface === "reader" ? pending.target.spreadId : undefined,
-      theme: pending.target.theme,
-      preview: pending.target.preview,
-    }, signal);
+    try {
+      await presentAuthoringSurface({
+        requestId,
+        surface: pending.target.surface,
+        documentId: pending.target.documentId,
+        revision: pending.target.revision,
+        spreadId: pending.target.surface === "reader" ? pending.target.spreadId : undefined,
+        theme: pending.target.theme,
+        preview: pending.target.preview,
+      }, signal);
+    } catch (reason) {
+      recordDiagnostic("webmcp:presentation-pending", {
+        requestId,
+        documentId: pending.target.documentId,
+        error: reason instanceof Error ? reason.name : "UnknownError",
+      });
+      return {
+        ...(pending.result && typeof pending.result === "object" ? pending.result : { result: pending.result }),
+        presentation: {
+          status: "pending",
+          summary: "The project change succeeded, but the exact visible frame was not confirmed. Retry the same requestId to resume presentation without repeating the mutation.",
+        },
+      };
+    }
     pendingPresentations.delete(requestId);
     sessionResults.set(requestId, pending.result);
     return pending.result;
@@ -315,6 +594,9 @@ export function registerWebMcpTools(
           const validatedSourceAssets = detail === "creation-readiness" && sourceAssetIds.length > 0
             ? await getAssetMetadata(sourceAssetIds)
             : [];
+          const validatedSourceAssetIds = validatedSourceAssets
+            .filter((asset) => asset.assetUse === "source-photo")
+            .map((asset) => asset.id);
           const qualityLifecycle = detail === "quality-review" ? bookEngine.getQualityLifecycle() : null;
           const result = {
             ...context,
@@ -325,7 +607,7 @@ export function registerWebMcpTools(
             ...(detail === "creation-readiness"
               ? {
                   creationReadiness: assessCreationReadiness(creationBrief, {
-                    validatedSourceAssetIds: validatedSourceAssets.map((asset) => asset.id),
+                    validatedSourceAssetIds,
                   }),
                 }
               : {}),
@@ -355,14 +637,14 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.manageBook,
         title: "Manage book",
-        description: "Open, create, attach a readiness-passed brief to one legacy personal book, set a cover, or record critique. Create and adopt-creation-brief reuse the exact brief that passed creation-readiness; if blocked, do not mutate. Prepare generated art or preserved-photo-album layouts. After real rendering, begin critique, inspect every frame, record every criterion, patch and re-check at most twice, and never publish with blockers.",
+        description: "Open, atomically create a complete prepared book from the exact brief, adopt-creation-brief for one legacy book, set a cover, begin critique, or record critique. Create requires a verified cover and every spread's final base plus 2–4 layers, including preserved-photo-album layouts. If assets are incomplete, do not mutate or enter the shelf or reader. Render and inspect every frame; never publish with blockers.",
         inputSchema: {
           type: "object",
           properties: {
             ...requiredMutation,
             action: { type: "string", enum: ["open", "create", "adopt-creation-brief", "set-cover", "begin-critique", "record-critique"] },
             bookId: { type: "string", description: "Stable id from library.books when action is open." },
-            coverAssetId: { type: "string", description: "Browser-local portrait image id returned by get_project_context(detail: assets)." },
+            coverAssetId: { type: "string", description: "Verified browser-local portrait cover id. Required for create and set-cover." },
             title: { type: "string", minLength: 1, maxLength: 100 },
             spreads: {
               type: "array",
@@ -374,8 +656,16 @@ export function registerWebMcpTools(
                   title: { type: "string", minLength: 1, maxLength: 100 },
                   body: { type: "string", minLength: 1, maxLength: 800 },
                   kicker: { type: "string", maxLength: 100 },
+                  background: preparedBackgroundSchema,
+                  layers: {
+                    type: "array",
+                    minItems: 2,
+                    maxItems: 4,
+                    items: preparedLayerSchema,
+                    description: "Two to four native-alpha foreground layers; at least one needs an authored interaction.",
+                  },
                 },
-                required: ["title", "body"],
+                required: ["title", "body", "background", "layers"],
                 additionalProperties: false,
               },
             },
@@ -384,12 +674,23 @@ export function registerWebMcpTools(
           },
           // Every manage action consumes the inspected revision, including
           // navigation that changes the active document context.
-          required: ["requestId", "expectedRevision", "action"],
+          required: [...requiredMutationFields, "action"],
+          oneOf: [
+            { properties: { action: { const: "open" } }, required: ["bookId"] },
+            {
+              properties: { action: { const: "create" } },
+              required: ["title", "coverAssetId", "spreads", "creationBrief"],
+            },
+            { properties: { action: { const: "adopt-creation-brief" } }, required: ["creationBrief"] },
+            { properties: { action: { const: "set-cover" } }, required: ["coverAssetId"] },
+            { properties: { action: { const: "begin-critique" } } },
+            { properties: { action: { const: "record-critique" } }, required: ["qualityReview"] },
+          ],
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: (input, options) => runTool(SITE_TOOL.manageBook, options?.signal ?? uncancelledToolSignal, async () => {
-          assertOnly(input, ["requestId", "expectedRevision", "action", "bookId", "coverAssetId", "title", "spreads", "creationBrief", "qualityReview"]);
+          assertOnly(input, [...requiredMutationFields, "action", "bookId", "coverAssetId", "title", "spreads", "creationBrief", "qualityReview"]);
           const requestId = requiredString(input, "requestId");
           if (pendingPresentations.has(requestId)) {
             return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
@@ -397,21 +698,27 @@ export function registerWebMcpTools(
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
           const action = requiredString(input, "action");
+          const expectedDocumentId = requiredDocumentId(input);
+          const expectedRevision = requiredRevision(input);
+          const preconditionConflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
+          if (preconditionConflict) {
+            const result = preconditionConflict;
+            sessionResults.set(requestId, result);
+            return result;
+          }
           if (action === "open") {
-            const expectedRevision = requiredRevision(input);
-            const currentRevision = bookEngine.getSnapshot().document.revision;
-            if (expectedRevision !== currentRevision) {
-              const result = {
-                ok: false,
-                code: "revision_conflict",
-                currentRevision,
-                summary: `Expected revision ${expectedRevision}; refresh context before opening another book.`,
-              };
-              sessionResults.set(requestId, result);
-              return result;
-            }
             const bookId = requiredString(input, "bookId");
-            if (!bookEngine.openBook(bookId, "agent")) invalid("bookId is not present in the current library.");
+            const openResult = await bookEngine.openBookCoordinated(bookId, "agent", options?.signal, {
+              documentId: expectedDocumentId,
+              revision: expectedRevision,
+            });
+            if (!openResult.ok) {
+              if (openResult.code === "revision_conflict") {
+                sessionResults.set(requestId, openResult);
+                return openResult;
+              }
+              invalid(openResult.summary);
+            }
             const opened = bookEngine.getSnapshot();
             const result = { ok: true, bookId, summary: `Opened ${opened.document.title}.` };
             pendingPresentations.set(requestId, {
@@ -431,28 +738,82 @@ export function registerWebMcpTools(
             const coverAssetId = requiredString(input, "coverAssetId");
             const validatedAssets = await getAssetMetadata([coverAssetId]);
             canceled(options?.signal ?? uncancelledToolSignal);
-            const result = bookEngine.dispatch({
+            const conflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
+            if (conflict) {
+              sessionResults.set(requestId, conflict);
+              return conflict;
+            }
+            const roleIssues = coverAssetRoleIssues(coverAssetId, validatedAssets);
+            if (roleIssues.length > 0) {
+              const result = {
+                ok: false as const,
+                code: "invalid" as const,
+                currentRevision: bookEngine.getSnapshot().document.revision,
+                summary: roleIssues[0],
+              };
+              sessionResults.set(requestId, result);
+              return result;
+            }
+            const result = await bookEngine.dispatchCoordinated({
               type: "set-book-cover",
               requestId,
-              expectedRevision: requiredRevision(input),
+              expectedDocumentId,
+              expectedRevision,
               assetId: coverAssetId,
               validatedLocalAssetIds: validatedAssets.map((asset) => asset.id),
-            }, "agent");
+            }, "agent", options?.signal);
             sessionResults.set(requestId, result);
             return result;
           }
           if (action === "begin-critique") {
-            // The engine owns the expectedRevision check so every critique
-            // entry point reports the same conflict and keeps requestId
-            // idempotency.
-            const result = bookEngine.beginQualityReview(requiredRevision(input));
+            const creationBrief = bookEngine.getQualityLifecycle()?.creationBrief;
+            if (creationBrief) {
+              const validation = await inspectCurrentDocumentAssetRoles(
+                creationBrief,
+                options?.signal ?? uncancelledToolSignal,
+              );
+              const conflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
+              if (conflict) {
+                sessionResults.set(requestId, conflict);
+                return conflict;
+              }
+              if (validation.issues.length > 0) {
+                const result = assetRoleFailure(validation.issues);
+                sessionResults.set(requestId, result);
+                return result;
+              }
+            }
+            const result = await bookEngine.beginQualityReviewCoordinated(
+              expectedDocumentId,
+              expectedRevision,
+              options?.signal,
+            );
             sessionResults.set(requestId, result);
             return result;
           }
           if (action === "record-critique") {
-            const result = bookEngine.recordQualityReview(
+            const creationBrief = bookEngine.getQualityLifecycle()?.creationBrief;
+            if (creationBrief) {
+              const validation = await inspectCurrentDocumentAssetRoles(
+                creationBrief,
+                options?.signal ?? uncancelledToolSignal,
+              );
+              const conflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
+              if (conflict) {
+                sessionResults.set(requestId, conflict);
+                return conflict;
+              }
+              if (validation.issues.length > 0) {
+                const result = assetRoleFailure(validation.issues);
+                sessionResults.set(requestId, result);
+                return result;
+              }
+            }
+            const result = await bookEngine.recordQualityReviewCoordinated(
               input.qualityReview as QualityVisualReviewSubmission,
-              requiredRevision(input),
+              expectedDocumentId,
+              expectedRevision,
+              options?.signal,
             );
             sessionResults.set(requestId, result);
             return result;
@@ -460,13 +821,22 @@ export function registerWebMcpTools(
           if (action === "adopt-creation-brief") {
             if (!authoringGuideRead) invalid("read get_project_context with detail authoring-guide before attaching a creation brief.");
             const creationBrief = input.creationBrief as CreationBriefPayload | undefined;
-            const sourceAssetIds = creationBriefSourceAssetIds(creationBrief);
-            const validatedSourceAssets = await getAssetMetadata(sourceAssetIds);
-            canceled(options?.signal ?? uncancelledToolSignal);
-            const result = bookEngine.adoptCreationBrief(
+            const validation = await inspectCurrentDocumentAssetRoles(
+              creationBrief,
+              options?.signal ?? uncancelledToolSignal,
+            );
+            const conflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
+            if (conflict) {
+              sessionResults.set(requestId, conflict);
+              return conflict;
+            }
+            const result = await bookEngine.adoptCreationBriefCoordinated(
               creationBrief ?? {},
-              validatedSourceAssets.map((asset) => asset.id),
-              requiredRevision(input),
+              validation.validatedSourceAssetIds,
+              expectedDocumentId,
+              expectedRevision,
+              validation.issues,
+              options?.signal,
             );
             sessionResults.set(requestId, result);
             return result;
@@ -478,41 +848,157 @@ export function registerWebMcpTools(
           const creationBrief = input.creationBrief as CreationBriefPayload | undefined;
           const sourceAssetIds = creationBriefSourceAssetIds(creationBrief);
           const validatedSourceAssets = await getAssetMetadata(sourceAssetIds);
+          canceled(options?.signal ?? uncancelledToolSignal);
+          const sourceValidationConflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
+          if (sourceValidationConflict) {
+            sessionResults.set(requestId, sourceValidationConflict);
+            return sourceValidationConflict;
+          }
+          const validatedSourceAssetIds = validatedSourceAssets
+            .filter((asset) => asset.assetUse === "source-photo")
+            .map((asset) => asset.id);
           const title = boundedString(input, "title", 100);
           if (!Array.isArray(input.spreads) || input.spreads.length < 1 || input.spreads.length > MAX_BOOK_SPREADS) invalid(`spreads must contain 1–${MAX_BOOK_SPREADS} spread drafts.`);
+          const readiness = assessCreationReadiness(creationBrief, {
+            expectedSpreadCount: input.spreads.length,
+            validatedSourceAssetIds,
+          });
+          if (!readiness.ready) {
+            const result = {
+              ok: false as const,
+              code: "creation_not_ready" as const,
+              currentRevision: bookEngine.getSnapshot().document.revision,
+              summary: "This creation brief needs a little more information before Apertale can create the book.",
+              readiness,
+            };
+            sessionResults.set(requestId, result);
+            return result;
+          }
+          const coverAssetId = requiredString(input, "coverAssetId");
           const spreads = input.spreads.map((raw, index) => {
             if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`spreads[${index}] must be an object.`);
             const draft = raw as ToolInput;
-            assertOnly(draft, ["title", "body", "kicker"]);
+            assertOnly(draft, ["title", "body", "kicker", "background", "layers"]);
             const spreadTitle = boundedString(draft, "title", 100);
+            if (!draft.background || typeof draft.background !== "object" || Array.isArray(draft.background)) {
+              invalid(`spreads[${index}].background must be a prepared asset object.`);
+            }
+            const backgroundInput = draft.background as ToolInput;
+            assertOnly(backgroundInput, ["cleanPlateAssetId", "sourceAssetId", "personalSourceAssetId", "separation"]);
+            const backgroundOperation = parseSceneOperation({ ...backgroundInput, op: "set-background" }, index);
+            if (backgroundOperation.op !== "set-background" || !backgroundOperation.separation) {
+              invalid(`spreads[${index}].background requires a supported separation.`);
+            }
+            const { op: _backgroundOp, ...background } = backgroundOperation;
+            if (!Array.isArray(draft.layers) || draft.layers.length < 2 || draft.layers.length > 4) {
+              invalid(`spreads[${index}].layers must contain 2–4 prepared foreground layers.`);
+            }
+            const layers = draft.layers.map((layer, layerIndex): PreparedBookLayer => {
+              if (!layer || typeof layer !== "object" || Array.isArray(layer)) invalid(`spreads[${index}].layers[${layerIndex}] must be an object.`);
+              const layerInput = layer as ToolInput;
+              assertOnly(layerInput, ["id", "label", "assetId", "frameAssetIds", "page", "kind", "transform", "depth", "locked", "motion", "hover", "focus", "reveal"]);
+              const operation = parseSceneOperation({ ...layerInput, op: "add" }, layerIndex);
+              if (operation.op !== "add") invalid(`spreads[${index}].layers[${layerIndex}] must describe a foreground layer.`);
+              const { op: _layerOp, ...preparedLayer } = operation;
+              return preparedLayer;
+            });
             return {
               id: `${index + 1}-${slug(spreadTitle)}`,
               title: spreadTitle,
               body: boundedString(draft, "body", 800),
               kicker: boundedString(draft, "kicker", 100, true),
+              background: background as PreparedBookBackground,
+              layers,
             };
           });
-          const result = bookEngine.dispatch({
+          const requestedAssetIds = [...new Set([
+            coverAssetId,
+            ...spreads.flatMap((spread) => [
+              spread.background.cleanPlateAssetId,
+              spread.background.sourceAssetId,
+              spread.background.personalSourceAssetId,
+              ...spread.layers.flatMap((layer) => [layer.assetId, ...(layer.frameAssetIds ?? [])]),
+            ].filter((assetId): assetId is string => Boolean(assetId))),
+          ])];
+          const publishableAssetIds = new Set([
+            coverAssetId,
+            ...spreads.flatMap((spread) => [
+              spread.background.cleanPlateAssetId,
+              ...spread.layers.flatMap((layer) => layer.frameAssetIds?.length ? layer.frameAssetIds : [layer.assetId]),
+            ]),
+          ]);
+          if (publishableAssetIds.size > MAX_BOOK_UPLOADED_ASSETS) {
+            const result = {
+              ok: false as const,
+              code: "creation_artifact_incomplete" as const,
+              currentRevision: bookEngine.getSnapshot().document.revision,
+              summary: "Apertale did not create the book because it cannot fit the publishing asset limit.",
+              issues: [`The finished book renders ${publishableAssetIds.size} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`],
+            };
+            sessionResults.set(requestId, result);
+            return result;
+          }
+          const validatedLocalAssets = await getAssetMetadata(requestedAssetIds);
+          if (validatedLocalAssets.length !== requestedAssetIds.length) {
+            const validatedIds = new Set(validatedLocalAssets.map((asset) => asset.id));
+            const missingCount = requestedAssetIds.filter((assetId) => !validatedIds.has(assetId)).length;
+            const result = {
+              ok: false as const,
+              code: "creation_artifact_incomplete" as const,
+              currentRevision: bookEngine.getSnapshot().document.revision,
+              summary: "Apertale did not create the book because its complete prepared asset set is no longer available in this browser.",
+              issues: [`The complete prepared book is missing ${missingCount} browser-local image${missingCount === 1 ? "" : "s"}.`],
+            };
+            sessionResults.set(requestId, result);
+            return result;
+          }
+          canceled(options?.signal ?? uncancelledToolSignal);
+          const assetValidationConflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
+          if (assetValidationConflict) {
+            sessionResults.set(requestId, assetValidationConflict);
+            return assetValidationConflict;
+          }
+          const roleIssues = preparedBookAssetIssues(
+            { coverAssetId, spreads },
+            validatedLocalAssets,
+            sourceAssetIds,
+          );
+          if (roleIssues.length > 0) {
+            const result = {
+              ok: false as const,
+              code: "creation_artifact_incomplete" as const,
+              currentRevision: bookEngine.getSnapshot().document.revision,
+              summary: "Apertale did not create the book because one or more image assets do not fit their required role.",
+              issues: roleIssues,
+            };
+            sessionResults.set(requestId, result);
+            return result;
+          }
+          const result = await bookEngine.dispatchCoordinated({
             type: "create-book",
             requestId,
-            expectedRevision: requiredRevision(input),
+            expectedDocumentId,
+            expectedRevision,
             documentId: `book-${slug(title)}-${crypto.randomUUID().slice(0, 8)}`,
             title,
+            coverAssetId,
             spreads,
             creationBrief: creationBrief ?? {},
-            validatedSourceAssetIds: validatedSourceAssets.map((asset) => asset.id),
-          }, "agent");
+            validatedSourceAssetIds,
+            validatedLocalAssetIds: validatedLocalAssets.map((asset) => asset.id),
+          }, "agent", options?.signal);
           if (result.ok) {
-            const created = bookEngine.getSnapshot();
+            if (!result.documentId || !result.changedIds[0]) invalid("create did not return its stable presentation target.");
+            const session = bookEngine.getSnapshot().session;
             pendingPresentations.set(requestId, {
               result,
               target: {
-                documentId: created.document.id,
-                revision: created.document.revision,
+                documentId: result.documentId,
+                revision: result.revision,
                 surface: "reader",
-                spreadId: created.document.spreads[created.session.currentSpreadIndex]?.id,
-                theme: created.session.sceneThemeId,
-                preview: created.session.preview,
+                spreadId: result.changedIds[0],
+                theme: session.sceneThemeId,
+                preview: session.preview,
               },
             });
             return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
@@ -537,21 +1023,22 @@ export function registerWebMcpTools(
             body: { type: "string", maxLength: 800 },
             kicker: { type: "string", maxLength: 100 },
           },
-          required: ["requestId", "expectedRevision", "spreadId"],
+          required: [...requiredMutationFields, "spreadId"],
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool(SITE_TOOL.composeSpread, options?.signal ?? uncancelledToolSignal, () => {
-          assertOnly(input, ["requestId", "expectedRevision", "spreadId", "title", "body", "kicker"]);
-          return bookEngine.dispatch({
+        execute: (input, options) => runTool(SITE_TOOL.composeSpread, options?.signal ?? uncancelledToolSignal, async () => {
+          assertOnly(input, [...requiredMutationFields, "spreadId", "title", "body", "kicker"]);
+          return bookEngine.dispatchCoordinated({
             type: "compose-spread",
             requestId: requiredString(input, "requestId"),
+            expectedDocumentId: requiredDocumentId(input),
             expectedRevision: requiredRevision(input),
             spreadId: requiredString(input, "spreadId"),
             title: boundedString(input, "title", 100, true),
             body: boundedString(input, "body", 800, true),
             kicker: boundedString(input, "kicker", 100, true),
-          }, "agent");
+          }, "agent", options?.signal);
         }),
       },
       { signal: controller.signal },
@@ -574,43 +1061,11 @@ export function registerWebMcpTools(
                 type: "object",
                 properties: {
                   op: { type: "string", enum: ["set-background", "add", "update", "remove", "reorder"] },
-                  cleanPlateAssetId: { type: "string", description: "Final 2:1 base: repaired clean plate or approved source-true photo layout." },
-                  sourceAssetId: { type: "string", description: "Original full-spread composite reference used to derive the clean plate. Required for every image-led spread." },
-                  personalSourceAssetId: { type: "string", description: "Declared personal source-photo provenance. Required when the creation brief contains source photos; never use this field for generated composites." },
-                  separation: { type: "string", enum: ["inpainted-clean-plate", "preserved-photo-layout"], description: "Use preserved-photo-layout only for an approved original-photo album." },
-                  id: { type: "string" },
+                  ...preparedBackgroundSchema.properties,
+                  ...preparedLayerSchema.properties,
                   elementId: { type: "string" },
-                  label: { type: "string", maxLength: 64 },
-                  assetId: { type: "string", description: "Existing browser-local image asset id returned by get_project_context(detail: assets)." },
-                  frameAssetIds: { type: ["array", "null"], minItems: 2, maxItems: 6, items: { type: "string" }, description: "Optional 2–6 browser-local image frames." },
-                  page: { type: "string", enum: ["left", "right"] },
-                  kind: { type: "string", enum: ["embedded", "lifted", "decoration"] },
-                  transform: {
-                    type: "object",
-                    properties: {
-                      x: { type: "number", minimum: 0, maximum: 1 },
-                      y: { type: "number", minimum: 0, maximum: 1 },
-                      scaleX: { type: "number", minimum: 0.3, maximum: 1.8 },
-                      scaleY: { type: "number", minimum: 0.3, maximum: 1.8 },
-                      rotationDeg: { type: "number", minimum: -180, maximum: 180 },
-                    },
-                    additionalProperties: false,
-                  },
-                  depth: { type: "number", minimum: 0, maximum: 0.5 },
-                  locked: { type: "boolean" },
-                  motion: {
-                    type: ["object", "null"],
-                    properties: {
-                      preset: { type: "string", enum: [...MOTION_PRESETS] },
-                      durationMs: { type: "integer", minimum: 400, maximum: 20000 },
-                      loop: { type: "boolean" },
-                    },
-                    required: ["preset", "durationMs", "loop"],
-                    additionalProperties: false,
-                  },
-                  hover: { type: "string", enum: HOVER_RESPONSES },
-                  focus: { type: "string", enum: FOCUS_RESPONSES },
-                  reveal: revealSchema,
+                  frameAssetIds: { type: ["array", "null"], minItems: 2, maxItems: 6, items: { type: "string" }, description: "Optional 2–6 browser-local image frames. For add, and for update of an existing layer, the first item must equal that layer's assetId." },
+                  motion: { ...motionSchema, type: ["object", "null"] },
                   index: { type: "integer", minimum: 0, maximum: 23 },
                 },
                 required: ["op"],
@@ -618,132 +1073,18 @@ export function registerWebMcpTools(
               },
             },
           },
-          required: ["requestId", "expectedRevision", "spreadId", "operations"],
+          required: [...requiredMutationFields, "spreadId", "operations"],
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: (input, options) => runTool(SITE_TOOL.applyScenePatch, options?.signal ?? uncancelledToolSignal, async () => {
-          assertOnly(input, ["requestId", "expectedRevision", "spreadId", "operations"]);
+          assertOnly(input, [...requiredMutationFields, "spreadId", "operations"]);
+          const requestId = requiredString(input, "requestId");
+          const expectedDocumentId = requiredDocumentId(input);
+          const expectedRevision = requiredRevision(input);
+          const spreadId = requiredString(input, "spreadId");
           if (!Array.isArray(input.operations) || input.operations.length < 1 || input.operations.length > 24) invalid("operations must contain 1–24 scene operations.");
-          const parseTransform = (raw: unknown) => {
-            if (typeof raw === "undefined") return undefined;
-            if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("transform must be an object.");
-            const value = raw as ToolInput;
-            assertOnly(value, ["x", "y", "scaleX", "scaleY", "rotationDeg"]);
-            const transform: Partial<Transform2D> = {
-              x: optionalBoundedNumber(value, "x", 0, 1),
-              y: optionalBoundedNumber(value, "y", 0, 1),
-              scaleX: optionalBoundedNumber(value, "scaleX", 0.3, 1.8),
-              scaleY: optionalBoundedNumber(value, "scaleY", 0.3, 1.8),
-              rotationDeg: optionalBoundedNumber(value, "rotationDeg", -180, 180),
-            };
-            Object.keys(transform).forEach((key) => typeof transform[key as keyof Transform2D] === "undefined" && delete transform[key as keyof Transform2D]);
-            if (Object.keys(transform).length === 0) invalid("transform must include at least one field.");
-            return transform;
-          };
-          const pick = <T extends string>(value: unknown, name: string, allowed: readonly T[]) => {
-            if (typeof value === "undefined") return undefined;
-            if (typeof value !== "string" || !allowed.includes(value as T)) invalid(`${name} is not supported.`);
-            return value as T;
-          };
-          const parseReveal = (raw: unknown): RevealSpec | undefined => {
-            if (typeof raw === "undefined") return undefined;
-            if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("reveal must be an object.");
-            const value = raw as ToolInput;
-            assertOnly(value, ["kind", "title", "summary", "facts", "source"]);
-            const kind = pick<RevealKind>(value.kind, "reveal.kind", REVEAL_KINDS);
-            if (!kind) invalid("reveal.kind is required.");
-            const title = boundedString(value, "title", 100, true) ?? "";
-            const summary = boundedString(value, "summary", 500, true) ?? "";
-            if (kind !== "none" && title.length === 0) invalid("reveal.title is required for a visible reveal.");
-            const facts = typeof value.facts === "undefined" ? [] : value.facts;
-            if (!Array.isArray(facts) || facts.length > 8) invalid("reveal.facts must contain at most 8 facts.");
-            return {
-              kind,
-              title,
-              summary,
-              facts: facts.map((rawFact, factIndex) => {
-                if (!rawFact || typeof rawFact !== "object" || Array.isArray(rawFact)) invalid(`reveal.facts[${factIndex}] must be an object.`);
-                const fact = rawFact as ToolInput;
-                assertOnly(fact, ["label", "value"]);
-                return { label: boundedString(fact, "label", 64), value: boundedString(fact, "value", 160) };
-              }),
-              source: boundedString(value, "source", 200, true),
-            };
-          };
-          const parseMotion = (raw: unknown): MotionSpec | null | undefined => {
-            if (typeof raw === "undefined" || raw === null) return raw;
-            if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("motion must be an object or null.");
-            const value = raw as ToolInput;
-            assertOnly(value, ["preset", "durationMs", "loop"]);
-            const preset = pick<MotionPreset>(value.preset, "motion.preset", [...MOTION_PRESETS]);
-            const durationMs = optionalBoundedNumber(value, "durationMs", 400, 20000);
-            if (!preset || !Number.isInteger(durationMs) || typeof value.loop !== "boolean") invalid("motion requires preset, integer durationMs, and loop.");
-            return { preset, durationMs: Number(durationMs), loop: value.loop };
-          };
-          const parseFrames = (raw: unknown): string[] | null | undefined => {
-            if (typeof raw === "undefined" || raw === null) return raw;
-            if (!Array.isArray(raw) || raw.length < 2 || raw.length > 6 || raw.some((item) => typeof item !== "string" || item.trim().length === 0)) {
-              invalid("frameAssetIds must contain 2–6 asset ids.");
-            }
-            return raw.map((item) => String(item));
-          };
-          const operations = input.operations.map((raw, index): ScenePatchOperation => {
-            if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`operations[${index}] must be an object.`);
-            const value = raw as ToolInput;
-            const op = requiredString(value, "op");
-            const common = ["op", "cleanPlateAssetId", "sourceAssetId", "personalSourceAssetId", "separation", "id", "elementId", "label", "assetId", "frameAssetIds", "page", "kind", "transform", "depth", "locked", "motion", "hover", "focus", "reveal", "index"];
-            assertOnly(value, common);
-            if (op === "set-background") {
-              return {
-                op,
-                cleanPlateAssetId: requiredString(value, "cleanPlateAssetId"),
-                sourceAssetId: boundedString(value, "sourceAssetId", 200),
-                personalSourceAssetId: boundedString(value, "personalSourceAssetId", 200, true),
-                separation: pick(value.separation, "separation", ["inpainted-clean-plate", "preserved-photo-layout"] as const),
-              };
-            }
-            if (op === "remove") return { op, elementId: requiredString(value, "elementId") };
-            if (op === "reorder") {
-              const order = optionalBoundedNumber(value, "index", 0, 23);
-              if (!Number.isInteger(order)) invalid("reorder index must be an integer.");
-              return { op, elementId: requiredString(value, "elementId"), index: Number(order) };
-            }
-            const transform = parseTransform(value.transform);
-            const hover = pick<HoverResponse>(value.hover, "hover", HOVER_RESPONSES);
-            const focus = pick<FocusResponse>(value.focus, "focus", FOCUS_RESPONSES);
-            const reveal = parseReveal(value.reveal);
-            const depth = optionalBoundedNumber(value, "depth", 0, 0.5);
-            if (typeof value.locked !== "undefined" && typeof value.locked !== "boolean") invalid("locked must be boolean.");
-            const motion = parseMotion(value.motion);
-            const frameAssetIds = parseFrames(value.frameAssetIds);
-            if (op === "add") {
-              const page = pick(value.page, "page", ["left", "right"] as const);
-              if (!page) invalid("add requires page.");
-              return {
-                op,
-                id: requiredString(value, "id"),
-                label: boundedString(value, "label", 64),
-                assetId: requiredString(value, "assetId"),
-                frameAssetIds: frameAssetIds ?? undefined,
-                page,
-                kind: pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const),
-                transform,
-                depth,
-                locked: value.locked as boolean | undefined,
-                motion: motion ?? undefined,
-                hover,
-                focus,
-                reveal,
-              };
-            }
-            if (op !== "update") invalid("op must be set-background, add, update, remove, or reorder.");
-            const kind = pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const);
-            if (!kind && !transform && typeof depth === "undefined" && typeof value.locked === "undefined" && typeof motion === "undefined" && typeof frameAssetIds === "undefined" && !hover && !focus && !reveal) {
-              invalid("update requires at least one change.");
-            }
-            return { op, elementId: requiredString(value, "elementId"), kind, transform, depth, locked: value.locked as boolean | undefined, motion, frameAssetIds, hover, focus, reveal };
-          });
+          const operations = input.operations.map(parseSceneOperation);
           const requestedLocalAssetIds = [...new Set(operations.flatMap((operation) => {
             const ids = operation.op === "set-background"
               ? [operation.cleanPlateAssetId, operation.sourceAssetId, operation.personalSourceAssetId].filter((assetId): assetId is string => Boolean(assetId))
@@ -755,14 +1096,75 @@ export function registerWebMcpTools(
           const validatedLocalAssets = await getAssetMetadata(requestedLocalAssetIds);
           if (validatedLocalAssets.length !== requestedLocalAssetIds.length) invalid("one or more local asset ids do not exist in this browser.");
           canceled(options?.signal ?? uncancelledToolSignal);
-          return bookEngine.dispatch({
-            type: "scene-patch",
-            requestId: requiredString(input, "requestId"),
-            expectedRevision: requiredRevision(input),
-            spreadId: requiredString(input, "spreadId"),
+          const command = {
+            type: "scene-patch" as const,
+            requestId,
+            expectedDocumentId,
+            expectedRevision,
+            spreadId,
             operations,
             validatedLocalAssetIds: validatedLocalAssets.map((asset) => asset.id),
-          }, "agent");
+          };
+          if (documentPreconditionConflict(expectedDocumentId, expectedRevision)) {
+            return bookEngine.dispatchCoordinated(command, "agent", options?.signal);
+          }
+          const declaredSourceAssetIds = creationBriefSourceAssetIds(bookEngine.getQualityLifecycle()?.creationBrief);
+          const roleIssues = operations.flatMap((operation, operationIndex) => {
+            const local = (assetIds: readonly string[]) => assetIds.filter((assetId) => assetId.startsWith("asset:"));
+            if (operation.op === "set-background") {
+              const localBackgroundIds = local([operation.sourceAssetId, operation.cleanPlateAssetId]);
+              return [
+                ...fullSpreadAssetRoleIssues(
+                  localBackgroundIds,
+                  validatedLocalAssets,
+                  `Background operation ${operationIndex + 1}`,
+                ),
+                ...backgroundAssetUseIssues(
+                  localBackgroundIds,
+                  validatedLocalAssets,
+                  operation.separation ?? "inpainted-clean-plate",
+                  declaredSourceAssetIds,
+                  `Background operation ${operationIndex + 1}`,
+                ),
+                ...(operation.personalSourceAssetId?.startsWith("asset:")
+                  ? [
+                      ...sourcePhotoAssetRoleIssues(
+                        [operation.personalSourceAssetId],
+                        validatedLocalAssets,
+                        `Background operation ${operationIndex + 1} personal source`,
+                      ),
+                      ...(!declaredSourceAssetIds.includes(operation.personalSourceAssetId)
+                        ? [`Background operation ${operationIndex + 1} personal source is not declared by the ready creation brief.`]
+                        : []),
+                    ]
+                  : []),
+                ...(localBackgroundIds.length === 2
+                  ? backgroundPairAssetRoleIssues(
+                      operation.sourceAssetId,
+                      operation.cleanPlateAssetId,
+                      validatedLocalAssets,
+                      `Background operation ${operationIndex + 1} original composite and final base`,
+                    )
+                  : []),
+              ];
+            }
+            if (operation.op === "add") {
+              const sequence = local([operation.assetId, ...(operation.frameAssetIds ?? [])]);
+              return operation.frameAssetIds?.length
+                ? frameSequenceAssetRoleIssues(sequence, validatedLocalAssets, `Layer ${operation.id}`)
+                : foregroundAssetRoleIssues(sequence, validatedLocalAssets, `Layer ${operation.id}`);
+            }
+            if (operation.op === "update" && operation.frameAssetIds?.length) {
+              return frameSequenceAssetRoleIssues(
+                local(operation.frameAssetIds),
+                validatedLocalAssets,
+                `Update ${operation.elementId} animation`,
+              );
+            }
+            return [];
+          });
+          if (roleIssues.length > 0) invalid(roleIssues[0]);
+          return bookEngine.dispatchCoordinated(command, "agent", options?.signal);
         }),
       },
       { signal: controller.signal },
@@ -775,24 +1177,32 @@ export function registerWebMcpTools(
         inputSchema: {
           type: "object",
           properties: {
-            requestId: { type: "string", description: "Unique idempotency key for this session action." },
+            ...requiredMutation,
             theme: { type: "string", enum: ["paper-atelier", "midnight-desk"] },
             preview: { type: "boolean" },
             spreadId: { type: "string", maxLength: 128 },
             surface: { type: "string", enum: ["reader", "shelf"], description: "Visible surface to show. Use shelf for cover evidence and reader for a spread." },
           },
-          required: ["requestId"],
+          required: requiredMutationFields,
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
         execute: (input, options) => runTool(SITE_TOOL.setPresentation, options?.signal ?? uncancelledToolSignal, async () => {
-          assertOnly(input, ["requestId", "theme", "preview", "spreadId", "surface"]);
+          assertOnly(input, [...requiredMutationFields, "theme", "preview", "spreadId", "surface"]);
           const requestId = requiredString(input, "requestId");
           if (pendingPresentations.has(requestId)) {
             return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
           }
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
+          const expectedDocumentId = requiredDocumentId(input);
+          const expectedRevision = requiredRevision(input);
+          const preconditionConflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
+          if (preconditionConflict) {
+            const result = preconditionConflict;
+            sessionResults.set(requestId, result);
+            return result;
+          }
           let theme = bookEngine.getSnapshot().session.sceneThemeId;
           if (typeof input.theme !== "undefined") {
             const requestedTheme = requiredString(input, "theme");
@@ -858,18 +1268,19 @@ export function registerWebMcpTools(
         inputSchema: {
           type: "object",
           properties: { ...requiredMutation, undoToken: { type: "string", description: "Token returned by the mutation to undo." } },
-          required: ["requestId", "expectedRevision", "undoToken"],
+          required: [...requiredMutationFields, "undoToken"],
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool(SITE_TOOL.undoProjectChange, options?.signal ?? uncancelledToolSignal, () => {
-          assertOnly(input, ["requestId", "expectedRevision", "undoToken"]);
-          return bookEngine.dispatch({
+        execute: (input, options) => runTool(SITE_TOOL.undoProjectChange, options?.signal ?? uncancelledToolSignal, async () => {
+          assertOnly(input, [...requiredMutationFields, "undoToken"]);
+          return bookEngine.dispatchCoordinated({
             type: "undo",
             requestId: requiredString(input, "requestId"),
+            expectedDocumentId: requiredDocumentId(input),
             expectedRevision: requiredRevision(input),
             undoToken: requiredString(input, "undoToken"),
-          }, "agent");
+          }, "agent", options?.signal);
         }),
       },
       { signal: controller.signal },

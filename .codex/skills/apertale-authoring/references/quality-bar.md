@@ -45,7 +45,7 @@ Use the versioned rubric returned by `get_project_context(detail: "quality-revie
 ## MCP and state safety
 
 - Context was refreshed after mutations and final revision is known.
-- Each mutation used a unique request id and the current expected revision.
+- Each book or presentation mutation used a unique request id and the expected document id plus revision from one current context.
 - Imported assets came from `get_project_context(detail: "assets")`.
 - Generation and import were never reported as successful without asset ids, tool results, or an explicit pending-handoff note.
 - Reversible changes have retained undo tokens.

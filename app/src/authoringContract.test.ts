@@ -13,6 +13,7 @@ import {
   AUTHORING_LAYOUT_SEQUENCE,
   CREATION_READINESS_VERSION,
   GENERATED_COVER_COUNT,
+  MAX_BOOK_PUBLISHABLE_ASSETS,
   PHOTO_TRUTH_REQUIREMENT,
   PROJECT_CONTEXT_DETAILS,
   REQUIRED_GATE_IDS,
@@ -32,7 +33,6 @@ describe("site-native authoring guide contract", () => {
     expect(guide.skillMirror).toBe(AUTHORING_GUIDE_SKILL_MIRROR);
     expect(guide.contract).toBe("two-phase");
     expect(guide.tools).toEqual([...SITE_TOOL_NAMES]);
-    expect(guide.tools).toHaveLength(7);
     expect(PROJECT_CONTEXT_DETAILS).toEqual([
       "compact",
       "selected-reveal",
@@ -82,7 +82,8 @@ describe("site-native authoring guide contract", () => {
     expect(story).toMatchObject({ ready: true, bookType: "illustrated-storybook", effectiveSpreadCount: 6 });
     expect(story.recommended.assetNeeds).toEqual(expect.arrayContaining([
       "1 dedicated portrait cover",
-      "1 complete generated 2:1 clean plate per spread",
+      "1 complete generated clean plate composed for the approximately 1.62:1 stage per spread",
+      expect.stringMatching(/at most 50 distinct browser-local/i),
     ]));
 
     const photoAsset = { id: "asset:12345678-1234-4234-8234-123456789abc", name: "Family picnic.png" };
@@ -117,8 +118,8 @@ describe("site-native authoring guide contract", () => {
     }, { validatedSourceAssetIds: [photoAsset.id] });
     expect(album).toMatchObject({ ready: true, bookType: "preserved-photo-album" });
     expect(album.recommendations.join(" ")).toMatch(/original photo geometry/i);
-    expect(album.recommended.assetNeeds).toContain("1 source-true 2:1 preserved-photo layout per spread; 0 generated interiors");
-    expect(album.recommended.assetNeeds.join(" ")).not.toMatch(/generated 2:1 clean plate per spread/i);
+    expect(album.recommended.assetNeeds).toContain("1 source-true layout composed for the approximately 1.62:1 stage per spread; 0 generated interiors");
+    expect(album.recommended.assetNeeds.join(" ")).not.toMatch(/generated clean plate.*per spread/i);
 
     const albumBrief = buildCreationBrief({
       mode: "photos",
@@ -173,6 +174,35 @@ describe("site-native authoring guide contract", () => {
     }, { validatedSourceAssetIds: [sourceAsset.id] })).toMatchObject({ ready: true });
   });
 
+  it("does not charge private source provenance against the shared reader asset capacity", () => {
+    const sourceAssets = Array.from({ length: 24 }, (_, index) => ({
+      id: `asset:30000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      name: `Source ${index + 1}.png`,
+    }));
+    const brief = {
+      contractVersion: CREATION_READINESS_VERSION,
+      bookType: "photo-led-keepsake" as const,
+      premise: "A long family journey.",
+      audience: "The family",
+      spreadCount: 12,
+      visualDirection: "Warm editorial collage",
+      sourceAssets,
+      photoPolicy: { sourceUse: "reference-and-compose" as const, preserveIdentity: true, allowFaceChanges: false },
+    };
+
+    expect(MAX_BOOK_PUBLISHABLE_ASSETS).toBe(50);
+    expect(assessCreationReadiness(brief, {
+      validatedSourceAssetIds: sourceAssets.map((asset) => asset.id),
+    })).toMatchObject({
+      ready: true,
+      recommended: {
+        assetNeeds: expect.arrayContaining([
+          expect.stringMatching(/source provenance is private and excluded unless it is also rendered/i),
+        ]),
+      },
+    });
+  });
+
   it("returns blocking fields and short user-ready questions instead of guessing material photo choices", () => {
     const result = assessCreationReadiness({
       contractVersion: CREATION_READINESS_VERSION,
@@ -203,7 +233,8 @@ describe("site-native authoring guide contract", () => {
     expect(byId.inspect).toMatch(/Inspect source assets and the user prompt/i);
     expect(byId.story).toMatch(/coherent complete story arc/i);
     expect(byId["plan-art"]).toMatch(/one dedicated portrait cover/i);
-    expect(byId["plan-art"]).toMatch(/one distinct 2:1 spread composition per spread/i);
+    expect(byId["plan-art"]).toMatch(/approximately 1\.62:1 stage per spread/i);
+    expect(byId["plan-art"]).toMatch(/1\.45–2\.10 is only the compatible input range/i);
     expect(byId["plan-art"]).toMatch(/preserve source-photo geometry/i);
     expect(byId["imagegen-before-create"]).toMatch(/host ImageGen/i);
     expect(byId["imagegen-before-create"]).toMatch(/before manage_book create/i);
@@ -213,9 +244,12 @@ describe("site-native authoring guide contract", () => {
     expect(byId["photo-truth"]).toMatch(/finished interior/i);
     expect(byId["photo-truth"]).toMatch(/literal photo album/i);
     expect(byId["handoff-before-refer"]).toMatch(/assetUse source-photo/i);
+    expect(byId.layout).toMatch(/at or below 50/i);
+    expect(guide.revisions).toMatch(/presentation pending.*same requestId/i);
     expect(byId["handoff-before-refer"]).toMatch(/assetUse book-art/i);
     expect(byId["handoff-before-refer"]).toMatch(/before referring/i);
-    expect(byId.layout).toMatch(/create, set-cover, and patch/i);
+    expect(byId.layout).toMatch(/atomically create with coverAssetId/i);
+    expect(byId.layout).toMatch(/text-only shell/i);
     expect(byId.interaction).toMatch(/spread-specific/i);
     expect(byId.cutouts).toMatch(/native transparent cutouts/i);
     expect(byId["provenance-revision"]).toMatch(/provenance/i);

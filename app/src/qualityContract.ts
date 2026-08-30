@@ -1,30 +1,35 @@
 import qualityRubricSource from "../worker/qualityRubric.json";
 import {
   CREATION_BOOK_TYPES,
+  CREATION_READINESS_VERSION,
+  MAX_BOOK_PUBLISHABLE_ASSETS,
   assessCreationReadiness,
   creationBriefSourceAssetIds,
   type CreationBookType,
   type CreationBriefPayload,
 } from "./authoringContract";
+import { bookAssetReferenceIssues, bookAssetReferenceManifest } from "./bookAssetContract";
+import { hasAuthoredInteraction } from "./interaction";
+import { listStoredPublishedAssetIds } from "./projectArtifact";
 import { MAX_BOOK_SPREADS, isProceduralElement, spreadBaseAssetId } from "./types";
 import type { DocumentState, ThemeId } from "./types";
 
-export const QUALITY_CONTRACT_VERSION = 1 as const;
-export const QUALITY_RUBRIC_VERSION = 1 as const;
+export const QUALITY_CONTRACT_VERSION = 2 as const;
+export const QUALITY_RUBRIC_VERSION = 2 as const;
 export const QUALITY_REVIEW_MAX_ROUNDS = 2 as const;
 /** Closed runtime vocabulary for persisted quality lifecycle status. */
 export const QUALITY_REVIEW_STATUSES = ["needs-review", "checking", "ready", "blocked", "needs-user-input"] as const;
 
 const MIN_SPREAD_FOREGROUND_LAYERS = 2;
 /**
- * Smallest asset capacity that can hold one publishable image-led book at the
- * 12-spread maximum: a dedicated cover plus, per spread, the original
- * composite, the final clean plate, and two foreground layers
- * (1 + 12 × 4 = 49). Shared with the Worker through the rubric so client
- * discovery and the upload quota advertise the same bound.
+ * Capacity for the common fully distinct 12-spread asset plan: a dedicated
+ * cover plus, per spread, the original composite, final clean plate, and two
+ * foreground layers (1 + 12 × 4 = 49), with one extra slot available for a
+ * personal source or animation frame. Cross-spread foreground reuse remains
+ * legal and can reduce the actual total.
  */
 const MINIMUM_CAPABLE_BOOK_ASSETS = 1 + MAX_BOOK_SPREADS * (2 + MIN_SPREAD_FOREGROUND_LAYERS);
-export const MAX_BOOK_UPLOADED_ASSETS = qualityRubricSource.maxBookUploadedAssets;
+export const MAX_BOOK_UPLOADED_ASSETS = MAX_BOOK_PUBLISHABLE_ASSETS;
 
 type QualityCriterionMode = "deterministic" | "visual" | "both";
 type QualityCriterion = {
@@ -51,6 +56,7 @@ export const QUALITY_RUBRIC = Object.freeze(qualityRubricSource) as QualityRubri
 if (
   QUALITY_RUBRIC.version !== QUALITY_RUBRIC_VERSION
   || QUALITY_RUBRIC.maxReviewRounds !== QUALITY_REVIEW_MAX_ROUNDS
+  || QUALITY_RUBRIC.maxBookUploadedAssets !== MAX_BOOK_UPLOADED_ASSETS
   || !Number.isInteger(MAX_BOOK_UPLOADED_ASSETS)
   || MAX_BOOK_UPLOADED_ASSETS < MINIMUM_CAPABLE_BOOK_ASSETS
 ) {
@@ -114,6 +120,14 @@ export type QualityReport = {
   publishAllowed: boolean;
   summary: string;
 };
+
+/** Distinguishes reports that can be used under the currently shipped gate. */
+export function isCurrentQualityReport(report: unknown): report is QualityReport {
+  if (!report || typeof report !== "object") return false;
+  const candidate = report as Partial<QualityReport>;
+  return candidate.contractVersion === QUALITY_CONTRACT_VERSION
+    && candidate.rubricVersion === QUALITY_RUBRIC_VERSION;
+}
 
 export type AuthoringQualityLifecycle = {
   creationBrief: CreationBriefPayload;
@@ -193,7 +207,8 @@ export function creationAssetPolicyIssues(
     issues.push(`The source-photo policy must remain ${policy.sourceUse}.`);
   }
   if (creationBrief.bookType !== "illustrated-storybook" && sourceIds.size === 0) issues.push("The photo book has no declared source assets.");
-  if (documentState.coverAssetId && sourceIds.has(documentState.coverAssetId)) issues.push("A personal source photo cannot replace the dedicated cover.");
+  const effectiveCoverAssetId = documentState.coverAssetId ?? documentState.coverTextureUrl;
+  if (effectiveCoverAssetId && sourceIds.has(effectiveCoverAssetId)) issues.push("A personal source photo cannot replace the dedicated cover.");
   for (const spread of documentState.spreads) {
     const artwork = spread.artwork;
     if (!artwork) continue;
@@ -245,29 +260,39 @@ const evidence = (
   ...(suggestedPatch ? { suggestedPatch } : {}),
 });
 
-function elementHasMeaningfulInteraction(element: DocumentState["spreads"][number]["elements"][number]) {
-  const interaction = element.interaction;
-  return Boolean(
-    element.motion
-    || (interaction && (
-      interaction.hover !== "none"
-      || interaction.focus !== "none"
-      || interaction.reveal.kind !== "none"
-    )),
-  );
-}
-
 function meaningfulInteraction(documentState: DocumentState, spreadId: string) {
   const spread = documentState.spreads.find((item) => item.id === spreadId);
-  return Boolean(spread?.elements.some(elementHasMeaningfulInteraction));
+  return Boolean(spread?.elements.some((element) => hasAuthoredInteraction(element.interaction)));
 }
 
-export function evaluateDeterministicQuality(
+function evaluateCreationArtifactQuality(
   documentState: DocumentState,
-  renderEvidence: readonly QualityRenderEvidence[],
   creationBrief?: CreationBriefPayload | null,
 ): QualityCheckResult[] {
   const checks: QualityCheckResult[] = [];
+  const elementIds = documentState.spreads.flatMap((spread) => spread.elements.map((element) => element.id));
+  const globallyUniqueElementIds = new Set(elementIds).size === elementIds.length;
+  checks.push(evidence(
+    "layered-spread-contract",
+    globallyUniqueElementIds ? "pass" : "blocker",
+    globallyUniqueElementIds
+      ? "Foreground layer ids are unique across the book."
+      : "Foreground layer ids must be unique across the whole book.",
+    [{ scope: "book", locator: ".book-app", description: "Book-wide foreground layer identity" }],
+    globallyUniqueElementIds ? undefined : "Give every foreground layer a book-wide stable id before continuing.",
+  ));
+
+  const localAssetCount = listStoredPublishedAssetIds(documentState).length;
+  const publishableAssetCount = localAssetCount <= MAX_BOOK_UPLOADED_ASSETS;
+  checks.push(evidence(
+    "creation-asset-policy",
+    publishableAssetCount ? "pass" : "blocker",
+    publishableAssetCount
+      ? `The book references ${localAssetCount} of ${MAX_BOOK_UPLOADED_ASSETS} available uploaded-image slots.`
+      : `The book references ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`,
+    [{ scope: "book", locator: ".book-app", description: "Publishable local image capacity" }],
+    publishableAssetCount ? undefined : "Reduce unique local image references before review.",
+  ));
   const coverAssetId = documentState.coverAssetId ?? documentState.coverTextureUrl;
   checks.push(evidence(
     "missing-or-fallback-assets",
@@ -311,7 +336,7 @@ export function evaluateDeterministicQuality(
       hasInteraction ? "pass" : "blocker",
       hasInteraction ? `Spread ${spread.order + 1} has an authored interaction.` : `Spread ${spread.order + 1} has no authored interaction.`,
       [spreadLocation],
-      hasInteraction ? undefined : "Add a spread-specific reveal, focus response, or story-relevant motion.",
+      hasInteraction ? undefined : "Add a spread-specific hover, focus response, or click reveal.",
     ));
 
     const safeTextLength = spread.title.trim().length > 0 && spread.title.length <= 100 && spread.body.length <= 800;
@@ -324,7 +349,10 @@ export function evaluateDeterministicQuality(
     ));
   }
 
-  const policyIssues = creationAssetPolicyIssues(documentState, creationBrief);
+  const policyIssues = [
+    ...creationAssetPolicyIssues(documentState, creationBrief),
+    ...bookAssetReferenceIssues(bookAssetReferenceManifest(documentState)),
+  ];
   checks.push(evidence(
     "creation-asset-policy",
     policyIssues.length === 0 ? "pass" : "blocker",
@@ -332,6 +360,25 @@ export function evaluateDeterministicQuality(
     [{ scope: "book", locator: ".book-app", description: "Creation brief and final spread asset policy" }],
     policyIssues.length === 0 ? undefined : "Restore the generated/preserved asset treatment and declared source-photo roles from the ready brief.",
   ));
+
+  return checks;
+}
+
+export function creationArtifactIssues(
+  documentState: DocumentState,
+  creationBrief?: CreationBriefPayload | null,
+) {
+  return evaluateCreationArtifactQuality(documentState, creationBrief)
+    .filter((check) => check.outcome === "blocker")
+    .map((check) => check.message);
+}
+
+export function evaluateDeterministicQuality(
+  documentState: DocumentState,
+  renderEvidence: readonly QualityRenderEvidence[],
+  creationBrief?: CreationBriefPayload | null,
+): QualityCheckResult[] {
+  const checks = evaluateCreationArtifactQuality(documentState, creationBrief);
 
   const currentEvidence = renderEvidence.filter((item) => (
     item.documentId === documentState.id && item.revision === documentState.revision
@@ -510,7 +557,7 @@ export function buildQualityRenderManifest(documentState: DocumentState, pageUrl
           id: element.id,
           label: element.label,
           assetId: element.assetId,
-          interaction: elementHasMeaningfulInteraction(element),
+          interaction: hasAuthoredInteraction(element.interaction),
         })),
       evidenceLocator: ".book-scene canvas",
     })),
@@ -539,7 +586,16 @@ export function qualityGateState(
       remainingRounds: QUALITY_REVIEW_MAX_ROUNDS,
     };
   }
-  const report = lifecycle.report && lifecycle.report.reviewedRevision === documentState.revision
+  if (lifecycle.creationBrief.contractVersion !== CREATION_READINESS_VERSION) {
+    return {
+      status: "needs-review",
+      message: `Replace the legacy creation brief with contract version ${CREATION_READINESS_VERSION} before quality review.`,
+      report: null,
+      nextRound: null,
+      remainingRounds: QUALITY_REVIEW_MAX_ROUNDS,
+    };
+  }
+  const report = isCurrentQualityReport(lifecycle.report) && lifecycle.report.reviewedRevision === documentState.revision
     ? lifecycle.report
     : null;
   const remainingRounds = Math.max(0, QUALITY_REVIEW_MAX_ROUNDS - lifecycle.reviewRounds);
@@ -593,9 +649,7 @@ export function assertPublishableQuality(documentState: DocumentState, report: Q
     });
   });
   if (
-    !report
-    || report.contractVersion !== QUALITY_CONTRACT_VERSION
-    || report.rubricVersion !== QUALITY_RUBRIC_VERSION
+    !isCurrentQualityReport(report)
     || report.documentId !== documentState.id
     || report.reviewedRevision !== documentState.revision
     || report.round < 1

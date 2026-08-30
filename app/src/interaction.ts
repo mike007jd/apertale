@@ -39,6 +39,20 @@ export const defaultInteraction: InteractionSpec = {
   reveal: EMPTY_REVEAL,
 };
 
+/** Idle motion can support a scene, but only a reader-triggered response makes it interactive. */
+export function hasAuthoredInteraction(
+  interaction: Partial<Pick<InteractionSpec, "hover" | "focus" | "reveal">> | null | undefined,
+) {
+  return Boolean(
+    interaction
+    && (
+      (interaction.hover && interaction.hover !== "none")
+      || (interaction.focus && interaction.focus !== "none")
+      || (interaction.reveal && interaction.reveal.kind !== "none")
+    ),
+  );
+}
+
 /** Elements without an authored interaction still behave predictably. */
 export function resolveInteraction(element: Pick<BookElement, "interaction" | "motion" | "label">): InteractionSpec {
   const authored = element.interaction;

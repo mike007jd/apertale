@@ -3,6 +3,7 @@ import {
   canTurnPage,
   createPageTurnSession,
   pageTurnNavDisabled,
+  pageTurnWaitState,
   skipsPageTurnAnimation,
 } from "./pageTurn";
 import type { TurnState } from "./types";
@@ -105,6 +106,14 @@ describe("page-turn session lifecycle", () => {
       previous: true,
       next: false,
     });
+  });
+
+  it("ignores renderer readiness from another revision or spread", () => {
+    const readiness = { navigationKey: "book-a:4:0", backward: true, forward: true };
+    expect(pageTurnWaitState(true, "book-a:4:0", readiness)).toEqual({ backward: false, forward: false });
+    expect(pageTurnWaitState(true, "book-a:4:5", readiness)).toEqual({ backward: true, forward: true });
+    expect(pageTurnWaitState(true, "book-a:5:0", readiness)).toEqual({ backward: true, forward: true });
+    expect(pageTurnWaitState(false, "book-a:5:0", readiness)).toEqual({ backward: false, forward: false });
   });
 
   it("holds the spread and locks navigation 80ms after an arrow click", () => {

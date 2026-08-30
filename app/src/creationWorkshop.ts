@@ -1,8 +1,9 @@
 import {
+  acquireAssetUrl,
   getAssetMetadata,
   isStoredAssetId,
-  resolveAssetUrl,
   storeLocalImages,
+  type AssetUrlLease,
   type StoredAssetMetadata,
 } from "./assetStore";
 import { buildCreationBrief, type AuthoringMode, type CreationBrief } from "./creationBrief";
@@ -62,6 +63,16 @@ function uniqueAssets(assets: readonly WorkshopAsset[]) {
   }).slice(0, MAX_WORKSHOP_ASSETS);
 }
 
+/** Returns only the incoming previews that can still enter the current strip. */
+export function admitWorkshopAssets(
+  current: readonly WorkshopAsset[],
+  incoming: readonly WorkshopAsset[],
+) {
+  const currentIds = new Set(current.map((asset) => asset.id));
+  const room = Math.max(0, MAX_WORKSHOP_ASSETS - currentIds.size);
+  return uniqueAssets(incoming.filter((asset) => !currentIds.has(asset.id))).slice(0, room);
+}
+
 export function reduceCreationWorkshop(
   state: CreationWorkshopState,
   action: CreationWorkshopAction,
@@ -78,7 +89,7 @@ export function reduceCreationWorkshop(
     return { ...state, assets: uniqueAssets([...action.assets, ...state.assets]) };
   }
   if (action.type === "append-assets") {
-    const assets = uniqueAssets([...state.assets, ...action.assets]);
+    const assets = [...state.assets, ...admitWorkshopAssets(state.assets, action.assets)];
     return {
       ...state,
       mode: assets.length > state.assets.length && state.mode === "idea" ? "both" : state.mode,
@@ -114,40 +125,63 @@ export function persistCreationWorkshopAssetOrder(assets: readonly WorkshopAsset
   }
 }
 
-export async function restoreCreationWorkshopAssets(): Promise<WorkshopAsset[]> {
+type ResolvedWorkshopAssets = {
+  assets: WorkshopAsset[];
+  leases: AssetUrlLease[];
+  unresolvedAssetIds: string[];
+};
+
+async function resolveWorkshopAssets(metadata: readonly Pick<StoredAssetMetadata, "id" | "name">[]): Promise<ResolvedWorkshopAssets> {
+  const assets: WorkshopAsset[] = [];
+  const leases: AssetUrlLease[] = [];
+  const unresolvedAssetIds: string[] = [];
+  for (const asset of metadata) {
+    try {
+      const lease = await acquireAssetUrl(asset.id);
+      leases.push(lease);
+      assets.push({ id: asset.id, name: asset.name, url: lease.url });
+    } catch {
+      unresolvedAssetIds.push(asset.id);
+    }
+  }
+  return { assets, leases, unresolvedAssetIds };
+}
+
+export async function restoreCreationWorkshopAssets(): Promise<Omit<ResolvedWorkshopAssets, "unresolvedAssetIds">> {
   const selectedIds = readCreationWorkshopAssetOrder();
-  if (selectedIds.length === 0) return [];
+  if (selectedIds.length === 0) return { assets: [], leases: [] };
   const metadata = await getAssetMetadata(selectedIds);
   const metadataById = new Map(metadata.map((asset) => [asset.id, asset]));
-  const restored = await Promise.all(selectedIds.map(async (id) => {
+  const restored = selectedIds.flatMap((id) => {
     const asset = metadataById.get(id);
-    if (!asset) return null;
-    try {
-      return { id: asset.id, name: asset.name, url: await resolveAssetUrl(asset.id) } satisfies WorkshopAsset;
-    } catch {
-      return null;
-    }
-  }));
-  return restored.filter((asset): asset is WorkshopAsset => Boolean(asset));
+    return asset?.assetUse === "source-photo" ? [asset] : [];
+  });
+  const resolved = await resolveWorkshopAssets(restored);
+  if (resolved.unresolvedAssetIds.length > 0) {
+    resolved.leases.forEach((lease) => lease.release());
+    throw new Error("One or more saved photo previews could not be restored.");
+  }
+  return { assets: resolved.assets, leases: resolved.leases };
 }
 
 export type CreationWorkshopImport = {
   imported: WorkshopAsset[];
   stored: StoredAssetMetadata[];
+  leases: AssetUrlLease[];
   rejected: number;
   failed: number;
 };
 
 export async function importCreationWorkshopAssets(files: Iterable<File>, limit: number): Promise<CreationWorkshopImport> {
-  const batch = await storeLocalImages(files, limit);
-  const imported = await Promise.all(batch.assets.map(async (asset) => {
-    try {
-      return { id: asset.id, name: asset.name, url: await resolveAssetUrl(asset.id) } satisfies WorkshopAsset;
-    } catch {
-      return { id: asset.id, name: asset.name, url: "" } satisfies WorkshopAsset;
-    }
-  }));
-  return { imported, stored: batch.assets, rejected: batch.rejected, failed: batch.failed };
+  const batch = await storeLocalImages(files, { assetUse: "source-photo", limit });
+  const resolved = await resolveWorkshopAssets(batch.assets);
+  return {
+    imported: resolved.assets,
+    stored: batch.assets,
+    leases: resolved.leases,
+    rejected: batch.rejected,
+    failed: batch.failed + batch.assets.length - resolved.assets.length,
+  };
 }
 
 export function buildCreationWorkshopBrief(state: CreationWorkshopState): CreationBrief {

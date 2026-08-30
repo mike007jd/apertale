@@ -2,8 +2,10 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ArrowLeft, ArrowRight, X } from "@phosphor-icons/react";
 import { MotionConfig } from "motion/react";
 import { ThemeSwitch } from "./design/ThemeSwitch";
+import { FallbackBook } from "./FallbackBook";
 import { hasReveal, resolveInteraction } from "./interaction";
 import { announce, supportsWebGl2 } from "./readerShell";
+import { readerSceneStructureKey, sceneFailureMatches } from "./renderEvidence";
 import {
   canTurnPage,
   createPageTurnSession,
@@ -11,7 +13,7 @@ import {
   skipsPageTurnAnimation,
 } from "./pageTurn";
 import type { TurnDirection, TurnWaitState } from "./pageTurn";
-import { spreadBaseAssetId, type BookSnapshot, type DocumentState, type ThemeId, type TurnState } from "./types";
+import { type BookSnapshot, type DocumentState, type ThemeId, type TurnState } from "./types";
 
 const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: module.ThreeBook })));
 
@@ -32,12 +34,26 @@ export function SharedBookApp() {
   const [spreadIndex, setSpreadIndex] = useState(0);
   const [selectionId, setSelectionId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeId>("paper-atelier");
-  const [sceneFailed, setSceneFailed] = useState(false);
+  const [failedSceneKey, setFailedSceneKey] = useState<string | null>(null);
   const [sceneReady, setSceneReady] = useState(false);
   const [pageTurnReady, setPageTurnReady] = useState<Record<TurnDirection, boolean>>({ backward: false, forward: false });
   const [turn, setTurn] = useState<TurnState>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
-  const webGlAvailable = useMemo(supportsWebGl2, []);
+  const forceFallback = new URLSearchParams(window.location.search).get("fallback") === "1";
+  const webGlAvailable = useMemo(() => supportsWebGl2(forceFallback), [forceFallback]);
+  const snapshot = useMemo<BookSnapshot | null>(() => documentState ? {
+    document: documentState,
+    session: {
+      currentSpreadIndex: spreadIndex,
+      selectionId,
+      sceneThemeId: theme,
+      preview: false,
+      quality: reducedMotion ? "reduced" : "balanced",
+    },
+    lastAction: null,
+  } : null, [documentState, reducedMotion, selectionId, spreadIndex, theme]);
+  const activeSceneKey = snapshot ? readerSceneStructureKey(snapshot, "reader") : null;
+  const sceneFailed = sceneFailureMatches(activeSceneKey, failedSceneKey);
   const spreadIndexRef = useRef(0);
   const spreadCountRef = useRef(0);
   const documentIdRef = useRef<string | null>(null);
@@ -134,18 +150,6 @@ export function SharedBookApp() {
     readerCopy.current?.scrollTo({ top: 0, behavior: "auto" });
   }, [spreadIndex]);
 
-  const snapshot = useMemo<BookSnapshot | null>(() => documentState ? {
-    document: documentState,
-    session: {
-      currentSpreadIndex: spreadIndex,
-      selectionId,
-      sceneThemeId: theme,
-      preview: false,
-      quality: reducedMotion ? "reduced" : "balanced",
-    },
-    lastAction: null,
-  } : null, [documentState, reducedMotion, selectionId, spreadIndex, theme]);
-
   if (error) {
     return <main className="app-shell"><section className="fallback-book"><article className="fallback-plate"><p className="fallback-kicker">Shared book</p><h2>Unavailable</h2><p>{error}</p></article></section></main>;
   }
@@ -193,19 +197,16 @@ export function SharedBookApp() {
                 setPageTurnReady({ backward: false, forward: false });
               }}
               onReady={() => setSceneReady(true)}
-              onFailure={() => {
+              onFailure={(failureSceneKey) => {
+                if (!sceneFailureMatches(activeSceneKey, failureSceneKey)) return;
                 setSceneReady(false);
                 setPageTurnReady({ backward: false, forward: false });
-                setSceneFailed(true);
+                setFailedSceneKey(failureSceneKey);
               }}
             />
           </Suspense>
         ) : (
-          <div className="fallback-book" aria-label={`Two-dimensional fallback for ${spread.title}`}>
-            {spreadBaseAssetId(spread)
-              ? <img src={spreadBaseAssetId(spread)} alt="" role="presentation" />
-              : <article className="fallback-plate"><h1>{spread.title}</h1><p>{spread.body}</p></article>}
-          </div>
+          <FallbackBook snapshot={snapshot} spread={spread} audience="reader" onSelect={setSelectionId} />
         )}
 
         <button className="page-arrow page-arrow-left" onClick={() => turnPage("backward")} disabled={nav.previous} aria-label="Previous spread"><ArrowLeft size={22} /></button>

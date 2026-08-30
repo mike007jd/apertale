@@ -1,6 +1,7 @@
 import {
   CREATION_READINESS_VERSION,
   GENERATED_COVER_COUNT,
+  MAX_BOOK_PUBLISHABLE_ASSETS,
   REQUIRED_GATE_IDS,
   assessCreationReadiness,
   creationCompletionGates,
@@ -148,8 +149,9 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "- Define audience or assumption and a complete story arc.",
     "- Plan the title, dedicated generated portrait cover, every spread, and ordered provenance.",
     ...(bookType === "preserved-photo-album"
-      ? ["- Use ImageGen for the dedicated portrait cover. Prepare one source-true 2:1 original-photo layout per spread without reillustrating people or changing photo geometry beyond the authorised policy."]
+      ? ["- Use ImageGen for the dedicated portrait cover. Prepare one source-true original-photo layout per spread for the approximately 1.62:1 stage without reillustrating people or changing photo geometry beyond the authorised policy."]
       : ["- Use the host ImageGen/image editing capability to make a dedicated portrait cover and purpose-built full-spread artwork for every spread."]),
+    "- Compose full-spread artwork for the approximately 1.62:1 stage. The 1.45–2.10 input range is compatibility tolerance, not an art-direction target.",
     "- Use source photos as references and story truth, not as a lazy final right-page placement unless the user explicitly chose a literal photo-album treatment.",
     ...(bookType === "preserved-photo-album"
       ? [`Required asset counts: generated cover count ${generatedCoverCount}; generated full-spread count 0; preserved original-photo layout count ${preservedPhotoSpreadCount}; provenance entries ${provenanceEntryCount}.`]
@@ -159,12 +161,14 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "",
     "Phase 2 — only after the complete asset plan and final asset set exist, lay the book out through Site Tools:",
     "- Call get_project_context(detail: \"creation-readiness\") again with the completed brief. Continue only when ready is true.",
-    "- Create a new independent book; never overwrite a curated sample. Pass the same completed creationBrief to manage_book create.",
-    "- Create the book through the Site Tools.",
     "- Need a reference photo from me? Call request_image_handoff with assetUse source-photo and a plain-language reason.",
     "- Need to transfer generated cover, spread, clean-plate, or cutout finals? Call request_image_handoff with assetUse book-art. Those assets stay out of the next source-photo brief.",
-    "- Set the dedicated portrait cover.",
-    "- Apply each spread with sourceAssetId as its original composite, cleanPlateAssetId as its final base, and personalSourceAssetId only for a declared user photo; then add meaningful hover/focus/click interactions.",
+    "- Refresh get_project_context(detail: \"assets\") and continue only when every cover, background, composite, cutout, and frame id in the plan exists in the browser registry.",
+    `- Deduplicate the browser-local reader-visible cover, resolved final base per spread, rendered layers, and frame ids. At most ${MAX_BOOK_PUBLISHABLE_ASSETS} may be uploaded. Author-only source and personal-photo provenance stays private and is excluded unless it is also selected for rendering.`,
+    "- Create one new independent book with a single manage_book create call; never overwrite a curated sample. Pass the same creationBrief, coverAssetId, and every complete spread manifest.",
+    "- Each spread manifest must include background.sourceAssetId, background.cleanPlateAssetId, the book-type separation, personalSourceAssetId when declared, and 2–4 native-alpha layers with a meaningful hover/focus/click interaction.",
+    "- A text-only shell is not a book. If any prepared asset is missing, do not create; finish or hand off the asset set first. Use set-cover and apply_scene_patch only for later critique fixes.",
+    "- If create returns ok true with presentation status pending, the book is already saved. Retry the exact same requestId to confirm the frame; never create a duplicate with a new requestId.",
     "- Visit the shelf cover and every spread so the current revision has real render evidence.",
     "- Read get_project_context(detail: \"quality-review\"), call manage_book(action: \"begin-critique\"), inspect the actual frames, and record every visual criterion with action record-critique.",
     "- Apply suggested patches and re-check once when needed. Stop after two rounds for missing material or a user decision; publish only when publishAllowed is true.",

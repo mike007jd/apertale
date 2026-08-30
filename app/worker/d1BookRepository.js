@@ -33,7 +33,10 @@ export class D1BookRepository {
     const result = await this.db.prepare(`INSERT INTO living_books (
       id, manage_token_hash, status, created_at, updated_at
     ) SELECT ?, ?, 'draft', ?, ?
-      WHERE (SELECT COUNT(*) FROM living_books) < ?
+      WHERE NOT EXISTS (
+          SELECT 1 FROM living_book_deleted_ids WHERE book_id = ?
+        )
+        AND (SELECT COUNT(*) FROM living_books) < ?
         AND (
           SELECT COUNT(*) FROM living_book_creation_events
           WHERE created_at >= ?
@@ -43,6 +46,7 @@ export class D1BookRepository {
       manageTokenHash,
       now,
       now,
+      id,
       maxSiteBooks,
       windowStart,
       maxBooksPerWindow,
@@ -50,6 +54,8 @@ export class D1BookRepository {
     if (changes(result) === 1) return "created";
     const existing = await this.findBook(id);
     if (existing) return existing.manage_token_hash === manageTokenHash ? "existing" : "conflict";
+    const deleted = await this.findDeletedBook(id);
+    if (deleted) return deleted.manage_token_hash === manageTokenHash ? "deleted" : "conflict";
     if (await this.countBooks() >= maxSiteBooks) return "site_limit";
     if (await this.countBooksCreatedSince(windowStart) >= maxBooksPerWindow) return "rate_limit";
     return "conflict";
@@ -65,9 +71,16 @@ export class D1BookRepository {
   async findManagedBook(id, manageTokenHash) {
     await this.ensureSchema();
     return this.db.prepare(`SELECT id, status, title, revision, share_token_hash,
-        publish_attempt_token_hash, revoked_at
+        publish_attempt_token_hash, asset_cleanup_pending, revoked_at
       FROM living_books
       WHERE id = ? AND manage_token_hash = ?`).bind(id, manageTokenHash).first();
+  }
+
+  async findDeletedBook(id) {
+    await this.ensureSchema();
+    return this.db.prepare(`SELECT manage_token_hash, deleted_at
+      FROM living_book_deleted_ids
+      WHERE book_id = ?`).bind(id).first();
   }
 
   async claimPublishAttempt({ id, manageTokenHash, shareTokenHash, now }) {
@@ -77,21 +90,15 @@ export class D1BookRepository {
       updated_at = ?
     WHERE id = ?
       AND manage_token_hash = ?
-      AND status IN ('draft', 'revoked')
+      AND status = 'draft'
+      AND asset_cleanup_pending = 0
       AND NOT EXISTS (
         SELECT 1 FROM living_book_retired_share_tokens
         WHERE share_token_hash = ?
       )
       AND (
         publish_attempt_token_hash = ?
-        OR (
-          publish_attempt_token_hash IS NULL
-          AND (
-            status = 'draft'
-            OR share_token_hash IS NULL
-            OR share_token_hash <> ?
-          )
-        )
+        OR publish_attempt_token_hash IS NULL
         OR EXISTS (
           SELECT 1 FROM living_book_retired_share_tokens
           WHERE share_token_hash = living_books.publish_attempt_token_hash
@@ -103,7 +110,6 @@ export class D1BookRepository {
       manageTokenHash,
       shareTokenHash,
       shareTokenHash,
-      shareTokenHash,
     ).run();
     return changes(result) === 1;
   }
@@ -113,6 +119,14 @@ export class D1BookRepository {
     const row = await this.db.prepare(`SELECT 1 AS retired
       FROM living_book_retired_share_tokens
       WHERE share_token_hash = ?`).bind(shareTokenHash).first();
+    return row?.retired === 1;
+  }
+
+  async isRetiredShareTokenForBook(shareTokenHash, bookId) {
+    await this.ensureSchema();
+    const row = await this.db.prepare(`SELECT 1 AS retired
+      FROM living_book_retired_share_tokens
+      WHERE share_token_hash = ? AND book_id = ?`).bind(shareTokenHash, bookId).first();
     return row?.retired === 1;
   }
 
@@ -133,7 +147,8 @@ export class D1BookRepository {
       FROM living_books
       WHERE id = ?
         AND manage_token_hash = ?
-        AND status IN ('draft', 'revoked')
+        AND status = 'draft'
+        AND asset_cleanup_pending = 0
         AND (
           SELECT COUNT(*) FROM living_book_assets
           WHERE book_id = ?
@@ -188,7 +203,8 @@ export class D1BookRepository {
       updated_at = ?
     WHERE id = ?
       AND manage_token_hash = ?
-      AND status IN ('draft', 'revoked')
+      AND status = 'draft'
+      AND asset_cleanup_pending = 0
       AND publish_attempt_token_hash = ?
       AND NOT EXISTS (
         SELECT 1 FROM living_book_retired_share_tokens
@@ -233,20 +249,55 @@ export class D1BookRepository {
         AND asset.asset_id = ?`).bind(shareTokenHash, assetId).first();
   }
 
-  async revokeBook({ id, manageTokenHash, now }) {
+  async revokeBook({ id, manageTokenHash, shareTokenHash, now }) {
     await this.ensureSchema();
     const result = await this.db.prepare(`UPDATE living_books SET
       publish_attempt_token_hash = NULL,
       status = 'revoked',
+      asset_cleanup_pending = 1,
       revoked_at = ?,
       updated_at = ?
-    WHERE id = ? AND manage_token_hash = ? AND status IN ('published', 'revoked')`).bind(
+    WHERE id = ?
+      AND manage_token_hash = ?
+      AND share_token_hash = ?
+      AND (
+        status = 'published'
+        OR (status = 'revoked' AND asset_cleanup_pending = 1)
+      )`).bind(
       now,
       now,
       id,
       manageTokenHash,
+      shareTokenHash,
     ).run();
     return changes(result) === 1;
+  }
+
+  async completeRevocation({ id, manageTokenHash, shareTokenHash, now }) {
+    await this.ensureSchema();
+    await this.db.prepare(`DELETE FROM living_book_assets
+      WHERE book_id = ?
+        AND EXISTS (
+          SELECT 1 FROM living_books
+          WHERE id = ?
+            AND manage_token_hash = ?
+            AND share_token_hash = ?
+            AND status = 'revoked'
+            AND asset_cleanup_pending = 1
+        )`).bind(id, id, manageTokenHash, shareTokenHash).run();
+    const result = await this.db.prepare(`UPDATE living_books SET
+      asset_cleanup_pending = 0,
+      updated_at = ?
+    WHERE id = ?
+      AND manage_token_hash = ?
+      AND share_token_hash = ?
+      AND status = 'revoked'
+      AND asset_cleanup_pending = 1`).bind(now, id, manageTokenHash, shareTokenHash).run();
+    if (changes(result) === 1) return true;
+    const existing = await this.findManagedBook(id, manageTokenHash);
+    return existing?.status === "revoked"
+      && existing.share_token_hash === shareTokenHash
+      && Number(existing.asset_cleanup_pending) === 0;
   }
 
   async markDeleting({ id, manageTokenHash, now }) {
@@ -262,11 +313,27 @@ export class D1BookRepository {
     return changes(result) === 1;
   }
 
-  async listAssets(bookId) {
+  async listAssetsForRevocation({ id, manageTokenHash, shareTokenHash }) {
     await this.ensureSchema();
-    const result = await this.db.prepare(`SELECT asset_id, object_key, content_type, byte_size
-      FROM living_book_assets
-      WHERE book_id = ?`).bind(bookId).all();
+    const result = await this.db.prepare(`SELECT asset.asset_id, asset.object_key, asset.content_type, asset.byte_size
+      FROM living_book_assets AS asset
+      INNER JOIN living_books AS book ON book.id = asset.book_id
+      WHERE book.id = ?
+        AND book.manage_token_hash = ?
+        AND book.share_token_hash = ?
+        AND book.status = 'revoked'
+        AND book.asset_cleanup_pending = 1`).bind(id, manageTokenHash, shareTokenHash).all();
+    return result.results;
+  }
+
+  async listAssetsForDeletion({ id, manageTokenHash }) {
+    await this.ensureSchema();
+    const result = await this.db.prepare(`SELECT asset.asset_id, asset.object_key, asset.content_type, asset.byte_size
+      FROM living_book_assets AS asset
+      INNER JOIN living_books AS book ON book.id = asset.book_id
+      WHERE book.id = ?
+        AND book.manage_token_hash = ?
+        AND book.status = 'deleting'`).bind(id, manageTokenHash).all();
     return result.results;
   }
 

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   INITIAL_CREATION_WORKSHOP,
   MAX_WORKSHOP_ASSETS,
+  admitWorkshopAssets,
   buildCreationWorkshopBrief,
   readCreationWorkshopAssetOrder,
   reduceCreationWorkshop,
@@ -10,16 +11,16 @@ import {
 } from "./creationWorkshop";
 
 const assetStore = vi.hoisted(() => ({
+  acquireAssetUrl: vi.fn(),
   getAssetMetadata: vi.fn(),
-  resolveAssetUrl: vi.fn(),
 }));
 
 vi.mock("./assetStore", async (importOriginal) => {
   const original = await importOriginal<typeof import("./assetStore")>();
   return {
     ...original,
+    acquireAssetUrl: assetStore.acquireAssetUrl,
     getAssetMetadata: assetStore.getAssetMetadata,
-    resolveAssetUrl: assetStore.resolveAssetUrl,
   };
 });
 
@@ -37,24 +38,77 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  assetStore.acquireAssetUrl.mockReset();
   assetStore.getAssetMetadata.mockReset();
-  assetStore.resolveAssetUrl.mockReset();
 });
 
 describe("creation workshop session", () => {
   it("restores unique persisted assets in the user's saved order", async () => {
     sessionStorage.setItem("apertale:workshop-asset-order:v1", JSON.stringify([id(2), "asset:invalid", id(1), id(2)]));
     assetStore.getAssetMetadata.mockResolvedValue([
-      { id: id(1), name: "First.png" },
-      { id: id(2), name: "Second.png" },
+      { id: id(1), name: "First.png", assetUse: "source-photo" },
+      { id: id(2), name: "Second.png", assetUse: "source-photo" },
     ]);
-    assetStore.resolveAssetUrl.mockImplementation(async (assetId: string) => `blob:${assetId}`);
+    assetStore.acquireAssetUrl.mockImplementation(async (assetId: string) => ({ assetId, url: `blob:${assetId}`, release: vi.fn() }));
 
     expect(readCreationWorkshopAssetOrder()).toEqual([id(2), id(1)]);
-    await expect(restoreCreationWorkshopAssets()).resolves.toEqual([
-      { id: id(2), name: "Second.png", url: `blob:${id(2)}` },
-      { id: id(1), name: "First.png", url: `blob:${id(1)}` },
+    await expect(restoreCreationWorkshopAssets()).resolves.toEqual({
+      assets: [
+        { id: id(2), name: "Second.png", url: `blob:${id(2)}` },
+        { id: id(1), name: "First.png", url: `blob:${id(1)}` },
+      ],
+      leases: [
+        expect.objectContaining({ assetId: id(2), url: `blob:${id(2)}` }),
+        expect.objectContaining({ assetId: id(1), url: `blob:${id(1)}` }),
+      ],
+    });
+  });
+
+  it("drops legacy and wrong-role assets instead of certifying them as source photos", async () => {
+    sessionStorage.setItem("apertale:workshop-asset-order:v1", JSON.stringify([id(1), id(2), id(3)]));
+    assetStore.getAssetMetadata.mockResolvedValue([
+      { id: id(1), name: "Legacy.png" },
+      { id: id(2), name: "Generated.png", assetUse: "book-art" },
+      { id: id(3), name: "Photo.png", assetUse: "source-photo" },
     ]);
+    assetStore.acquireAssetUrl.mockImplementation(async (assetId: string) => ({ assetId, url: `blob:${assetId}`, release: vi.fn() }));
+
+    await expect(restoreCreationWorkshopAssets()).resolves.toEqual({
+      assets: [{ id: id(3), name: "Photo.png", url: `blob:${id(3)}` }],
+      leases: [expect.objectContaining({ assetId: id(3), url: `blob:${id(3)}` })],
+    });
+    expect(assetStore.acquireAssetUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the saved order intact when a preview lease fails transiently, then restores on retry", async () => {
+    const savedOrder = [id(1), id(2)];
+    sessionStorage.setItem("apertale:workshop-asset-order:v1", JSON.stringify(savedOrder));
+    assetStore.getAssetMetadata.mockResolvedValue(savedOrder.map((assetId, index) => ({
+      id: assetId,
+      name: `Saved ${index + 1}.png`,
+      assetUse: "source-photo",
+    })));
+    const firstRelease = vi.fn();
+    assetStore.acquireAssetUrl
+      .mockResolvedValueOnce({ assetId: id(1), url: "blob:first", release: firstRelease })
+      .mockRejectedValueOnce(new Error("transient URL failure"));
+
+    await expect(restoreCreationWorkshopAssets()).rejects.toThrow("could not be restored");
+    expect(firstRelease).toHaveBeenCalledOnce();
+    expect(readCreationWorkshopAssetOrder()).toEqual(savedOrder);
+
+    assetStore.acquireAssetUrl.mockImplementation(async (assetId: string) => ({
+      assetId,
+      url: `blob:${assetId}`,
+      release: vi.fn(),
+    }));
+    await expect(restoreCreationWorkshopAssets()).resolves.toMatchObject({
+      assets: savedOrder.map((assetId, index) => ({
+        id: assetId,
+        name: `Saved ${index + 1}.png`,
+        url: `blob:${assetId}`,
+      })),
+    });
   });
 
   it("keeps asset order, enforces capacity, and changes idea mode to both after import", () => {
@@ -67,6 +121,15 @@ describe("creation workshop session", () => {
     expect(state.assets.slice(0, 2).map((asset) => asset.id)).toEqual([id(2), id(1)]);
     state = reduceCreationWorkshop(state, { type: "remove-asset", assetId: id(2) });
     expect(state.assets.some((asset) => asset.id === id(2))).toBe(false);
+  });
+
+  it("admits only unique incoming previews that still fit the live strip", () => {
+    const current = Array.from({ length: MAX_WORKSHOP_ASSETS - 1 }, (_, index) => workshopAsset(index + 1));
+    expect(admitWorkshopAssets(current, [
+      workshopAsset(1),
+      workshopAsset(MAX_WORKSHOP_ASSETS),
+      workshopAsset(MAX_WORKSHOP_ASSETS + 1),
+    ])).toEqual([workshopAsset(MAX_WORKSHOP_ASSETS)]);
   });
 
   it("keeps selected photos while idea mode excludes them from the generated brief", () => {

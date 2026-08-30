@@ -71,6 +71,7 @@
   --ring-neutral: 0 0 0 3px rgb(25 27 24 / .12);
   --ring-accent: 0 0 0 3px var(--accent-soft);
   --ring-ok: 0 0 0 3px rgb(71 168 121 / .16);
+  --ring-marker: 0 0 0 4px color-mix(in srgb, var(--marker-color) 35%, transparent);
   --ring-inset-accent: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
   --elev-book: 0 22px 34px rgb(42 28 17 / .24), -6px 5px 0 rgb(65 44 29 / .16);
   --elev-book-hover: 0 32px 45px rgb(42 28 17 / .30), -7px 6px 0 rgb(65 44 29 / .13);
@@ -109,6 +110,7 @@
   --ring-neutral: 0 0 0 3px rgb(247 240 227 / .14);
   --ring-accent: 0 0 0 3px var(--accent-soft);
   --ring-ok: 0 0 0 3px rgb(107 168 143 / .18);
+  --ring-marker: 0 0 0 4px color-mix(in srgb, var(--marker-color) 42%, transparent);
   --ring-inset-accent: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
   --elev-book: 0 25px 45px rgb(0 0 0 / .6), -6px 5px 0 rgb(70 44 24 / .5);
   --elev-book-hover: 0 34px 56px rgb(0 0 0 / .66), -7px 6px 0 rgb(70 44 24 / .46);

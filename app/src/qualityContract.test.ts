@@ -8,6 +8,7 @@ import {
   buildQualityReport,
   groupQualityBlockers,
   buildQualityRenderManifest,
+  creationArtifactIssues,
   creationAssetPolicyIssues,
   evaluateDeterministicQuality,
   validateVisualReview,
@@ -106,7 +107,7 @@ const readyBrief = {
 };
 
 const visualReview = (outcome: "pass" | "warn" | "blocker" = "pass"): QualityVisualReviewSubmission => ({
-  contractVersion: 1,
+  contractVersion: 2,
   reviewedRevision: 4,
   expectedRound: 1,
   sampleReady: outcome !== "blocker",
@@ -122,7 +123,7 @@ const visualReview = (outcome: "pass" | "warn" | "blocker" = "pass"): QualityVis
 
 describe("quality contract", () => {
   it("keeps one versioned rubric for deterministic and visual judgments", () => {
-    expect(QUALITY_RUBRIC).toMatchObject({ version: 1, maxReviewRounds: QUALITY_REVIEW_MAX_ROUNDS });
+    expect(QUALITY_RUBRIC).toMatchObject({ version: 2, maxReviewRounds: QUALITY_REVIEW_MAX_ROUNDS });
     expect(QUALITY_RUBRIC.criteria.map((item) => item.id)).toEqual(expect.arrayContaining([
       "cover-appeal",
       "spread-composition",
@@ -130,6 +131,8 @@ describe("quality contract", () => {
       "alpha-edge-matte",
       "premium-sample-value",
     ]));
+    expect(JSON.stringify(QUALITY_RUBRIC)).toMatch(/approximately 1\.62:1 stage/i);
+    expect(JSON.stringify(QUALITY_RUBRIC)).not.toMatch(/2:1 spread composition|intentional 2:1 composition/i);
   });
 
   it("blocks missing structure and render evidence deterministically", () => {
@@ -144,6 +147,52 @@ describe("quality contract", () => {
       "meaningful-interaction",
       "render-evidence-completeness",
     ]));
+    const createIssues = creationArtifactIssues(broken, readyBrief);
+    expect(createIssues).toEqual(expect.arrayContaining([
+      expect.stringMatching(/cover/i),
+      expect.stringMatching(/spread 1/i),
+    ]));
+    expect(createIssues.join(" ")).not.toMatch(/render evidence/i);
+  });
+
+  it("does not count idle motion as an authored reader interaction", () => {
+    const document = documentState();
+    document.spreads[0].elements.forEach((element) => {
+      delete element.interaction;
+    });
+    document.spreads[0].elements[0].motion = { preset: "gentle-float", durationMs: 4200, loop: true };
+
+    expect(creationArtifactIssues(document, readyBrief)).toEqual(expect.arrayContaining([
+      expect.stringMatching(/no authored interaction/i),
+    ]));
+    expect(evaluateDeterministicQuality(document, renderEvidence(), readyBrief)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ criterionId: "meaningful-interaction", outcome: "blocker" }),
+    ]));
+  });
+
+  it("blocks legacy cross-role asset conflicts before the Worker publish boundary", () => {
+    const document = documentState();
+    document.spreads[0].elements[0].assetId = document.spreads[0].artwork!.cleanPlateAssetId;
+
+    expect(creationArtifactIssues(document, readyBrief)).toEqual(expect.arrayContaining([
+      expect.stringMatching(/reuse background asset/i),
+    ]));
+  });
+
+  it("treats a legacy coverTextureUrl as the effective cover for source-photo policy", () => {
+    const sourceId = "asset:32345678-1234-4234-8234-123456789abc";
+    const document = documentState();
+    delete document.coverAssetId;
+    document.coverTextureUrl = sourceId;
+    const brief = {
+      ...readyBrief,
+      sourceAssets: [{ id: sourceId, name: "Portrait.png" }],
+      photoPolicy: { sourceUse: "reference-and-compose" as const, preserveIdentity: true, allowFaceChanges: false },
+    };
+
+    expect(creationAssetPolicyIssues(document, brief)).toContain(
+      "A personal source photo cannot replace the dedicated cover.",
+    );
   });
 
   it("requires every visual criterion and produces a publishable warning record", () => {

@@ -1,4 +1,5 @@
-import { isStoredAssetId } from "./assetStore";
+import { isStoredAssetId } from "./assetId";
+import { renderedElementAssetIds, spreadBaseAssetId } from "./types";
 import type { DocumentState } from "./types";
 
 type ProjectAssetLocation =
@@ -39,10 +40,17 @@ export function listProjectAssetReferences(documentState: DocumentState): Projec
   return references;
 }
 
-export function listStoredProjectAssetIds(documentState: DocumentState): string[] {
-  return [...new Set(
-    listProjectAssetReferences(documentState)
-      .map((reference) => reference.assetId)
-      .filter(isStoredAssetId),
-  )];
+/**
+ * Lists only browser-local assets a reader actually renders. Author-side
+ * composite and personal-photo provenance stay in the private project.
+ */
+export function listStoredPublishedAssetIds(documentState: DocumentState): string[] {
+  const rendered = [documentState.coverAssetId ?? documentState.coverTextureUrl];
+  documentState.spreads.forEach((spread) => {
+    rendered.push(spreadBaseAssetId(spread));
+    spread.elements.forEach((element) => rendered.push(...renderedElementAssetIds(element)));
+  });
+  return [...new Set(rendered.filter((assetId): assetId is string => (
+    typeof assetId === "string" && isStoredAssetId(assetId)
+  )))];
 }

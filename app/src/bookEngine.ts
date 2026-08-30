@@ -1,18 +1,36 @@
 import { initialDocument, initialSession, sampleBooks } from "./sampleBook";
-import { assessCreationReadiness, type CreationBriefPayload } from "./authoringContract";
-import { recordDiagnostic } from "./diagnostics";
-import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS, resolveInteraction } from "./interaction";
-import { listProjectAssetReferences } from "./projectArtifact";
+import { BoundedMap } from "./boundedMap";
 import {
+  bookLifecycleLockManager,
+  bookLifecycleLockName,
+  BOOK_LIBRARY_MUTATION_LOCK_NAME,
+  BOOK_LIBRARY_STORAGE_KEY,
+} from "./bookLifecycle";
+import { isStoredAssetId } from "./assetId";
+import { CREATION_READINESS_VERSION, assessCreationReadiness, type CreationBriefPayload } from "./authoringContract";
+import {
+  bookAssetReferenceFindings,
+  bookAssetReferenceIssueKey,
+  bookAssetReferenceManifest,
+  formatBookAssetReferenceIssue,
+} from "./bookAssetContract";
+import { recordDiagnostic } from "./diagnostics";
+import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS, hasAuthoredInteraction, resolveInteraction } from "./interaction";
+import { listProjectAssetReferences, listStoredPublishedAssetIds } from "./projectArtifact";
+import { getPublicationRecord } from "./publishingClient";
+import {
+  MAX_BOOK_UPLOADED_ASSETS,
   QUALITY_REVIEW_MAX_ROUNDS,
   QUALITY_REVIEW_STATUSES,
   buildQualityReport,
+  creationArtifactIssues,
   creationAssetPolicyIssues,
   evaluateDeterministicQuality,
+  isCurrentQualityReport,
   qualityGateState,
   validateVisualReview,
 } from "./qualityContract";
-import { DIRECT_MANIPULATION, MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralElement, spreadBaseAssetId } from "./types";
+import { BOOK_ELEMENT_ID_PATTERN, DIRECT_MANIPULATION, MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralAssetId, isProceduralElement, spreadBaseAssetId } from "./types";
 import type {
   AuthoringQualityLifecycle,
   QualityGateState,
@@ -35,6 +53,7 @@ import type {
   LayeredArtwork,
   MotionSpec,
   MutationResult,
+  PreparedBookLayer,
   QualityTier,
   RevealSpec,
   ScenePatchCommand,
@@ -45,8 +64,9 @@ import type {
   VisibleAction,
 } from "./types";
 
-const STORAGE_KEY = "apertale.library.v4";
 const SAMPLE_SOURCE_VERSION = 4;
+const REQUEST_RESULT_LIMIT = 128;
+const UNDO_RECORD_LIMIT = 32;
 
 /**
  * Every render-evidence identity a fully rendered book can hold at one
@@ -59,11 +79,12 @@ const RENDER_EVIDENCE_LIMIT = MAX_BOOK_SPREADS * THEME_IDS.length * 2 + THEME_ID
 
 const renderEvidenceKey = (item: QualityRenderEvidence) => `${item.scope}:${item.spreadId ?? ""}:${item.theme}:${item.surface}`;
 
-type ElementField = "kind" | "depth" | "locked" | "motion" | "transform" | "interaction" | "provenance";
+type ElementField = "label" | "kind" | "assetId" | "frameAssetIds" | "page" | "depth" | "locked" | "motion" | "transform" | "interaction" | "provenance";
 
 type ElementUndoRecord = {
   operation: "update";
   token: string;
+  documentId: string;
   elementId: string;
   fields: ElementField[];
   before: Partial<BookElement>;
@@ -75,6 +96,7 @@ type SpreadField = "title" | "body" | "kicker";
 type ComposeSpreadUndoRecord = {
   operation: "compose";
   token: string;
+  documentId: string;
   spreadId: string;
   fields: SpreadField[];
   before: Partial<Pick<Spread, SpreadField>>;
@@ -84,15 +106,18 @@ type ComposeSpreadUndoRecord = {
 type CreateBookUndoRecord = {
   operation: "create-book";
   token: string;
+  documentId: string;
   direction: "undo" | "redo";
   previous: DocumentState;
   created: DocumentState;
-  quality: AuthoringQualityLifecycle;
+  previousQuality?: AuthoringQualityLifecycle;
+  createdQuality: AuthoringQualityLifecycle;
 };
 
 type BookCoverUndoRecord = {
   operation: "set-cover";
   token: string;
+  documentId: string;
   before?: string;
   after?: string;
 };
@@ -107,6 +132,7 @@ type ScenePatchElementUndo = {
 type ScenePatchUndoRecord = {
   operation: "scene-patch";
   token: string;
+  documentId: string;
   spreadId: string;
   beforeOrder: string[];
   afterOrder: string[];
@@ -123,12 +149,120 @@ const clone = <T,>(value: T): T => structuredClone(value);
 
 const freshRequestId = () => crypto.randomUUID();
 
+const validTransform = (transform: Partial<Transform2D> | undefined) => !transform || Object.entries(transform).every(([field, value]) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return false;
+  if (field === "x" || field === "y") return value >= 0 && value <= 1;
+  if (field === "scaleX" || field === "scaleY") return value >= 0.3 && value <= 1.8;
+  if (field === "rotationDeg") return value >= -180 && value <= 180;
+  return false;
+});
+
+const validReveal = (reveal: RevealSpec | undefined) => !reveal || (
+  REVEAL_KINDS.includes(reveal.kind)
+  && (reveal.kind === "none" || (reveal.title.trim().length >= 1 && reveal.title.trim().length <= 100))
+  && reveal.summary.trim().length <= 500
+  && Array.isArray(reveal.facts)
+  && reveal.facts.length <= 8
+  && reveal.facts.every((fact) => fact.label.trim().length >= 1 && fact.label.trim().length <= 64 && fact.value.trim().length >= 1 && fact.value.trim().length <= 160)
+  && (typeof reveal.source === "undefined" || reveal.source.trim().length <= 200)
+);
+
+const validMotion = (motion: MotionSpec | null | undefined) => typeof motion === "undefined"
+  || motion === null
+  || (MOTION_PRESETS.includes(motion.preset)
+    && motion.durationMs >= 400
+    && motion.durationMs <= 20_000
+    && typeof motion.loop === "boolean");
+
+const normalizeReveal = (reveal: RevealSpec) => ({
+  kind: reveal.kind,
+  title: reveal.title.trim(),
+  summary: reveal.summary.trim(),
+  facts: reveal.facts.map((fact) => ({ label: fact.label.trim(), value: fact.value.trim() })),
+  source: reveal.source?.trim() || undefined,
+});
+
+function materializeBookLayer(
+  layer: PreparedBookLayer,
+  source: CommandSource,
+  validAssetId: (assetId: string) => boolean,
+): BookElement | null {
+  const validImageAssetId = (assetId: string) => validAssetId(assetId) && !isProceduralAssetId(assetId);
+  const validFrameAssets = typeof layer.frameAssetIds === "undefined"
+    || (
+      !isProceduralAssetId(layer.assetId)
+      && layer.frameAssetIds.length >= 2
+      && layer.frameAssetIds.length <= 6
+      && layer.frameAssetIds[0] === layer.assetId
+      && layer.frameAssetIds.every(validImageAssetId)
+    );
+  if (
+    !BOOK_ELEMENT_ID_PATTERN.test(layer.id)
+    || layer.label.trim().length < 1
+    || layer.label.trim().length > 64
+    || !["left", "right"].includes(layer.page)
+    || (layer.kind && !["embedded", "lifted", "decoration"].includes(layer.kind))
+    || !validAssetId(layer.assetId)
+    || !validFrameAssets
+    || !validTransform(layer.transform)
+    || (typeof layer.depth === "number" && (layer.depth < 0 || layer.depth > 0.5))
+    || !validMotion(layer.motion)
+    || (layer.hover && !HOVER_RESPONSES.includes(layer.hover))
+    || (layer.focus && !FOCUS_RESPONSES.includes(layer.focus))
+    || !validReveal(layer.reveal)
+  ) return null;
+
+  const hasExplicitInteraction = typeof layer.hover !== "undefined"
+    || typeof layer.focus !== "undefined"
+    || typeof layer.reveal !== "undefined";
+
+  return {
+    id: layer.id,
+    label: layer.label.trim(),
+    assetId: layer.assetId,
+    frameAssetIds: layer.frameAssetIds,
+    page: layer.page,
+    kind: layer.kind ?? "lifted",
+    transform: { x: 0.5, y: 0.5, scaleX: 0.72, scaleY: 0.72, rotationDeg: 0, ...layer.transform },
+    depth: layer.depth ?? 0.1,
+    locked: layer.locked ?? false,
+    motion: layer.motion,
+    ...(hasExplicitInteraction
+      ? {
+          interaction: {
+            hover: layer.hover ?? "none",
+            focus: layer.focus ?? "none",
+            reveal: layer.reveal
+              ? normalizeReveal(layer.reveal)
+              : { kind: "none" as const, title: "", summary: "", facts: [] },
+            hint: `Explore ${layer.label.trim()}`,
+          },
+        }
+      : {}),
+    provenance: source,
+  };
+}
+
 type StoredLibrary = {
   activeBookId: string;
   documents: DocumentState[];
   sampleSourceVersion?: number;
   authoringQuality?: Record<string, AuthoringQualityLifecycle>;
 };
+
+export type CoordinatedOpenResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code: "revision_conflict";
+      currentRevision: number;
+      summary: string;
+    }
+  | {
+      ok: false;
+      code: "not_found" | "coordination_unavailable";
+      summary: string;
+    };
 
 function validDocument(parsed: DocumentState) {
   return typeof parsed.id === "string"
@@ -167,9 +301,21 @@ function validQualityLifecycle(value: unknown): value is AuthoringQualityLifecyc
     && Array.isArray(lifecycle.renderEvidence);
 }
 
+function normalizeQualityLifecycle(lifecycle: AuthoringQualityLifecycle): AuthoringQualityLifecycle {
+  if (lifecycle.report && !isCurrentQualityReport(lifecycle.report)) {
+    return {
+      creationBrief: clone(lifecycle.creationBrief),
+      reviewRounds: 0,
+      reviewStatus: "needs-review",
+      renderEvidence: [],
+    };
+  }
+  return clone(lifecycle);
+}
+
 function loadLibrary(): StoredLibrary {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(BOOK_LIBRARY_STORAGE_KEY);
     if (!raw) return defaultLibrary();
     const parsed = JSON.parse(raw) as StoredLibrary;
     if (!Array.isArray(parsed.documents) || !parsed.documents.every(validDocument)) return defaultLibrary();
@@ -250,12 +396,50 @@ function loadLibrary(): StoredLibrary {
     const activeBookId = documents.some((book) => book.id === parsed.activeBookId) ? parsed.activeBookId : documents[0]?.id;
     if (!activeBookId) return defaultLibrary();
     const documentIds = new Set(documents.map((document) => document.id));
-    const authoringQuality = Object.fromEntries(Object.entries(parsed.authoringQuality ?? {}).filter(([documentId, lifecycle]) => (
-      documentIds.has(documentId) && validQualityLifecycle(lifecycle)
-    )));
+    const authoringQuality: Record<string, AuthoringQualityLifecycle> = {};
+    Object.entries(parsed.authoringQuality ?? {}).forEach(([documentId, lifecycle]) => {
+      if (documentIds.has(documentId) && validQualityLifecycle(lifecycle)) {
+        authoringQuality[documentId] = normalizeQualityLifecycle(lifecycle);
+      }
+    });
     return { activeBookId, documents, sampleSourceVersion: SAMPLE_SOURCE_VERSION, authoringQuality };
   } catch {
     return defaultLibrary();
+  }
+}
+
+/**
+ * Reads the durable library used as the precondition for a lifecycle change.
+ * Unlike loadLibrary(), malformed storage never falls back to samples: a
+ * create/remove transaction must stop instead of overwriting uncertain data.
+ */
+function readLibraryForLifecycleMutation(current: StoredLibrary): StoredLibrary | null {
+  try {
+    let raw = localStorage.getItem(BOOK_LIBRARY_STORAGE_KEY);
+    if (!raw) {
+      const initial = JSON.stringify(current);
+      localStorage.setItem(BOOK_LIBRARY_STORAGE_KEY, initial);
+      raw = localStorage.getItem(BOOK_LIBRARY_STORAGE_KEY);
+      if (raw !== initial) return null;
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const candidate = parsed as Partial<StoredLibrary>;
+    if (
+      typeof candidate.activeBookId !== "string"
+      || !Array.isArray(candidate.documents)
+      || !candidate.documents.every(validDocument)
+      || new Set(candidate.documents.map((document) => document.id)).size !== candidate.documents.length
+      || !candidate.documents.some((document) => document.id === candidate.activeBookId)
+      || (
+        typeof candidate.authoringQuality !== "undefined"
+        && (!candidate.authoringQuality || typeof candidate.authoringQuality !== "object" || Array.isArray(candidate.authoringQuality))
+      )
+    ) return null;
+    const normalized = loadLibrary();
+    return localStorage.getItem(BOOK_LIBRARY_STORAGE_KEY) === raw ? normalized : null;
+  } catch {
+    return null;
   }
 }
 
@@ -294,8 +478,8 @@ export class BookEngine {
   private sessionState = clone(initialSession);
   private lastAction: VisibleAction | null = null;
   private listeners = new Set<() => void>();
-  private requestResults = new Map<string, DocumentResult>();
-  private undoRecords = new Map<string, UndoRecord>();
+  private requestResults = new BoundedMap<string, DocumentResult>(REQUEST_RESULT_LIMIT);
+  private undoRecords = new BoundedMap<string, UndoRecord>(UNDO_RECORD_LIMIT);
   private snapshot: BookSnapshot = this.makeSnapshot();
   private storageWarningPending = false;
 
@@ -337,10 +521,176 @@ export class BookEngine {
     return lifecycle ? clone(lifecycle) : null;
   }
 
+  private async coordinateLibraryMutation<T>(
+    work: () => T,
+    signal?: AbortSignal,
+    expectedDocumentId?: string,
+  ): Promise<T | null> {
+    const lockManager = bookLifecycleLockManager();
+    if (!lockManager) return null;
+    const options: LockOptions = { mode: "exclusive", ...(signal ? { signal } : {}) };
+    return await lockManager.request(BOOK_LIBRARY_MUTATION_LOCK_NAME, options, () => {
+      if (signal?.aborted) throw new DOMException("Tool execution was canceled.", "AbortError");
+      if (!this.adoptDurableLibraryBaseline()) return null;
+      if (expectedDocumentId && this.documentState.id !== expectedDocumentId) return null;
+      return work();
+    });
+  }
+
+  async adoptCreationBriefCoordinated(
+    creationBrief: CreationBriefPayload,
+    validatedSourceAssetIds: string[],
+    expectedDocumentId: string,
+    expectedRevision: number,
+    assetRoleIssues: readonly string[],
+    signal?: AbortSignal,
+  ) {
+    return await this.coordinateLibraryMutation(
+      () => this.adoptCreationBrief(creationBrief, validatedSourceAssetIds, expectedRevision, assetRoleIssues),
+      signal,
+      expectedDocumentId,
+    ) ?? {
+      ok: false as const,
+      code: "revision_conflict" as const,
+      currentRevision: this.documentState.revision,
+      summary: "The saved library changed in another tab; reopen the book before attaching its creation brief.",
+    };
+  }
+
+  async beginQualityReviewCoordinated(expectedDocumentId: string, expectedRevision: number, signal?: AbortSignal) {
+    return await this.coordinateLibraryMutation(
+      () => this.beginQualityReview(expectedRevision),
+      signal,
+      expectedDocumentId,
+    ) ?? {
+      ok: false as const,
+      code: "revision_conflict" as const,
+      currentRevision: this.documentState.revision,
+      summary: "The saved library changed in another tab; reopen the book before starting quality review.",
+      qualityGate: this.getQualityGate(),
+    };
+  }
+
+  async recordQualityReviewCoordinated(
+    submission: QualityVisualReviewSubmission,
+    expectedDocumentId: string,
+    expectedRevision: number,
+    signal?: AbortSignal,
+  ) {
+    return await this.coordinateLibraryMutation(
+      () => this.recordQualityReview(submission, expectedRevision),
+      signal,
+      expectedDocumentId,
+    ) ?? {
+      ok: false as const,
+      code: "revision_conflict" as const,
+      currentRevision: this.documentState.revision,
+      summary: "The saved library changed in another tab; reopen the book before recording critique.",
+      qualityGate: this.getQualityGate(),
+    };
+  }
+
+  async recordRenderEvidenceCoordinated(
+    input: Omit<QualityRenderEvidence, "renderedAt">,
+    signal?: AbortSignal,
+  ) {
+    return await this.coordinateLibraryMutation(() => this.recordRenderEvidence(input), signal) ?? false;
+  }
+
+  async openBookCoordinated(
+    documentId: string,
+    source: CommandSource = "human",
+    signal?: AbortSignal,
+    expected?: { documentId: string; revision: number },
+  ): Promise<CoordinatedOpenResult> {
+    const lockManager = bookLifecycleLockManager();
+    if (!lockManager) {
+      return {
+        ok: false,
+        code: "coordination_unavailable",
+        summary: "Cross-tab book coordination is unavailable in this browser.",
+      };
+    }
+    const options: LockOptions = { mode: "exclusive", ...(signal ? { signal } : {}) };
+    return await lockManager.request(BOOK_LIBRARY_MUTATION_LOCK_NAME, options, () => {
+      if (signal?.aborted) throw new DOMException("Tool execution was canceled.", "AbortError");
+      if (expected && (
+        this.documentState.id !== expected.documentId
+        || this.documentState.revision !== expected.revision
+      )) {
+        return {
+          ok: false as const,
+          code: "revision_conflict" as const,
+          currentRevision: this.documentState.revision,
+          summary: `Expected ${expected.documentId} at revision ${expected.revision}; refresh context before opening another book.`,
+        };
+      }
+      const durableLibrary = readLibraryForLifecycleMutation(this.libraryState);
+      if (!durableLibrary) {
+        return {
+          ok: false as const,
+          code: "coordination_unavailable" as const,
+          summary: "The saved library could not be read safely; reopen the library before navigating.",
+        };
+      }
+      if (expected) {
+        const durableSource = durableLibrary.documents.find((book) => book.id === expected.documentId);
+        if (!durableSource || durableSource.revision !== expected.revision) {
+          return {
+            ok: false as const,
+            code: "revision_conflict" as const,
+            currentRevision: durableSource?.revision ?? this.documentState.revision,
+            summary: `Expected ${expected.documentId} at revision ${expected.revision}; the saved library changed in another tab.`,
+          };
+        }
+      }
+      const target = durableLibrary.documents.find((book) => book.id === documentId);
+      if (!target) {
+        return {
+          ok: false as const,
+          code: "not_found" as const,
+          summary: "The requested book is not present in the saved library.",
+        };
+      }
+
+      const beforeLibrary = clone(this.libraryState);
+      const beforeDocument = clone(this.documentState);
+      const beforeSession = clone(this.sessionState);
+      const sameDocument = target.id === this.documentState.id;
+      this.libraryState = durableLibrary;
+      this.documentState = clone(target);
+      this.libraryState.activeBookId = target.id;
+      if (!sameDocument) {
+        this.sessionState = { ...this.sessionState, currentSpreadIndex: 0, selectionId: null, preview: false };
+      }
+      if (!this.persist(true)) {
+        this.libraryState = beforeLibrary;
+        this.documentState = beforeDocument;
+        this.sessionState = beforeSession;
+        return {
+          ok: false as const,
+          code: "coordination_unavailable" as const,
+          summary: "The saved library changed before navigation could be committed; reopen the library and retry.",
+        };
+      }
+      if (sameDocument) this.emit();
+      else this.showAction(source, "success", `${source === "agent" ? "Codex opened" : "Opened"} ${target.title}`);
+      return { ok: true as const };
+    });
+  }
+
+  async resetCoordinated() {
+    return await this.coordinateLibraryMutation(() => {
+      this.reset();
+      return true;
+    }) ?? false;
+  }
+
   adoptCreationBrief(
     creationBrief: CreationBriefPayload,
     validatedSourceAssetIds: string[],
     expectedRevision: number,
+    assetRoleIssues: readonly string[],
   ) {
     if (expectedRevision !== this.documentState.revision) {
       return {
@@ -359,12 +709,24 @@ export class BookEngine {
       };
     }
     const existing = this.qualityLifecycle();
-    if (existing?.creationBrief?.bookType) {
+    if (
+      existing?.creationBrief?.bookType
+      && existing.creationBrief.contractVersion === CREATION_READINESS_VERSION
+    ) {
       return {
         ok: false as const,
         code: "creation_brief_already_attached" as const,
         currentRevision: this.documentState.revision,
         summary: "This book already has its immutable creation brief.",
+      };
+    }
+    if (assetRoleIssues.length > 0) {
+      return {
+        ok: false as const,
+        code: "creation_artifact_incomplete" as const,
+        currentRevision: this.documentState.revision,
+        summary: "This legacy book contains assets whose stored roles do not match their reader-facing use.",
+        issues: [...assetRoleIssues],
       };
     }
     const readiness = assessCreationReadiness(creationBrief, {
@@ -406,6 +768,18 @@ export class BookEngine {
       };
     }
     const lifecycle = this.ensureQualityLifecycle();
+    if (
+      lifecycle.creationBrief?.bookType
+      && lifecycle.creationBrief.contractVersion !== CREATION_READINESS_VERSION
+    ) {
+      return {
+        ok: false as const,
+        code: "creation_brief_upgrade_required" as const,
+        currentRevision: this.documentState.revision,
+        summary: `Replace the legacy creation brief with contract version ${CREATION_READINESS_VERSION} before starting quality review.`,
+        qualityGate: this.getQualityGate(),
+      };
+    }
     if (!lifecycle.creationBrief?.bookType) {
       return {
         ok: false as const,
@@ -415,7 +789,11 @@ export class BookEngine {
         qualityGate: this.getQualityGate(),
       };
     }
-    if (lifecycle.report?.publishAllowed && lifecycle.report.reviewedRevision === this.documentState.revision) {
+    if (
+      isCurrentQualityReport(lifecycle.report)
+      && lifecycle.report.publishAllowed
+      && lifecycle.report.reviewedRevision === this.documentState.revision
+    ) {
       return {
         ok: true as const,
         currentRevision: this.documentState.revision,
@@ -485,6 +863,19 @@ export class BookEngine {
       )),
       next,
     ].slice(-RENDER_EVIDENCE_LIMIT);
+    if (
+      lifecycle.report?.reviewedRevision === documentState.revision
+      && !lifecycle.report.publishAllowed
+      && lifecycle.report.checks.some((check) => (
+        check.criterionId === "render-evidence-completeness" && check.outcome === "blocker"
+      ))
+      && evaluateDeterministicQuality(documentState, lifecycle.renderEvidence, lifecycle.creationBrief).some((check) => (
+        check.criterionId === "render-evidence-completeness" && check.outcome === "pass"
+      ))
+    ) {
+      lifecycle.reviewStatus = "needs-review";
+      delete lifecycle.report;
+    }
     this.persist();
     this.emit();
     return true;
@@ -539,6 +930,18 @@ export class BookEngine {
       };
     }
     const deterministic = evaluateDeterministicQuality(this.documentState, lifecycle.renderEvidence, lifecycle.creationBrief);
+    const renderEvidenceBlocker = deterministic.find((check) => (
+      check.criterionId === "render-evidence-completeness" && check.outcome === "blocker"
+    ));
+    if (renderEvidenceBlocker) {
+      return {
+        ok: false as const,
+        code: "render_evidence_required" as const,
+        currentRevision: this.documentState.revision,
+        summary: renderEvidenceBlocker.message,
+        qualityGate: this.getQualityGate(),
+      };
+    }
     const report = buildQualityReport(this.documentState, nextRound, deterministic, submission, lifecycle.creationBrief);
     lifecycle.reviewRounds = nextRound;
     lifecycle.reviewStatus = report.status;
@@ -574,7 +977,7 @@ export class BookEngine {
     this.listeners.forEach((listener) => listener());
   }
 
-  private persist() {
+  private persist(suppressWarning = false) {
     const quality = this.qualityLifecycle();
     if (
       quality?.report?.publishAllowed
@@ -592,18 +995,20 @@ export class BookEngine {
       if (documentIndex >= 0) this.libraryState.documents[documentIndex] = clone(this.documentState);
       else this.libraryState.documents.push(clone(this.documentState));
       this.libraryState.activeBookId = this.documentState.id;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.libraryState));
+      localStorage.setItem(BOOK_LIBRARY_STORAGE_KEY, JSON.stringify(this.libraryState));
+      return true;
     } catch (error) {
       recordDiagnostic("storage:persist-failed", {
         error: error instanceof Error ? error.name : "UnknownError",
       });
-      if (typeof localStorage !== "undefined" && !this.storageWarningPending) {
+      if (!suppressWarning && typeof localStorage !== "undefined" && !this.storageWarningPending) {
         this.storageWarningPending = true;
         queueMicrotask(() => {
           this.storageWarningPending = false;
           this.showAction("human", "error", "Change is live, but this browser could not save it");
         });
       }
+      return false;
     }
   }
 
@@ -671,6 +1076,8 @@ export class BookEngine {
           id: element.id,
           label: element.label,
           kind: element.kind,
+          assetId: element.assetId,
+          frameAssetIds: element.frameAssetIds ?? null,
           locked: element.locked,
         })),
       },
@@ -679,6 +1086,8 @@ export class BookEngine {
             id: selected.id,
             label: selected.label,
             kind: selected.kind,
+            assetId: selected.assetId,
+            frameAssetIds: selected.frameAssetIds ?? null,
             locked: selected.locked,
             transform: selected.transform,
             motion: selected.motion ?? null,
@@ -740,8 +1149,6 @@ export class BookEngine {
     this.documentState = clone(nextDocument);
     this.libraryState.activeBookId = documentId;
     this.sessionState = { ...this.sessionState, currentSpreadIndex: 0, selectionId: null, preview: false };
-    this.requestResults.clear();
-    this.undoRecords.clear();
     this.persist();
     this.showAction(source, "success", `${source === "agent" ? "Codex opened" : "Opened"} ${nextDocument.title}`);
     return true;
@@ -806,6 +1213,15 @@ export class BookEngine {
   dispatch(command: DocumentCommand, source: CommandSource): DocumentResult {
     const prior = this.requestResults.get(command.requestId);
     if (prior) return prior;
+
+    if (command.expectedDocumentId !== this.documentState.id) {
+      const result = this.conflict(
+        "revision_conflict",
+        `Expected document ${command.expectedDocumentId}; current document is ${this.documentState.id}.`,
+      );
+      this.requestResults.set(command.requestId, result);
+      return result;
+    }
 
     const refused = this.refusedByPreview(command, source);
     if (refused) {
@@ -893,6 +1309,7 @@ export class BookEngine {
     this.undoRecords.set(undoToken, {
       operation: "update",
       token: undoToken,
+      documentId: nextDocument.id,
       elementId: nextElement.id,
       fields,
       before: Object.fromEntries(fields.map((field) => [field, clone(before[field])])) as Partial<BookElement>,
@@ -905,6 +1322,67 @@ export class BookEngine {
     this.persist();
     this.showAction(source, "success", summary, nextElement.id, undoToken);
     return result;
+  }
+
+  private adoptDurableLibraryBaseline() {
+    const durableLibrary = readLibraryForLifecycleMutation(this.libraryState);
+    const durableDocument = durableLibrary?.documents.find((book) => book.id === this.documentState.id);
+    if (!durableLibrary || !durableDocument || !equalField(durableDocument, this.documentState)) return false;
+    this.libraryState = durableLibrary;
+    return true;
+  }
+
+  /**
+   * Production entry point for saved document commands. Every library write
+   * takes the short global storage lock; create/creation-history commands also
+   * take the per-book lifecycle lock shared with publication.
+   */
+  async dispatchCoordinated(
+    command: DocumentCommand,
+    source: CommandSource,
+    signal?: AbortSignal,
+  ): Promise<DocumentResult> {
+    const prior = this.requestResults.get(command.requestId);
+    if (prior) return prior;
+    const createRecord = command.type === "undo" ? this.undoRecords.get(command.undoToken) : null;
+    const lifecycleDocumentId = command.type === "create-book"
+      ? command.documentId
+      : createRecord?.operation === "create-book"
+        ? createRecord.created.id
+        : null;
+    const lockManager = bookLifecycleLockManager();
+    if (!lockManager) {
+      const result = this.conflict("invalid", "This browser cannot safely coordinate saved book changes across tabs.");
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+    const lockOptions: LockOptions = { mode: "exclusive", ...(signal ? { signal } : {}) };
+    const throwIfCanceled = () => {
+      if (signal?.aborted) throw new DOMException("Tool execution was canceled.", "AbortError");
+    };
+    const commit = () => {
+      throwIfCanceled();
+      if (!lifecycleDocumentId && !this.adoptDurableLibraryBaseline()) {
+        const result = this.conflict("revision_conflict", "The saved library changed in another tab; reopen the book before editing it.");
+        this.requestResults.set(command.requestId, result);
+        this.showAction(source, "error", result.summary);
+        return result;
+      }
+      return this.dispatch(command, source);
+    };
+    const withLibraryLock = () => lockManager.request(
+      BOOK_LIBRARY_MUTATION_LOCK_NAME,
+      lockOptions,
+      commit,
+    );
+    return await (lifecycleDocumentId
+      ? lockManager.request(
+          bookLifecycleLockName(lifecycleDocumentId),
+          lockOptions,
+          withLibraryLock,
+        )
+      : withLibraryLock());
   }
 
   private applyCreateBook(command: CreateBookCommand, source: CommandSource): DocumentResult {
@@ -941,27 +1419,118 @@ export class BookEngine {
       this.showAction(source, "error", result.summary);
       return result;
     }
-    if (this.libraryState.documents.some((book) => book.id === command.documentId)) {
-      const result = this.conflict("invalid", `Book ${command.documentId} already exists. Open it or choose a new id.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
-    }
-
     const before = clone(this.documentState);
+    let beforeLibrary = clone(this.libraryState);
+    const beforeSession = clone(this.sessionState);
+    const beforeUndoRecords = new BoundedMap(
+      UNDO_RECORD_LIMIT,
+      [...this.undoRecords].map(([token, undoRecord]) => [token, clone(undoRecord)] as const),
+    );
+    let previousQuality = this.qualityLifecycle(before.id);
+    const validatedLocalAssetIds = new Set(command.validatedLocalAssetIds ?? []);
+    const validLocalAssetId = (assetId: string) => isStoredAssetId(assetId) && validatedLocalAssetIds.has(assetId);
+    const artifactIssues: string[] = [];
+    if (!command.coverAssetId || !validLocalAssetId(command.coverAssetId)) {
+      artifactIssues.push("The dedicated cover must be a verified browser-local image asset.");
+    }
     const nextDocument: DocumentState = {
       id: command.documentId,
       revision: before.revision + 1,
       title,
+      ...(command.coverAssetId ? { coverAssetId: command.coverAssetId } : {}),
       spreads: command.spreads.map((spread, order) => ({
         id: spread.id,
         order,
         title: spread.title.trim(),
         body: spread.body.trim(),
         kicker: spread.kicker?.trim() || undefined,
-        elements: [],
+        ...(spread.background
+          ? {
+              artwork: {
+                cleanPlateAssetId: spread.background.cleanPlateAssetId,
+                sourceAssetId: spread.background.sourceAssetId,
+                personalSourceAssetId: spread.background.personalSourceAssetId,
+                separation: spread.background.separation ?? "inpainted-clean-plate",
+              },
+            }
+          : {}),
+        elements: (spread.layers ?? []).flatMap((layer) => {
+          const element = materializeBookLayer(layer, source, validLocalAssetId);
+          return element ? [element] : [];
+        }),
       })),
     };
+
+    const bookLayerIds = command.spreads.flatMap((spread) => (spread.layers ?? []).map((layer) => layer.id));
+    if (new Set(bookLayerIds).size !== bookLayerIds.length) {
+      artifactIssues.push("Foreground layer ids must be unique across the whole book.");
+    }
+
+    command.spreads.forEach((spread, index) => {
+      const spreadNumber = index + 1;
+      const background = spread.background;
+      if (!background) {
+        artifactIssues.push(`Spread ${spreadNumber} has no prepared full-spread background.`);
+      } else {
+        const backgroundAssets = [background.cleanPlateAssetId, background.sourceAssetId, background.personalSourceAssetId]
+          .filter((assetId): assetId is string => Boolean(assetId));
+        if (backgroundAssets.some((assetId) => !validLocalAssetId(assetId))) {
+          artifactIssues.push(`Spread ${spreadNumber} references an unverified background or provenance asset.`);
+        }
+      }
+      const layers = spread.layers ?? [];
+      if (layers.length < 2 || layers.length > 4) {
+        artifactIssues.push(`Spread ${spreadNumber} needs 2–4 prepared foreground layers; found ${layers.length}.`);
+      }
+      if (new Set(layers.map((layer) => layer.id)).size !== layers.length) {
+        artifactIssues.push(`Spread ${spreadNumber} foreground layer ids must be unique.`);
+      }
+      if (nextDocument.spreads[index].elements.length !== layers.length) {
+        artifactIssues.push(`Spread ${spreadNumber} contains an invalid or unverified foreground layer.`);
+      }
+      if (!layers.some(hasAuthoredInteraction)) {
+        artifactIssues.push(`Spread ${spreadNumber} needs at least one explicit story-relevant interaction.`);
+      }
+    });
+    artifactIssues.push(...creationArtifactIssues(nextDocument, command.creationBrief));
+    const uniqueArtifactIssues = [...new Set(artifactIssues)];
+    if (uniqueArtifactIssues.length > 0) {
+      const result = {
+        ok: false as const,
+        code: "creation_artifact_incomplete" as const,
+        currentRevision: this.documentState.revision,
+        summary: "Apertale did not create the book because its complete prepared artwork is not ready.",
+        issues: uniqueArtifactIssues,
+      };
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+
+    const durableLibrary = readLibraryForLifecycleMutation(this.libraryState);
+    if (!durableLibrary) {
+      const result = this.conflict("invalid", "Apertale did not create the book because its saved library could not be read safely.");
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+    const durableBefore = durableLibrary.documents.find((book) => book.id === before.id);
+    if (!durableBefore || !equalField(durableBefore, before)) {
+      const result = this.conflict("revision_conflict", "The saved library changed in another tab; reopen it before creating this book.");
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+    if (durableLibrary.documents.some((book) => book.id === command.documentId)) {
+      const result = this.conflict("invalid", `Book ${command.documentId} already exists. Open it or choose a new id.`);
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+    this.libraryState = durableLibrary;
+    beforeLibrary = clone(durableLibrary);
+    previousQuality = this.qualityLifecycle(before.id);
+
     this.documentState = nextDocument;
     const quality: AuthoringQualityLifecycle = {
       creationBrief: clone(command.creationBrief),
@@ -975,10 +1544,12 @@ export class BookEngine {
     this.undoRecords.set(undoToken, {
       operation: "create-book",
       token: undoToken,
+      documentId: nextDocument.id,
       direction: "undo",
       previous: before,
       created: clone(nextDocument),
-      quality: clone(quality),
+      previousQuality: previousQuality ? clone(previousQuality) : undefined,
+      createdQuality: clone(quality),
     });
     const summary = `${source === "agent" ? "Codex" : "You"} created ${title}`;
     const result: MutationResult = {
@@ -987,15 +1558,25 @@ export class BookEngine {
       changedIds: nextDocument.spreads.map((spread) => spread.id),
       undoToken,
       summary,
+      documentId: nextDocument.id,
     };
+    if (!this.persist(true)) {
+      this.documentState = before;
+      this.libraryState = beforeLibrary;
+      this.sessionState = beforeSession;
+      this.undoRecords = beforeUndoRecords;
+      const failure = this.conflict("invalid", "Apertale did not create the book because this browser could not save it.");
+      this.requestResults.set(command.requestId, failure);
+      this.showAction(source, "error", failure.summary);
+      return failure;
+    }
     this.requestResults.set(command.requestId, result);
-    this.persist();
     this.showAction(source, "success", summary, undefined, undoToken);
     return result;
   }
 
   private applySetBookCover(command: SetBookCoverCommand, source: CommandSource): DocumentResult {
-    const validAssetId = /^asset:[0-9a-f-]{36}$/.test(command.assetId)
+    const validAssetId = isStoredAssetId(command.assetId)
       && command.validatedLocalAssetIds.includes(command.assetId);
     if (!validAssetId) {
       const result = this.conflict("invalid", "Book covers require a validated browser-local image asset.");
@@ -1005,15 +1586,44 @@ export class BookEngine {
     }
 
     const before = this.documentState.coverAssetId;
+    const existingReferenceIssues = new Set(
+      bookAssetReferenceFindings(bookAssetReferenceManifest(this.documentState)).map(bookAssetReferenceIssueKey),
+    );
     const nextDocument = clone(this.documentState);
     nextDocument.coverAssetId = command.assetId;
     nextDocument.revision += 1;
+    const newReferenceIssue = bookAssetReferenceFindings(bookAssetReferenceManifest(nextDocument))
+      .find((issue) => !existingReferenceIssues.has(bookAssetReferenceIssueKey(issue)));
+    if (newReferenceIssue) {
+      const result = this.conflict("invalid", formatBookAssetReferenceIssue(newReferenceIssue));
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+    const creationBrief = this.qualityLifecycle()?.creationBrief;
+    if (creationBrief?.bookType) {
+      const policyIssue = creationAssetPolicyIssues(nextDocument, creationBrief)[0];
+      if (policyIssue) {
+        const result = this.conflict("invalid", policyIssue);
+        this.requestResults.set(command.requestId, result);
+        this.showAction(source, "error", result.summary);
+        return result;
+      }
+    }
+    const localAssetCount = listStoredPublishedAssetIds(nextDocument).length;
+    if (localAssetCount > MAX_BOOK_UPLOADED_ASSETS) {
+      const result = this.conflict("invalid", `The cover would raise this book to ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`);
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
     this.documentState = nextDocument;
 
     const undoToken = crypto.randomUUID();
     this.undoRecords.set(undoToken, {
       operation: "set-cover",
       token: undoToken,
+      documentId: nextDocument.id,
       before,
       after: command.assetId,
     });
@@ -1067,7 +1677,15 @@ export class BookEngine {
     this.documentState = nextDocument;
     const undoToken = crypto.randomUUID();
     const after = Object.fromEntries(fields.map((field) => [field, clone(spread[field])])) as Partial<Pick<Spread, SpreadField>>;
-    this.undoRecords.set(undoToken, { operation: "compose", token: undoToken, spreadId: spread.id, fields, before, after });
+    this.undoRecords.set(undoToken, {
+      operation: "compose",
+      token: undoToken,
+      documentId: nextDocument.id,
+      spreadId: spread.id,
+      fields,
+      before,
+      after,
+    });
     const summary = `${source === "agent" ? "Codex" : "You"} composed ${spread.title}`;
     const result: MutationResult = { ok: true, revision: nextDocument.revision, changedIds: [spread.id], undoToken, summary };
     this.requestResults.set(command.requestId, result);
@@ -1090,21 +1708,35 @@ export class BookEngine {
     const nextDocument = clone(this.documentState);
     const spread = nextDocument.spreads[spreadIndex];
     const elements = spread.elements;
-    const knownAssetIds = new Set(this.libraryState.documents.flatMap((document) => (
-      listProjectAssetReferences(document)
-        // A cover proves library ownership, not authorization to place the same
-        // browser-local image into a scene without the trusted Asset registry.
-        .filter((reference) => reference.location.kind !== "cover")
-        .map((reference) => reference.assetId)
-    )));
+    const knownBackgroundAssetIds = new Set<string>();
+    const knownForegroundAssetIds = new Set<string>();
+    const knownPersonalSourceAssetIds = new Set<string>();
+    this.libraryState.documents.forEach((document) => {
+      listProjectAssetReferences(document).forEach((reference) => {
+        if (reference.location.kind === "element") knownForegroundAssetIds.add(reference.assetId);
+        else if (reference.location.kind === "spread" && reference.location.field === "personalSourceAssetId") {
+          knownPersonalSourceAssetIds.add(reference.assetId);
+        } else if (reference.location.kind === "spread") {
+          knownBackgroundAssetIds.add(reference.assetId);
+        }
+      });
+    });
     const validatedLocalAssetIds = new Set(command.validatedLocalAssetIds ?? []);
-    const validAssetId = (assetId: string) => !assetId.startsWith("model:") && (
-      knownAssetIds.has(assetId)
-      || (/^asset:[0-9a-f-]{36}$/.test(assetId) && validatedLocalAssetIds.has(assetId))
-    );
+    const validLocalAssetId = (assetId: string) => isStoredAssetId(assetId) && validatedLocalAssetIds.has(assetId);
+    const validBackgroundAssetId = (assetId: string) => !assetId.startsWith("model:")
+      && (knownBackgroundAssetIds.has(assetId) || validLocalAssetId(assetId));
+    const validForegroundAssetId = (assetId: string) => !assetId.startsWith("model:")
+      && (knownForegroundAssetIds.has(assetId) || validLocalAssetId(assetId));
+    const validPersonalSourceAssetId = (assetId: string) => !assetId.startsWith("model:")
+      && (knownPersonalSourceAssetIds.has(assetId) || validLocalAssetId(assetId));
     const validFrameAssets = (assetIds: string[] | null | undefined) => typeof assetIds === "undefined"
       || assetIds === null
-      || (assetIds.length >= 2 && assetIds.length <= 6 && assetIds.every(validAssetId));
+      || (assetIds.length >= 2
+        && assetIds.length <= 6
+        && assetIds.every((assetId) => validForegroundAssetId(assetId) && !isProceduralAssetId(assetId)));
+    const existingReferenceIssues = new Set(
+      bookAssetReferenceFindings(bookAssetReferenceManifest(before)).map(bookAssetReferenceIssueKey),
+    );
     const changedIds: string[] = [];
     const fail = (summary: string) => {
       const result = this.conflict("invalid", summary);
@@ -1112,43 +1744,13 @@ export class BookEngine {
       this.showAction(source, "error", result.summary);
       return result;
     };
-    const validTransform = (transform: Partial<Transform2D> | undefined) => !transform || Object.entries(transform).every(([field, value]) => {
-      if (typeof value !== "number" || !Number.isFinite(value)) return false;
-      if (field === "x" || field === "y") return value >= 0 && value <= 1;
-      if (field === "scaleX" || field === "scaleY") return value >= 0.3 && value <= 1.8;
-      if (field === "rotationDeg") return value >= -180 && value <= 180;
-      return false;
-    });
-    const validReveal = (reveal: RevealSpec | undefined) => !reveal || (
-      REVEAL_KINDS.includes(reveal.kind)
-      && (reveal.kind === "none" || (reveal.title.trim().length >= 1 && reveal.title.trim().length <= 100))
-      && reveal.summary.trim().length <= 500
-      && Array.isArray(reveal.facts)
-      && reveal.facts.length <= 8
-      && reveal.facts.every((fact) => fact.label.trim().length >= 1 && fact.label.trim().length <= 64 && fact.value.trim().length >= 1 && fact.value.trim().length <= 160)
-      && (typeof reveal.source === "undefined" || reveal.source.trim().length <= 200)
-    );
-    const validMotion = (motion: MotionSpec | null | undefined) => typeof motion === "undefined"
-      || motion === null
-      || (MOTION_PRESETS.includes(motion.preset)
-        && motion.durationMs >= 400
-        && motion.durationMs <= 20_000
-        && typeof motion.loop === "boolean");
-    const normalizeReveal = (reveal: RevealSpec) => ({
-      kind: reveal.kind,
-      title: reveal.title.trim(),
-      summary: reveal.summary.trim(),
-      facts: reveal.facts.map((fact) => ({ label: fact.label.trim(), value: fact.value.trim() })),
-      source: reveal.source?.trim() || undefined,
-    });
-
     for (const operation of command.operations) {
       if (operation.op === "set-background") {
         if (
-          !validAssetId(operation.cleanPlateAssetId)
+          !validBackgroundAssetId(operation.cleanPlateAssetId)
           || !operation.sourceAssetId
-          || !validAssetId(operation.sourceAssetId)
-          || (operation.personalSourceAssetId && !validAssetId(operation.personalSourceAssetId))
+          || !validBackgroundAssetId(operation.sourceAssetId)
+          || (operation.personalSourceAssetId && !validPersonalSourceAssetId(operation.personalSourceAssetId))
         ) {
           return fail("The clean plate, original composite, and any personal source must be known image assets.");
         }
@@ -1162,48 +1764,22 @@ export class BookEngine {
         continue;
       }
       if (operation.op === "add") {
-        const validAsset = validAssetId(operation.assetId);
+        if (
+          !validForegroundAssetId(operation.assetId)
+          || (operation.frameAssetIds?.length && isProceduralAssetId(operation.assetId))
+          || operation.frameAssetIds?.some((assetId) => !validForegroundAssetId(assetId))
+        ) {
+          return fail(`Layer ${operation.id || "element"} requires assets trusted for the foreground role.`);
+        }
+        const nextElement = materializeBookLayer(operation, source, validForegroundAssetId);
         if (
           elements.length >= 24
-          || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(operation.id)
-          || operation.label.trim().length < 1
-          || operation.label.trim().length > 64
-          || elements.some((element) => element.id === operation.id)
-          || !["left", "right"].includes(operation.page)
-          || (operation.kind && !["embedded", "lifted", "decoration"].includes(operation.kind))
-          || !validAsset
-          || !validFrameAssets(operation.frameAssetIds)
-          || !validTransform(operation.transform)
-          || (typeof operation.depth === "number" && (operation.depth < 0 || operation.depth > 0.5))
-          || !validMotion(operation.motion)
-          || (operation.hover && !HOVER_RESPONSES.includes(operation.hover))
-          || (operation.focus && !FOCUS_RESPONSES.includes(operation.focus))
-          || !validReveal(operation.reveal)
+          || findElement(nextDocument, operation.id)
+          || !nextElement
         ) return fail(`Add operation for ${operation.id || "element"} is outside the scene limits.`);
-        const transform = { x: 0.5, y: 0.5, scaleX: 0.72, scaleY: 0.72, rotationDeg: 0, ...operation.transform };
-        elements.push({
-          id: operation.id,
-          label: operation.label.trim(),
-          assetId: operation.assetId,
-          frameAssetIds: operation.frameAssetIds,
-          page: operation.page,
-          kind: operation.kind ?? "lifted",
-          transform,
-          depth: operation.depth ?? 0.1,
-          locked: operation.locked ?? false,
-          motion: operation.motion,
-          interaction: {
-            hover: operation.hover ?? defaultInteraction.hover,
-            focus: operation.focus ?? defaultInteraction.focus,
-            reveal: operation.reveal
-              ? normalizeReveal(operation.reveal)
-              : { kind: "caption", title: operation.label.trim(), summary: "", facts: [] },
-            hint: `Explore ${operation.label.trim()}`,
-          },
-          provenance: source,
-        });
-        knownAssetIds.add(operation.assetId);
-        operation.frameAssetIds?.forEach((assetId) => knownAssetIds.add(assetId));
+        elements.push(nextElement);
+        knownForegroundAssetIds.add(operation.assetId);
+        operation.frameAssetIds?.forEach((assetId) => knownForegroundAssetIds.add(assetId));
         changedIds.push(operation.id);
         continue;
       }
@@ -1225,6 +1801,8 @@ export class BookEngine {
           || (typeof operation.depth === "number" && (operation.depth < 0 || operation.depth > 0.5))
           || !validMotion(operation.motion)
           || !validFrameAssets(operation.frameAssetIds)
+          || (operation.frameAssetIds?.length && isProceduralElement(element))
+          || (operation.frameAssetIds?.length && operation.frameAssetIds[0] !== element.assetId)
           || (operation.hover && !HOVER_RESPONSES.includes(operation.hover))
           || (operation.focus && !FOCUS_RESPONSES.includes(operation.focus))
           || !validReveal(operation.reveal)
@@ -1269,10 +1847,18 @@ export class BookEngine {
       return fail("A clean background requires at least two extracted foreground image layers in the same finished scene.");
     }
 
+    const newReferenceIssue = bookAssetReferenceFindings(bookAssetReferenceManifest(nextDocument))
+      .find((issue) => !existingReferenceIssues.has(bookAssetReferenceIssueKey(issue)));
+    if (newReferenceIssue) return fail(formatBookAssetReferenceIssue(newReferenceIssue));
+
     const creationBrief = this.qualityLifecycle()?.creationBrief;
     if (creationBrief?.bookType) {
       const policyIssues = creationAssetPolicyIssues(nextDocument, creationBrief);
       if (policyIssues.length > 0) return fail(policyIssues[0]);
+    }
+    const localAssetCount = listStoredPublishedAssetIds(nextDocument).length;
+    if (localAssetCount > MAX_BOOK_UPLOADED_ASSETS) {
+      return fail(`This patch would raise the book to ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`);
     }
 
     nextDocument.revision += 1;
@@ -1289,7 +1875,18 @@ export class BookEngine {
     const afterById = new Map(afterElements.map((element) => [element.id, element]));
     // Provenance describes the latest operator, so a later non-overlapping
     // human edit must remain visible when an earlier Agent patch is undone.
-    const mutableFields: ElementField[] = ["kind", "depth", "locked", "motion", "transform", "interaction"];
+    const mutableFields: ElementField[] = [
+      "label",
+      "kind",
+      "assetId",
+      "frameAssetIds",
+      "page",
+      "depth",
+      "locked",
+      "motion",
+      "transform",
+      "interaction",
+    ];
     const elementDiffs = [...new Set([...beforeById.keys(), ...afterById.keys()])].flatMap((elementId): ScenePatchElementUndo[] => {
       const beforeElement = beforeById.get(elementId) ?? null;
       const afterElement = afterById.get(elementId) ?? null;
@@ -1300,6 +1897,7 @@ export class BookEngine {
     this.undoRecords.set(undoToken, {
       operation: "scene-patch",
       token: undoToken,
+      documentId: nextDocument.id,
       spreadId: command.spreadId,
       beforeOrder: beforeElements.map((element) => element.id),
       afterOrder: afterElements.map((element) => element.id),
@@ -1342,10 +1940,45 @@ export class BookEngine {
     };
   }
 
+  private restoredDocumentIssue(candidate: DocumentState) {
+    const elementIdCounts = (document: DocumentState) => document.spreads
+      .flatMap((spread) => spread.elements.map((element) => element.id))
+      .reduce((counts, elementId) => counts.set(elementId, (counts.get(elementId) ?? 0) + 1), new Map<string, number>());
+    const currentElementIdCounts = elementIdCounts(this.documentState);
+    const worsenedDuplicate = [...elementIdCounts(candidate)].some(([elementId, count]) => (
+      count > 1 && count > (currentElementIdCounts.get(elementId) ?? 0)
+    ));
+    if (worsenedDuplicate) {
+      return "Undo would duplicate a foreground layer id across the book.";
+    }
+    const currentReferenceIssues = new Set(
+      bookAssetReferenceFindings(bookAssetReferenceManifest(this.documentState)).map(bookAssetReferenceIssueKey),
+    );
+    const newReferenceIssue = bookAssetReferenceFindings(bookAssetReferenceManifest(candidate))
+      .find((issue) => !currentReferenceIssues.has(bookAssetReferenceIssueKey(issue)));
+    if (newReferenceIssue) return formatBookAssetReferenceIssue(newReferenceIssue);
+    const creationBrief = this.qualityLifecycle(candidate.id)?.creationBrief;
+    if (creationBrief?.bookType) {
+      const policyIssue = creationAssetPolicyIssues(candidate, creationBrief)[0];
+      if (policyIssue) return policyIssue;
+    }
+    const localAssetCount = listStoredPublishedAssetIds(candidate).length;
+    if (localAssetCount > MAX_BOOK_UPLOADED_ASSETS) {
+      return `Undo would raise this book to ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`;
+    }
+    return null;
+  }
+
   private applyUndo(command: Extract<DocumentCommand, { type: "undo" }>, source: CommandSource): DocumentResult {
     const record = this.undoRecords.get(command.undoToken);
     if (!record) {
       const result = this.conflict("not_found", "That undo token is no longer available.");
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+    if (record.documentId !== this.documentState.id) {
+      const result = this.conflict("undo_conflict", "That undo belongs to another book; the active book was not changed.");
       this.requestResults.set(command.requestId, result);
       this.showAction(source, "error", result.summary);
       return result;
@@ -1377,6 +2010,7 @@ export class BookEngine {
     this.undoRecords.set(token, {
       operation: "update",
       token,
+      documentId: nextDocument.id,
       elementId: restored.id,
       fields: record.fields,
       before: Object.fromEntries(record.fields.map((field) => [field, clone(current[field])])) as Partial<BookElement>,
@@ -1460,6 +2094,13 @@ export class BookEngine {
     else nextSpread.elements = nextSpread.elements.map((element) => nextById.get(element.id) ?? element);
     if (record.artwork?.before) nextSpread.artwork = clone(record.artwork.before);
     else if (record.artwork) delete nextSpread.artwork;
+    const contractIssue = this.restoredDocumentIssue(nextDocument);
+    if (contractIssue) {
+      const result = this.conflict("undo_conflict", contractIssue);
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
     nextDocument.revision += 1;
     this.documentState = nextDocument;
     if (this.sessionState.selectionId && !findElement(nextDocument, this.sessionState.selectionId)) this.sessionState = { ...this.sessionState, selectionId: null };
@@ -1468,6 +2109,7 @@ export class BookEngine {
     this.undoRecords.set(token, {
       operation: "scene-patch",
       token,
+      documentId: nextDocument.id,
       spreadId: record.spreadId,
       beforeOrder: record.afterOrder,
       afterOrder: record.beforeOrder,
@@ -1508,6 +2150,13 @@ export class BookEngine {
     const nextDocument = clone(this.documentState);
     if (record.before) nextDocument.coverAssetId = record.before;
     else delete nextDocument.coverAssetId;
+    const contractIssue = this.restoredDocumentIssue(nextDocument);
+    if (contractIssue) {
+      const result = this.conflict("undo_conflict", contractIssue);
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
     nextDocument.revision += 1;
     this.documentState = nextDocument;
     this.undoRecords.delete(record.token);
@@ -1516,6 +2165,7 @@ export class BookEngine {
     this.undoRecords.set(token, {
       operation: "set-cover",
       token,
+      documentId: nextDocument.id,
       before: record.after,
       after: record.before,
     });
@@ -1546,29 +2196,65 @@ export class BookEngine {
       return result;
     }
 
-    const current = clone(this.documentState);
-    const next = clone(record.direction === "undo" ? record.previous : record.created);
-    next.revision = current.revision + 1;
-
-    if (record.direction === "undo") {
-      const createdIndex = this.libraryState.documents.findIndex((book) => book.id === record.created.id);
-      if (createdIndex < 0 || !equalField(this.libraryState.documents[createdIndex], record.created)) {
-        const result = this.conflict("undo_conflict", "The created library book changed again; undo did not remove it.");
-        this.requestResults.set(command.requestId, result);
-        this.showAction(source, "error", result.summary);
-        return result;
-      }
-      this.libraryState.documents.splice(createdIndex, 1);
-      const currentQuality = this.qualityLifecycle(record.created.id);
-      if (currentQuality) record.quality = clone(currentQuality);
-      delete this.qualityLifecycles()[record.created.id];
-    } else if (this.libraryState.documents.some((book) => book.id === record.created.id)) {
-      const result = this.conflict("undo_conflict", `Book ${record.created.id} already exists; redo did not replace it.`);
+    let previousForReverse = clone(record.previous);
+    let createdIndexForUndo = -1;
+    let next: DocumentState;
+    const reject = (code: "undo_conflict" | "invalid", summary: string) => {
+      const result = this.conflict(code, summary);
       this.requestResults.set(command.requestId, result);
       this.showAction(source, "error", result.summary);
       return result;
+    };
+
+    const durableLibrary = readLibraryForLifecycleMutation(this.libraryState);
+    if (!durableLibrary) {
+      return reject("invalid", "Apertale did not change book creation because its saved library could not be read safely.");
+    }
+    if (record.direction === "undo") {
+      const currentCreated = durableLibrary.documents.find((book) => book.id === record.created.id);
+      if (!currentCreated || !equalField(currentCreated, record.created)) {
+        return reject("undo_conflict", "The created library book changed again; undo did not remove newer work.");
+      }
+      const currentPrevious = durableLibrary.documents.find((book) => book.id === record.previous.id);
+      if (!currentPrevious) {
+        return reject("undo_conflict", "The previous book is no longer in the library; creation undo preserved the current book.");
+      }
+      if (getPublicationRecord(record.created.id)) {
+        return reject("undo_conflict", "Remove this book's publication record before undoing its creation.");
+      }
+      createdIndexForUndo = durableLibrary.documents.findIndex((book) => book.id === record.created.id);
+      previousForReverse = clone(currentPrevious);
+      next = clone(currentPrevious);
     } else {
-      this.qualityLifecycles()[record.created.id] = clone(record.quality);
+      if (durableLibrary.documents.some((book) => book.id === record.created.id)) {
+        return reject("undo_conflict", `Book ${record.created.id} already exists; redo did not replace it.`);
+      }
+      const durableCurrent = durableLibrary.documents.find((book) => book.id === this.documentState.id);
+      if (!durableCurrent || !equalField(durableCurrent, this.documentState)) {
+        return reject("undo_conflict", "The saved library changed in another tab; redo preserved the newer work.");
+      }
+      next = clone(record.created);
+    }
+    this.libraryState = durableLibrary;
+    const beforeDocument = clone(this.documentState);
+    const beforeLibrary = clone(this.libraryState);
+    const beforeSession = clone(this.sessionState);
+    const beforeUndoRecords = new BoundedMap(
+      UNDO_RECORD_LIMIT,
+      [...this.undoRecords].map(([token, undoRecord]) => [token, clone(undoRecord)] as const),
+    );
+    const beforeRequestResults = new BoundedMap(REQUEST_RESULT_LIMIT, [...this.requestResults]);
+    const previousQuality = this.qualityLifecycle(record.previous.id);
+    const createdQuality = this.qualityLifecycle(record.created.id);
+
+    if (record.direction === "undo") {
+      this.libraryState.documents.splice(createdIndexForUndo, 1);
+      delete this.qualityLifecycles()[record.created.id];
+      if (!previousQuality && record.previousQuality) {
+        this.qualityLifecycles()[record.previous.id] = clone(record.previousQuality);
+      }
+    } else {
+      this.qualityLifecycles()[record.created.id] = clone(record.createdQuality);
     }
 
     this.documentState = next;
@@ -1578,10 +2264,12 @@ export class BookEngine {
     this.undoRecords.set(token, {
       operation: "create-book",
       token,
+      documentId: next.id,
       direction: record.direction === "undo" ? "redo" : "undo",
-      previous: record.direction === "undo" ? clone(next) : clone(record.previous),
-      created: record.direction === "redo" ? clone(next) : clone(record.created),
-      quality: clone(record.quality),
+      previous: previousForReverse,
+      created: clone(record.created),
+      previousQuality: previousQuality ? clone(previousQuality) : record.previousQuality ? clone(record.previousQuality) : undefined,
+      createdQuality: createdQuality ? clone(createdQuality) : clone(record.createdQuality),
     });
     const verb = record.direction === "undo" ? "removed the new book and restored" : "recreated";
     const summary = `${source === "agent" ? "Codex" : "You"} ${verb} ${next.title}`;
@@ -1592,8 +2280,72 @@ export class BookEngine {
       undoToken: token,
       summary,
     };
+    if (
+      record.direction === "undo"
+      && getPublicationRecord(record.created.id)
+    ) {
+      this.documentState = beforeDocument;
+      this.libraryState = beforeLibrary;
+      this.sessionState = beforeSession;
+      this.undoRecords = beforeUndoRecords;
+      this.requestResults = beforeRequestResults;
+      return reject("undo_conflict", "Publishing began; creation undo preserved the book.");
+    }
+    if (!this.persist(true)) {
+      this.documentState = beforeDocument;
+      this.libraryState = beforeLibrary;
+      this.sessionState = beforeSession;
+      this.undoRecords = beforeUndoRecords;
+      this.requestResults = beforeRequestResults;
+      const attemptedAction = record.direction === "undo" ? "undo book creation" : "redo book creation";
+      const failure = this.conflict("invalid", `Apertale did not ${attemptedAction} because this browser could not save it.`);
+      this.requestResults.set(command.requestId, failure);
+      this.showAction(source, "error", failure.summary);
+      return failure;
+    }
+    if (
+      record.direction === "undo"
+      && getPublicationRecord(record.created.id)
+    ) {
+      this.documentState = beforeDocument;
+      this.libraryState = beforeLibrary;
+      this.sessionState = beforeSession;
+      this.undoRecords = beforeUndoRecords;
+      this.requestResults = beforeRequestResults;
+      const restored = this.persist(true);
+      const result = this.conflict(
+        "undo_conflict",
+        restored
+          ? "Publishing began in another tab; creation undo restored the book instead of orphaning its share."
+          : "Publishing began in another tab, and this browser could not safely restore the book.",
+      );
+      this.requestResults.set(command.requestId, result);
+      this.showAction(source, "error", result.summary);
+      return result;
+    }
+    const committedLibrary = readLibraryForLifecycleMutation(this.libraryState);
+    const committed = record.direction === "undo"
+      ? Boolean(
+          committedLibrary
+          && !committedLibrary.documents.some((book) => book.id === record.created.id)
+          && equalField(committedLibrary.documents.find((book) => book.id === next.id), next),
+        )
+      : Boolean(
+          committedLibrary
+          && equalField(committedLibrary.documents.find((book) => book.id === record.created.id), next),
+        );
+    if (!committed) {
+      this.documentState = beforeDocument;
+      this.libraryState = beforeLibrary;
+      this.sessionState = beforeSession;
+      this.undoRecords = beforeUndoRecords;
+      this.requestResults = beforeRequestResults;
+      const failure = this.conflict("invalid", "Apertale could not verify the saved book lifecycle change.");
+      this.requestResults.set(command.requestId, failure);
+      this.showAction(source, "error", failure.summary);
+      return failure;
+    }
     this.requestResults.set(command.requestId, result);
-    this.persist();
     this.showAction(source, "success", summary, undefined, token);
     return result;
   }
@@ -1626,6 +2378,7 @@ export class BookEngine {
     this.undoRecords.set(token, {
       operation: "compose",
       token,
+      documentId: nextDocument.id,
       spreadId: record.spreadId,
       fields: record.fields,
       before: Object.fromEntries(record.fields.map((field) => [field, clone(currentSpread[field])])) as Partial<Pick<Spread, SpreadField>>,
@@ -1651,15 +2404,15 @@ export const bookEngine = new BookEngine();
 
 export function humanEdit(elementId: string, transform: Partial<Transform2D>) {
   const snapshot = bookEngine.getSnapshot();
-  return bookEngine.dispatch({ type: "edit", requestId: freshRequestId(), expectedRevision: snapshot.document.revision, elementId, transform }, "human");
+  return bookEngine.dispatchCoordinated({ type: "edit", requestId: freshRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId, transform }, "human");
 }
 
 export function humanAnimate(elementId: string, motion: AnimateCommand["motion"]) {
   const snapshot = bookEngine.getSnapshot();
-  return bookEngine.dispatch({ type: "animate", requestId: freshRequestId(), expectedRevision: snapshot.document.revision, elementId, motion }, "human");
+  return bookEngine.dispatchCoordinated({ type: "animate", requestId: freshRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId, motion }, "human");
 }
 
 export function humanInteract(elementId: string, interaction: InteractCommand["interaction"]) {
   const snapshot = bookEngine.getSnapshot();
-  return bookEngine.dispatch({ type: "interact", requestId: freshRequestId(), expectedRevision: snapshot.document.revision, elementId, interaction }, "human");
+  return bookEngine.dispatchCoordinated({ type: "interact", requestId: freshRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId, interaction }, "human");
 }
