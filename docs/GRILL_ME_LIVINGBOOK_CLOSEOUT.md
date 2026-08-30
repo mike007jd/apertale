@@ -22,7 +22,7 @@ Apertale 让用户在自己的 ChatGPT/Codex 对话中完成理解、故事设�
 
 - **ChatGPT/Codex 对话**：自然语言意图、照片理解、故事规划、生成决策、图片生成或编辑。
 - **Apertale Site**：样书书架、一次最小 Image handoff、结构化 manifest、BookEngine 编辑状态、书籍渲染、发布与只读分享。
-- **WebMCP**：在 ChatGPT desktop 内置浏览器中把当前开放页面作为共享画布；六个既有工具继续是唯一 Agent 操作面。
+- **WebMCP**：在 ChatGPT desktop 内置浏览器中把当前开放页面作为共享画布；七个语义工具是唯一 Agent 操作面。
 - **独立浏览器**：Safari/Chrome 可以浏览书架和公开分享成品，但没有 ChatGPT composer。创作引导必须说明在 ChatGPT desktop 内置浏览器打开本 Site，并在旁边的真实对话中继续。
 - **深链边界**：截至核对日，官方 Sites / Site Tools 文档没有给出可验证的“从任意 Safari 页面直接在 ChatGPT desktop 打开当前 Site”的通用深链协议。因此当前只提供诚实说明和站内 handoff，不发明 URL scheme；正式深链标记为待验证。
 
@@ -46,12 +46,13 @@ Apertale 让用户在自己的 ChatGPT/Codex 对话中完成理解、故事设�
 
 - **D1**：书籍状态、revision、manifest JSON、发布时间、撤销状态、R2 对象索引，以及哈希后的管理/分享 capability。
 - **R2**：用户 handoff 或生成的图片文件。D1 不保存大二进制。
-- **本地存储**：`localStorage` / IndexedDB 只保留未发布编辑草稿、设备偏好和本地 handoff；不再是已发布成品的权威来源。
-- **发布状态机**：`draft -> published -> revoked -> published`，或任意可管理状态进入 `deleting` 后完成永久删除。
+- **本地存储**：`localStorage` / IndexedDB 保留编辑草稿、设备偏好、本地 handoff 和本机 creator capability；服务端 D1/R2 是已发布成品的权威来源。Web Locks 按 document 串行化同源标签页里的发布、撤销和删除，避免生成两个无法同时管理的服务端身份。
+- **发布状态机**：`draft/revoked -> publishing claim -> published`。同一 claim 可恢复；不同 share token 不能覆盖它。任意可管理状态也可进入 `deleting` 后完成永久删除。
 - **当前服务端契约**：
-  - `POST /api/books`：创建草稿并一次性返回 256-bit 创作者 capability。
-  - `PUT /api/books/:bookId/assets/:assetId`：上传已验证 PNG/JPEG/WebP；单文件最多 1.5 MB，每书最多 24 个文件。
+  - `POST /api/books`：幂等登记客户端预先生成并本地持久化的 `bookId` 与 256-bit 创作者 capability；服务端不返回 capability。
+  - `PUT /api/books/:bookId/assets/:assetId`：上传已验证 PNG/JPEG/WebP；单文件最多 1.5 MB，每书最多 49 个文件。
   - `POST /api/books/:bookId/publish`：校验 manifest 和所有本地资产引用后发布，返回专属 `/share/:token`。
+  - `POST /api/books/:bookId/publish/reconcile`：恢复已提交的分享 URL 和准确 revision；未提交时以同一 share token 原子认领可恢复的发布尝试，或确认该 token 已撤销。
   - `GET /api/shared/:token` 与 `GET /api/shared/:token/assets/:assetId`：匿名只读读取。
   - `POST /api/books/:bookId/revoke`：立刻使旧分享 URL 失效，文件保留以便重新发布。
   - `DELETE /api/books/:bookId`：先切断公开访问并进入 `deleting`，再删 R2，最后删 D1；中途失败可安全重试。
@@ -61,7 +62,7 @@ Apertale 让用户在自己的 ChatGPT/Codex 对话中完成理解、故事设�
 - 分享 token 与管理 token 都是不可枚举的 256-bit capability；D1 只保存 SHA-256，公开目录不列出成品。
 - `/share/:token` 无需登录，但“拿到链接的人可查看”就是权限模型；它不是端到端加密或私密相册。
 - 只读分享可以翻页、切换 Day/Night、触发声明式 hover/click/reveal；不能修改 manifest 或上传文件。
-- 撤销清空分享 capability；旧 URL 和资产 URL 都返回 404，并使用 `private, no-store` 避免撤销后继续被共享缓存读取。
+- 撤销让旧分享 capability 立即失效，并在 D1 的 retired-token 账本永久保留其哈希；删除也退休当时的公开 token。任何书或后续发布代次都不能复用旧 URL。旧 URL 和资产 URL 都返回 404，并使用 `private, no-store` 避免撤销后继续被共享缓存读取。
 - 删除是永久动作；先进入不可公开的 `deleting` 状态，R2/D1 跨资源删除采用可重试顺序，不宣称分布式原子事务。
 - 个人照片、标题、正文和互动说明都可能构成个人数据。公开发布前必须复核授权、人物隐私和分享范围。Sites 当前不支持 data/inference residency；不得收集 PHI、支付卡数据，也不得面向 13 岁以下或当地数字同意年龄以下儿童。
 - 创作者 capability 必须由客户端安全持久化且不出现在 URL、日志或 D1 明文中。当前默认分支尚无账号恢复机制，丢失 capability 即无法管理该成品；这是发布 UI 接入前必须显式告知的产品限制。
@@ -105,7 +106,7 @@ Apertale 让用户在自己的 ChatGPT/Codex 对话中完成理解、故事设�
 
 ### 当前仓库已实现
 
-- 既有 `BookEngine` / `DocumentState` manifest、六个 WebMCP 工具和浏览器本地 Image handoff。
+- 既有 `BookEngine` / `DocumentState` manifest、七个 WebMCP 工具和浏览器本地 Image handoff。
 - `.openai/hosting.json` 的逻辑 bindings：D1=`DB`、R2=`FILES`。
 - 独立 D1 repository、R2 对象访问、发布/读取/撤销/删除 API、哈希 capability、只读分享路由和分享 reader。
 - 分享 manifest 复用现有 `DocumentState`；读取时只把 `asset:` 引用水合为当前 share token 下的只读资产 URL。
@@ -116,7 +117,7 @@ Apertale 让用户在自己的 ChatGPT/Codex 对话中完成理解、故事设�
 
 - React 编辑器已经接入发布、撤销、复制分享链接和永久删除；发布只上传当前 manifest 引用的 IndexedDB Blob。
 - D1/R2 的真实 Sites CRUD、匿名 reader、撤销和删除生命周期已经通过生产验证；证据见 [`qa/livingbook-final-closeout-2026-08-28/REPORT.md`](qa/livingbook-final-closeout-2026-08-28/REPORT.md)。
-- 当前 capability-only 匿名创建没有账号恢复和全局滥用/配额控制。公开写入前至少要完成速率/总量保护或明确采用可验证的创作者身份；每书大小限制不足以抵御批量滥用。
+- 当前 capability-only 匿名创建没有账号恢复或身份级滥用策略；已有站点总量、时间窗和每书资产上限，进一步公开运营仍需可验证身份或更强的滥用控制。
 - “Open in ChatGPT”通用深链待官方契约确认；当前 UI 只说明正确操作，不生成未验证协议。
 - 两条 Site Tools E2E 和公开 live URL 已通过；公开 repo、带音频且少于 3 分钟的 YouTube 视频与 Devpost 仍是外部门槛。
 
@@ -152,7 +153,7 @@ Apertale 让用户在自己的 ChatGPT/Codex 对话中完成理解、故事设�
 ### 产品门禁
 
 - Safari 首屏是书架，不是单本书；Safari 文案不暗示存在 ChatGPT composer。
-- ChatGPT desktop 中，Site 与真实对话并排，六工具可发现且两条创建路径可完成。
+- ChatGPT desktop 中，Site 与真实对话并排，七工具可发现且创建、发布和分享路径可完成。
 - 分享 reader 没有编辑、上传、Agent 工具或管理 token 泄漏。
 - 不把 starter copy、Image handoff 或任何局部输入样式成完整 AI 对话框。
 

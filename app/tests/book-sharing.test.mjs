@@ -6,9 +6,25 @@ import qualityRubric from "../worker/qualityRubric.json" with { type: "json" };
 class MemoryRepository {
   books = new Map();
   assets = new Map();
+  retiredShareTokenHashes = new Set();
 
   async createBook({ id, manageTokenHash, now }) {
-    this.books.set(id, { id, manageTokenHash, status: "draft", created_at: now });
+    const existing = this.books.get(id);
+    if (existing) return existing.manageTokenHash === manageTokenHash ? "existing" : "conflict";
+    this.books.set(id, {
+      id,
+      manageTokenHash,
+      status: "draft",
+      share_token_hash: null,
+      publish_attempt_token_hash: null,
+      created_at: now,
+    });
+    return "created";
+  }
+
+  async findBook(id) {
+    const book = this.books.get(id);
+    return book ? { ...book, manage_token_hash: book.manageTokenHash } : null;
   }
 
   async findManagedBook(id, manageTokenHash) {
@@ -38,27 +54,47 @@ class MemoryRepository {
     return [...this.books.values()].filter((book) => book.created_at >= isoTimestamp).length;
   }
 
+  async claimPublishAttempt({ id, manageTokenHash, shareTokenHash }) {
+    const book = await this.findManagedBook(id, manageTokenHash);
+    if (!book || !["draft", "revoked"].includes(book.status)) return false;
+    if (this.retiredShareTokenHashes.has(shareTokenHash)) return false;
+    if (book.publish_attempt_token_hash === shareTokenHash) return true;
+    if (book.publish_attempt_token_hash != null) return false;
+    if (book.status === "revoked" && book.share_token_hash === shareTokenHash) return false;
+    book.publish_attempt_token_hash = shareTokenHash;
+    return true;
+  }
+
+  async isRetiredShareToken(shareTokenHash) {
+    return this.retiredShareTokenHashes.has(shareTokenHash);
+  }
+
   async publishBook({ id, manageTokenHash, shareTokenHash, title, revision, manifestJson, now }) {
     const book = await this.findManagedBook(id, manageTokenHash);
     if (!book) return false;
-    if (["draft", "revoked"].includes(book.status)) {
+    if (
+      ["draft", "revoked"].includes(book.status)
+      && book.publish_attempt_token_hash === shareTokenHash
+    ) {
       Object.assign(book, {
-        shareTokenHash,
+        share_token_hash: shareTokenHash,
+        publish_attempt_token_hash: null,
         status: "published",
         title,
         revision,
         manifest_json: manifestJson,
         published_at: now,
       });
-      return true;
+      return revision;
     }
     return book.status === "published"
-      && book.revision === revision
-      && book.shareTokenHash === shareTokenHash;
+      && book.share_token_hash === shareTokenHash
+      ? book.revision
+      : false;
   }
 
   async findPublishedBook(shareTokenHash) {
-    return [...this.books.values()].find((book) => book.shareTokenHash === shareTokenHash && book.status === "published") ?? null;
+    return [...this.books.values()].find((book) => book.share_token_hash === shareTokenHash && book.status === "published") ?? null;
   }
 
   async findPublishedAsset(shareTokenHash, assetId) {
@@ -69,16 +105,23 @@ class MemoryRepository {
 
   async revokeBook({ id, manageTokenHash, now }) {
     const book = await this.findManagedBook(id, manageTokenHash);
-    if (!book || book.status !== "published") return false;
-    Object.assign(book, { shareTokenHash: null, status: "revoked", revoked_at: now });
+    if (!book || !["published", "revoked"].includes(book.status)) return false;
+    if (book.status === "published" && book.share_token_hash) {
+      this.retiredShareTokenHashes.add(book.share_token_hash);
+    }
+    Object.assign(book, { publish_attempt_token_hash: null, status: "revoked", revoked_at: now });
     return true;
   }
 
   async markDeleting({ id, manageTokenHash }) {
     const book = await this.findManagedBook(id, manageTokenHash);
     if (!book || !["draft", "published", "revoked", "deleting"].includes(book.status)) return false;
+    if (book.status === "published" && book.share_token_hash) {
+      this.retiredShareTokenHashes.add(book.share_token_hash);
+    }
     book.status = "deleting";
-    book.shareTokenHash = null;
+    book.share_token_hash = null;
+    book.publish_attempt_token_hash = null;
     return true;
   }
 
@@ -117,6 +160,17 @@ class MemoryObjects {
   }
 }
 
+function draftCreationRequest(manageToken, bookId = crypto.randomUUID()) {
+  return new Request("https://example.test/api/books", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${manageToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ bookId }),
+  });
+}
+
 test("publishes an uploaded book and makes revocation fail closed", async () => {
   const manageToken = "a".repeat(43);
   const shareToken = "b".repeat(43);
@@ -125,14 +179,13 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   const api = createBookShareApi({
     repository,
     objects,
-    tokenFactory: () => manageToken,
     clock: () => new Date("2026-08-28T00:00:00.000Z"),
   });
 
-  const draftResponse = await api.handle(new Request("https://example.test/api/books", { method: "POST" }));
+  const draftResponse = await api.handle(draftCreationRequest(manageToken));
   assert.equal(draftResponse.status, 201);
   const draft = await draftResponse.json();
-  assert.equal(draft.manageToken, manageToken);
+  assert.equal("manageToken" in draft, false);
 
   const assetId = "asset:12345678-1234-4234-8234-123456789abc";
   const uploadResponse = await api.handle(new Request(
@@ -412,8 +465,8 @@ test("publishes a preserved-photo album only with its declared original source",
   const shareToken = "o".repeat(43);
   const repository = new MemoryRepository();
   const objects = new MemoryObjects();
-  const api = createBookShareApi({ repository, objects, tokenFactory: () => manageToken });
-  const draft = await (await api.handle(new Request("https://example.test/api/books", { method: "POST" }))).json();
+  const api = createBookShareApi({ repository, objects });
+  const draft = await (await api.handle(draftCreationRequest(manageToken))).json();
   const sourceId = "asset:12345678-1234-4234-8234-123456789abc";
   const upload = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/assets/${encodeURIComponent(sourceId)}`, {
     method: "PUT",
@@ -493,18 +546,17 @@ async function publishFixture(options = {}) {
   const api = createBookShareApi({
     repository,
     objects,
-    tokenFactory: () => manageToken,
     clock: () => new Date("2026-08-28T00:00:00.000Z"),
     limits: options.limits,
   });
-  const draftResponse = await api.handle(new Request("https://example.test/api/books", { method: "POST" }));
+  const draftResponse = await api.handle(draftCreationRequest(manageToken));
   const draft = await draftResponse.json();
   const assetId = "asset:12345678-1234-4234-8234-123456789abc";
   const uploadResponse = await api.handle(new Request(
     `https://example.test/api/books/${draft.bookId}/assets/${encodeURIComponent(assetId)}`,
     {
       method: "PUT",
-      headers: { authorization: `Bearer ${draft.manageToken}`, "content-type": "image/png" },
+      headers: { authorization: `Bearer ${manageToken}`, "content-type": "image/png" },
       body: pngBytes(),
     },
   ));
@@ -553,7 +605,7 @@ async function publishFixture(options = {}) {
   };
   const publishRequest = {
     method: "POST",
-    headers: { authorization: `Bearer ${draft.manageToken}`, "content-type": "application/json" },
+    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
     body: JSON.stringify({ manifest, shareToken, quality: qualityFor(manifest) }),
   };
   const publishResponse = await api.handle(new Request(
@@ -566,7 +618,7 @@ async function publishFixture(options = {}) {
     objects,
     draft,
     assetId,
-    manageToken: draft.manageToken,
+    manageToken,
     shareToken,
     uploadResponse,
     publishResponse,
@@ -690,8 +742,8 @@ test("uploads a full 12-spread image-led asset set before enforcing the shared b
   const manageToken = "q".repeat(43);
   const repository = new MemoryRepository();
   const objects = new MemoryObjects();
-  const api = createBookShareApi({ repository, objects, tokenFactory: () => manageToken });
-  const draft = await (await api.handle(new Request("https://example.test/api/books", { method: "POST" }))).json();
+  const api = createBookShareApi({ repository, objects });
+  const draft = await (await api.handle(draftCreationRequest(manageToken))).json();
 
   const upload = async (serial) => {
     const assetId = `asset:12345678-1234-4234-8234-${String(serial).padStart(12, "0")}`;
@@ -723,8 +775,8 @@ test("rejects an oversized publish manifest in one body pass", async () => {
   const manageToken = "s".repeat(43);
   const repository = new MemoryRepository();
   const objects = new MemoryObjects();
-  const api = createBookShareApi({ repository, objects, tokenFactory: () => manageToken });
-  const draft = await (await api.handle(new Request("https://example.test/api/books", { method: "POST" }))).json();
+  const api = createBookShareApi({ repository, objects });
+  const draft = await (await api.handle(draftCreationRequest(manageToken))).json();
 
   const oversized = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
@@ -741,26 +793,29 @@ test("bounds anonymous book creation without storing network identity", async ()
   const api = createBookShareApi({
     repository,
     objects,
-    tokenFactory: () => "f".repeat(43),
     clock: () => new Date("2026-08-28T00:00:00.000Z"),
     limits: { maxSiteBooks: 2, maxBooksPerWindow: 2 },
   });
 
-  assert.equal((await api.handle(new Request("https://example.test/api/books", { method: "POST" }))).status, 201);
-  assert.equal((await api.handle(new Request("https://example.test/api/books", { method: "POST" }))).status, 201);
-  const limited = await api.handle(new Request("https://example.test/api/books", { method: "POST" }));
+  const replayBookId = crypto.randomUUID();
+  assert.equal((await api.handle(draftCreationRequest("f".repeat(43), replayBookId))).status, 201);
+  assert.equal((await api.handle(draftCreationRequest("f".repeat(43)))).status, 201);
+  assert.equal((await api.handle(draftCreationRequest("f".repeat(43), replayBookId))).status, 200);
+  const capabilityMismatch = await api.handle(draftCreationRequest("z".repeat(43), replayBookId));
+  assert.equal(capabilityMismatch.status, 409);
+  assert.equal((await capabilityMismatch.json()).code, "book_exists");
+  const limited = await api.handle(draftCreationRequest("f".repeat(43)));
   assert.equal(limited.status, 429);
   assert.equal((await limited.json()).code, "creation_limit");
 
   const rateApi = createBookShareApi({
     repository: new MemoryRepository(),
     objects: new MemoryObjects(),
-    tokenFactory: () => "g".repeat(43),
     clock: () => new Date("2026-08-28T00:00:00.000Z"),
     limits: { maxSiteBooks: 50, maxBooksPerWindow: 1, creationWindowMs: 60 * 60 * 1000 },
   });
-  assert.equal((await rateApi.handle(new Request("https://example.test/api/books", { method: "POST" }))).status, 201);
-  const rateLimited = await rateApi.handle(new Request("https://example.test/api/books", { method: "POST" }));
+  assert.equal((await rateApi.handle(draftCreationRequest("g".repeat(43)))).status, 201);
+  const rateLimited = await rateApi.handle(draftCreationRequest("g".repeat(43)));
   assert.equal(rateLimited.status, 429);
   assert.equal((await rateLimited.json()).code, "creation_rate");
 });
@@ -783,15 +838,33 @@ test("retries a publish whose response was lost after commit without replacing t
 
   const retry = await api.handle(new Request(
     `https://example.test/api/books/${draft.bookId}/publish`,
-    publishRequest,
+    {
+      ...publishRequest,
+      body: JSON.stringify({ manifest: { revision: 5 }, shareToken }),
+    },
   ));
   assert.equal(retry.status, 200);
   const retried = await retry.json();
   assert.equal(retried.shareUrl, first.shareUrl);
+  assert.equal(retried.publishedRevision, 4);
   assert.equal(objectPuts, 0);
   assert.equal(objects.values.size, 1);
   assert.equal(repository.assets.size, 1);
   assert.equal(await api.isPublishedShare(shareToken), true);
+
+  const reconciled = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish/reconcile`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ shareToken }),
+  }));
+  assert.equal(reconciled.status, 200);
+  assert.deepEqual(await reconciled.json(), {
+    ok: true,
+    bookId: draft.bookId,
+    status: "published",
+    shareUrl: first.shareUrl,
+    publishedRevision: 4,
+  });
 
   const mismatch = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
@@ -805,4 +878,72 @@ test("retries a publish whose response was lost after commit without replacing t
   assert.equal((await mismatch.json()).code, "invalid_state");
   assert.equal(await api.isPublishedShare(shareToken), true);
   assert.equal(await api.isPublishedShare("j".repeat(43)), false);
+});
+
+test("reconcile claims one resumable token and never resurrects the revoked link", async () => {
+  const { api, draft, manageToken, shareToken, publishRequest } = await publishFixture({
+    manageToken: "u".repeat(43),
+    shareToken: "v".repeat(43),
+  });
+  const headers = { authorization: `Bearer ${manageToken}`, "content-type": "application/json" };
+  assert.equal((await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/revoke`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${manageToken}` },
+  }))).status, 200);
+
+  const oldTokenRecovery = await api.handle(new Request(
+    `https://example.test/api/books/${draft.bookId}/publish/reconcile`,
+    { method: "POST", headers, body: JSON.stringify({ shareToken }) },
+  ));
+  assert.equal(oldTokenRecovery.status, 200);
+  assert.equal((await oldTokenRecovery.json()).status, "revoked");
+
+  const oldTokenPublish = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
+    ...publishRequest,
+    body: JSON.stringify({ ...JSON.parse(publishRequest.body), shareToken }),
+  }));
+  assert.equal(oldTokenPublish.status, 409);
+  assert.equal((await oldTokenPublish.json()).code, "revoked_share");
+
+  const nextShareToken = "w".repeat(43);
+  const competingShareToken = "x".repeat(43);
+  const claimed = await api.handle(new Request(
+    `https://example.test/api/books/${draft.bookId}/publish/reconcile`,
+    { method: "POST", headers, body: JSON.stringify({ shareToken: nextShareToken }) },
+  ));
+  assert.equal(claimed.status, 200);
+  assert.equal((await claimed.json()).status, "publishing");
+
+  const competing = await api.handle(new Request(
+    `https://example.test/api/books/${draft.bookId}/publish/reconcile`,
+    { method: "POST", headers, body: JSON.stringify({ shareToken: competingShareToken }) },
+  ));
+  assert.equal(competing.status, 409);
+  assert.equal((await competing.json()).code, "publish_conflict");
+
+  const resumed = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
+    ...publishRequest,
+    body: JSON.stringify({ ...JSON.parse(publishRequest.body), shareToken: nextShareToken }),
+  }));
+  assert.equal(resumed.status, 200);
+  assert.equal((await resumed.json()).shareUrl, `https://example.test/share/${nextShareToken}`);
+  assert.equal(await api.isPublishedShare(shareToken), false);
+  assert.equal(await api.isPublishedShare(nextShareToken), true);
+
+  assert.equal((await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/revoke`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${manageToken}` },
+  }))).status, 200);
+  const oldestTokenRecovery = await api.handle(new Request(
+    `https://example.test/api/books/${draft.bookId}/publish/reconcile`,
+    { method: "POST", headers, body: JSON.stringify({ shareToken }) },
+  ));
+  assert.equal(oldestTokenRecovery.status, 200);
+  assert.equal((await oldestTokenRecovery.json()).status, "revoked");
+  const oldestTokenRepublish = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
+    ...publishRequest,
+    body: JSON.stringify({ ...JSON.parse(publishRequest.body), shareToken }),
+  }));
+  assert.equal(oldestTokenRepublish.status, 409);
+  assert.equal((await oldestTokenRepublish.json()).code, "revoked_share");
 });

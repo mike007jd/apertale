@@ -23,16 +23,70 @@ export class D1BookRepository {
 
   async createBook({ id, manageTokenHash, now }) {
     await this.ensureSchema();
-    await this.db.prepare(`INSERT INTO living_books (
+    const result = await this.db.prepare(`INSERT INTO living_books (
       id, manage_token_hash, status, created_at, updated_at
-    ) VALUES (?, ?, 'draft', ?, ?)`).bind(id, manageTokenHash, now, now).run();
+    ) VALUES (?, ?, 'draft', ?, ?)
+    ON CONFLICT(id) DO NOTHING`).bind(id, manageTokenHash, now, now).run();
+    if (changes(result) === 1) return "created";
+    const existing = await this.findBook(id);
+    return existing?.manage_token_hash === manageTokenHash ? "existing" : "conflict";
+  }
+
+  async findBook(id) {
+    await this.ensureSchema();
+    return this.db.prepare(`SELECT id, manage_token_hash, status
+      FROM living_books
+      WHERE id = ?`).bind(id).first();
   }
 
   async findManagedBook(id, manageTokenHash) {
     await this.ensureSchema();
-    return this.db.prepare(`SELECT id, status, title, revision, share_token_hash
+    return this.db.prepare(`SELECT id, status, title, revision, share_token_hash,
+        publish_attempt_token_hash, revoked_at
       FROM living_books
       WHERE id = ? AND manage_token_hash = ?`).bind(id, manageTokenHash).first();
+  }
+
+  async claimPublishAttempt({ id, manageTokenHash, shareTokenHash, now }) {
+    await this.ensureSchema();
+    const result = await this.db.prepare(`UPDATE living_books SET
+      publish_attempt_token_hash = ?,
+      updated_at = ?
+    WHERE id = ?
+      AND manage_token_hash = ?
+      AND status IN ('draft', 'revoked')
+      AND NOT EXISTS (
+        SELECT 1 FROM living_book_retired_share_tokens
+        WHERE share_token_hash = ?
+      )
+      AND (
+        publish_attempt_token_hash = ?
+        OR (
+          publish_attempt_token_hash IS NULL
+          AND (
+            status = 'draft'
+            OR share_token_hash IS NULL
+            OR share_token_hash <> ?
+          )
+        )
+      )`).bind(
+      shareTokenHash,
+      now,
+      id,
+      manageTokenHash,
+      shareTokenHash,
+      shareTokenHash,
+      shareTokenHash,
+    ).run();
+    return changes(result) === 1;
+  }
+
+  async isRetiredShareToken(shareTokenHash) {
+    await this.ensureSchema();
+    const row = await this.db.prepare(`SELECT 1 AS retired
+      FROM living_book_retired_share_tokens
+      WHERE share_token_hash = ?`).bind(shareTokenHash).first();
+    return row?.retired === 1;
   }
 
   async insertAsset({ bookId, assetId, objectKey, contentType, byteSize, now }) {
@@ -75,6 +129,7 @@ export class D1BookRepository {
     await this.ensureSchema();
     const result = await this.db.prepare(`UPDATE living_books SET
       share_token_hash = ?,
+      publish_attempt_token_hash = NULL,
       status = 'published',
       title = ?,
       revision = ?,
@@ -84,7 +139,8 @@ export class D1BookRepository {
       updated_at = ?
     WHERE id = ?
       AND manage_token_hash = ?
-      AND status IN ('draft', 'revoked')`).bind(
+      AND status IN ('draft', 'revoked')
+      AND publish_attempt_token_hash = ?`).bind(
       shareTokenHash,
       title,
       revision,
@@ -93,17 +149,17 @@ export class D1BookRepository {
       now,
       id,
       manageTokenHash,
+      shareTokenHash,
     ).run();
-    if (changes(result) === 1) return true;
+    if (changes(result) === 1) return revision;
     if (!Number.isSafeInteger(revision) || typeof shareTokenHash !== "string") return false;
-    const existing = await this.db.prepare(`SELECT id
+    const existing = await this.db.prepare(`SELECT revision
       FROM living_books
       WHERE id = ?
         AND manage_token_hash = ?
         AND status = 'published'
-        AND revision = ?
-        AND share_token_hash = ?`).bind(id, manageTokenHash, revision, shareTokenHash).first();
-    return Boolean(existing);
+        AND share_token_hash = ?`).bind(id, manageTokenHash, shareTokenHash).first();
+    return Number.isSafeInteger(existing?.revision) ? existing.revision : false;
   }
 
   async findPublishedBook(shareTokenHash) {
@@ -126,11 +182,11 @@ export class D1BookRepository {
   async revokeBook({ id, manageTokenHash, now }) {
     await this.ensureSchema();
     const result = await this.db.prepare(`UPDATE living_books SET
-      share_token_hash = NULL,
+      publish_attempt_token_hash = NULL,
       status = 'revoked',
       revoked_at = ?,
       updated_at = ?
-    WHERE id = ? AND manage_token_hash = ? AND status = 'published'`).bind(
+    WHERE id = ? AND manage_token_hash = ? AND status IN ('published', 'revoked')`).bind(
       now,
       now,
       id,
@@ -143,6 +199,7 @@ export class D1BookRepository {
     await this.ensureSchema();
     const result = await this.db.prepare(`UPDATE living_books SET
       share_token_hash = NULL,
+      publish_attempt_token_hash = NULL,
       status = 'deleting',
       updated_at = ?
     WHERE id = ?
