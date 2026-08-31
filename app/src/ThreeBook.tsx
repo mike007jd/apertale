@@ -6,7 +6,7 @@ import { recordDiagnostic } from "./diagnostics";
 import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
 import { spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
-import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
+import { bookCaseMatterPose, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
 import { readerSceneStructureKey, resourceAttemptIsCurrent, sceneAssetsReadyForEvidence, spreadResourceIndexes, type ReaderRenderEvidence } from "./renderEvidence";
 import { renderedElementAssetIds, spreadArtworkFit, spreadBaseAssetId, type BookElement, type BookSnapshot, type Spread, type TurnState } from "./types";
 
@@ -862,6 +862,13 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     frontBoardPivot.add(frontBoard);
     book.add(frontBoardPivot);
 
+    // The left page and its paper block are the front matter: they travel with
+    // the front cover instead of remaining as a fully open spread underneath
+    // it. This pivot uses the page's existing left-of-spine coordinates, so an
+    // open pose is the identity transform and the settled reader stays exact.
+    const frontMatterPivot = new THREE.Group();
+    book.add(frontMatterPivot);
+
     /** Cover art rides coplanar with the board so an unresolved cover never pops. */
     const coverArtMaterial = new THREE.MeshStandardMaterial({
       roughness: 0.58,
@@ -984,17 +991,16 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     function applyCover() {
       const phi = coverPhi;
       const closure = (1 - Math.cos(phi)) / 2;
+      const openness = 1 - THREE.MathUtils.clamp((phi - FLAT_PHI) / (Math.PI - FLAT_PHI), 0, 1);
+      const matterPose = bookCaseMatterPose(openness);
       frontBoardPivot.rotation.y = Math.PI - phi;
       frontBoardPivot.position.set(
         -(spineGap / 2) * Math.cos(phi),
         0,
         THREE.MathUtils.lerp(openBoardZ, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2 + BOARD_T / 2, closure),
       );
-      // No visibility toggles here. Two booleans used to flip mid-swing - the
-      // page block at 237ms and the spread at 532ms - and a boolean is a pop by
-      // construction. The closed front board sits in front of the pages in
-      // depth, so the depth test occludes them for free and keeps occluding
-      // them continuously as the cover turns.
+      frontMatterPivot.rotation.y = matterPose.foldY;
+      leftPage.scale.z = rightPage.scale.z = matterPose.reliefZ;
     }
 
     const pageBlockMaterial = new THREE.MeshStandardMaterial({ color: 0xe8dcc4, roughness: 0.92 });
@@ -1018,7 +1024,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     seatStack(rightStack, 2.16, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2);
     leftStack.castShadow = rightStack.castShadow = true;
     leftStack.receiveShadow = rightStack.receiveShadow = true;
-    book.add(leftStack, rightStack);
+    frontMatterPivot.add(leftStack);
+    book.add(rightStack);
 
     const leftMaterial = makePageMaterial(THREE.FrontSide);
     const rightMaterial = makePageMaterial(THREE.FrontSide);
@@ -1029,7 +1036,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     leftPage.position.set(-PAGE_W / 2, 0, 0.075);
     rightPage.position.set(PAGE_W / 2, 0, 0.08);
     leftPage.receiveShadow = rightPage.receiveShadow = true;
-    book.add(leftPage, rightPage);
+    frontMatterPivot.add(leftPage);
+    book.add(rightPage);
 
     // Turning leaves use page-sized samples cut from the same full-spread RT.
     // Front and back are frozen at gesture start, so the illustrated stage
@@ -1837,7 +1845,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
         }
       }
       // The turn machinery hides these mid-turn and has to put them back. The
-      // case no longer needs a say: the cover occludes them in depth.
+      // whole-case pivot owns their pose rather than their visibility.
       leftPage.visible = rightPage.visible = true;
 
       frame += 1;
