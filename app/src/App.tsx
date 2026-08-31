@@ -90,7 +90,7 @@ const motionAuditSeconds = (() => {
   const value = Number(runtimeParams.get("motionAudit"));
   return Number.isFinite(value) && value >= 0.5 && value <= 30 ? value : null;
 })();
-const navigationDurationMs = motionAuditSeconds === null ? durationMs.navigation : motionAuditSeconds * 1000;
+const bookHandoffDurationMs = motionAuditSeconds === null ? durationMs.book : motionAuditSeconds * 1000;
 /**
  * Freezes the case at a fixed openness so a mid-swing pose can be captured for
  * the visual QA record in app/qa. 0 is closed, 1 is open; anything outside that
@@ -380,11 +380,10 @@ export function App() {
       done?.();
       return;
     }
-    // Equal durations. The shelf's own fade is what differentiates the two
-    // directions now, rather than a compressed curve that has to land harder
-    // to cover the same distance in less time. This IS `--motion-navigation`;
-    // retyping the number is how the CSS and the case fall out of step.
-    const duration = navigationDurationMs;
+    // A whole book changing place needs more readable time than one page
+    // turning. The shelf and case still share this one clock in both
+    // directions, but no longer borrow the shorter page-navigation token.
+    const duration = bookHandoffDurationMs;
 
     /*
      * One curve, end to end. This was three self-terminating power segments
@@ -484,8 +483,8 @@ export function App() {
 
   useEffect(() => {
     if (motionAuditSeconds === null) return undefined;
-    document.documentElement.style.setProperty("--motion-navigation", `${motionAuditSeconds}s`);
-    return () => { document.documentElement.style.removeProperty("--motion-navigation"); };
+    document.documentElement.style.setProperty("--motion-book", `${motionAuditSeconds}s`);
+    return () => { document.documentElement.style.removeProperty("--motion-book"); };
   }, []);
 
   useEffect(() => {

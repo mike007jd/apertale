@@ -153,14 +153,10 @@ export const ring = {
   },
 };
 
-/**
- * The book on the shelf is a physical object with a page block, so its shadow
- * carries a hard offset no UI elevation should have. This token retires when
- * the shelf hands off to WebGL and the shadow becomes a real mesh shadow.
- */
+/** The shelf and WebGL stage share one soft, paper-on-desk light language. */
 export const bookShadow = {
-  rest: { day: "0 22px 34px rgb(42 28 17 / .24), -6px 5px 0 rgb(65 44 29 / .16)", night: "0 25px 45px rgb(0 0 0 / .6), -6px 5px 0 rgb(70 44 24 / .5)" },
-  hover: { day: "0 32px 45px rgb(42 28 17 / .30), -7px 6px 0 rgb(65 44 29 / .13)", night: "0 34px 56px rgb(0 0 0 / .66), -7px 6px 0 rgb(70 44 24 / .46)" },
+  rest: { day: "0 8px 18px rgb(42 28 17 / .14), 0 24px 42px rgb(42 28 17 / .20)", night: "0 10px 22px rgb(0 0 0 / .34), 0 28px 50px rgb(0 0 0 / .48)" },
+  hover: { day: "0 12px 24px rgb(42 28 17 / .16), 0 34px 54px rgb(42 28 17 / .24)", night: "0 14px 28px rgb(0 0 0 / .38), 0 38px 62px rgb(0 0 0 / .54)" },
 };
 
 /**
@@ -194,6 +190,7 @@ export const motion = {
     state: "220ms",
     theme: "240ms",
     reveal: "320ms",
+    book: "1100ms",
     navigation: "760ms",
   },
   ease: {

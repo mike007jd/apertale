@@ -212,11 +212,11 @@ summary:focus-visible,
 .book-library.is-closing-book .library-sheet { pointer-events: none; }
 
 .book-library.is-opening-book {
-  animation: library-to-open-book var(--motion-navigation) var(--ease-navigation) both;
+  animation: library-to-open-book var(--motion-book) var(--ease-navigation) both;
 }
 
 .book-library.is-closing-book {
-  animation: library-from-open-book var(--motion-navigation) var(--ease-navigation) both;
+  animation: library-from-open-book var(--motion-book) var(--ease-navigation) both;
 }
 
 .library-atmosphere {

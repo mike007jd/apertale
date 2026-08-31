@@ -28,6 +28,7 @@ export const durationMs = {
   "state": 220,
   "theme": 240,
   "reveal": 320,
+  "book": 1100,
   "navigation": 760
 } as const;
 

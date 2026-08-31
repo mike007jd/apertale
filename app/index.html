@@ -8,9 +8,65 @@
     <meta name="theme-color" content="#f4f0e8" />
     <meta name="description" content="Apertale — open a page, enter a world. Create dimensional interactive books with your own ChatGPT or Codex Agent." />
     <title>Apertale</title>
+    <style>
+      html, body, #root { min-height: 100%; margin: 0; }
+      .apertale-boot {
+        box-sizing: border-box;
+        min-height: 100svh;
+        padding: clamp(18px, 3vw, 34px) clamp(18px, 4vw, 56px);
+        overflow: hidden;
+        color: #211b16;
+        background: #f4f0e8;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+      .apertale-boot__bar { display: flex; align-items: center; justify-content: space-between; }
+      .apertale-boot__wordmark { font-family: Georgia, serif; font-size: 18px; }
+      .apertale-boot__switches { display: flex; gap: 10px; }
+      .apertale-boot__pill, .apertale-boot__action, .apertale-boot__line, .apertale-boot__cover {
+        background: #ddd3c5;
+        animation: apertale-boot-pulse 1.4s ease-in-out infinite;
+      }
+      .apertale-boot__pill { width: 74px; height: 34px; border-radius: 999px; }
+      .apertale-boot__intro { display: grid; justify-items: center; gap: 12px; margin: clamp(64px, 11vh, 108px) auto 0; }
+      .apertale-boot__line { height: 15px; border-radius: 5px; }
+      .apertale-boot__line--eyebrow { width: 118px; height: 9px; }
+      .apertale-boot__line--title { width: min(360px, 68vw); height: 28px; }
+      .apertale-boot__line--copy { width: min(440px, 78vw); }
+      .apertale-boot__actions { display: flex; gap: 10px; margin-top: 8px; }
+      .apertale-boot__action { width: 118px; height: 38px; border-radius: 999px; }
+      .apertale-boot__shelf { display: grid; grid-template-columns: repeat(5, minmax(70px, 1fr)); gap: clamp(18px, 4vw, 44px); width: min(820px, 88vw); margin: clamp(48px, 8vh, 76px) auto 0; }
+      .apertale-boot__cover { aspect-ratio: 3 / 4; border-radius: 8px 12px 12px 8px; box-shadow: 0 12px 30px rgb(42 28 17 / .14); }
+      .apertale-boot__status { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+      @keyframes apertale-boot-pulse { 50% { opacity: .48; } }
+      @media (max-width: 680px) {
+        .apertale-boot__pill:first-child { display: none; }
+        .apertale-boot__shelf { grid-template-columns: repeat(3, 1fr); width: 92vw; }
+        .apertale-boot__cover:nth-child(n + 4) { display: none; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .apertale-boot__pill, .apertale-boot__action, .apertale-boot__line, .apertale-boot__cover { animation: none; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="apertale-boot" role="status" aria-label="Opening Apertale">
+        <span class="apertale-boot__status">Opening Apertale…</span>
+        <header class="apertale-boot__bar" aria-hidden="true">
+          <strong class="apertale-boot__wordmark">Apertale</strong>
+          <span class="apertale-boot__switches"><i class="apertale-boot__pill"></i><i class="apertale-boot__pill"></i></span>
+        </header>
+        <section class="apertale-boot__intro" aria-hidden="true">
+          <i class="apertale-boot__line apertale-boot__line--eyebrow"></i>
+          <i class="apertale-boot__line apertale-boot__line--title"></i>
+          <i class="apertale-boot__line apertale-boot__line--copy"></i>
+          <span class="apertale-boot__actions"><i class="apertale-boot__action"></i><i class="apertale-boot__action"></i></span>
+        </section>
+        <section class="apertale-boot__shelf" aria-hidden="true">
+          <i class="apertale-boot__cover"></i><i class="apertale-boot__cover"></i><i class="apertale-boot__cover"></i><i class="apertale-boot__cover"></i><i class="apertale-boot__cover"></i>
+        </section>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

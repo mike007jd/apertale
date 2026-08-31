@@ -73,8 +73,8 @@
   --ring-ok: 0 0 0 3px rgb(71 168 121 / .16);
   --ring-marker: 0 0 0 4px color-mix(in srgb, var(--marker-color) 35%, transparent);
   --ring-inset-accent: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
-  --elev-book: 0 22px 34px rgb(42 28 17 / .24), -6px 5px 0 rgb(65 44 29 / .16);
-  --elev-book-hover: 0 32px 45px rgb(42 28 17 / .30), -7px 6px 0 rgb(65 44 29 / .13);
+  --elev-book: 0 8px 18px rgb(42 28 17 / .14), 0 24px 42px rgb(42 28 17 / .20);
+  --elev-book-hover: 0 12px 24px rgb(42 28 17 / .16), 0 34px 54px rgb(42 28 17 / .24);
   --elev-accent-rest: 0 9px 22px color-mix(in srgb, var(--accent) 24%, transparent);
   --elev-accent-hover: 0 13px 30px color-mix(in srgb, var(--accent) 30%, transparent);
   --elev-accent-press: 0 5px 12px color-mix(in srgb, var(--accent) 22%, transparent);
@@ -84,6 +84,7 @@
   --motion-state: 220ms;
   --motion-theme: 240ms;
   --motion-reveal: 320ms;
+  --motion-book: 1100ms;
   --motion-navigation: 760ms;
   --ease-object: cubic-bezier(.22, 1, .36, 1);
   --ease-info: cubic-bezier(.2, .8, .2, 1);
@@ -112,6 +113,6 @@
   --ring-ok: 0 0 0 3px rgb(107 168 143 / .18);
   --ring-marker: 0 0 0 4px color-mix(in srgb, var(--marker-color) 42%, transparent);
   --ring-inset-accent: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
-  --elev-book: 0 25px 45px rgb(0 0 0 / .6), -6px 5px 0 rgb(70 44 24 / .5);
-  --elev-book-hover: 0 34px 56px rgb(0 0 0 / .66), -7px 6px 0 rgb(70 44 24 / .46);
+  --elev-book: 0 10px 22px rgb(0 0 0 / .34), 0 28px 50px rgb(0 0 0 / .48);
+  --elev-book-hover: 0 14px 28px rgb(0 0 0 / .38), 0 38px 62px rgb(0 0 0 / .54);
 }
