@@ -30,12 +30,65 @@ import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import type { HTMLMotionProps } from "motion/react";
 import type { ReactNode } from "react";
 import { durationMs, easePoints, motion as motionTokens } from "./tokens.generated";
+import type { CreationNavigationPhase, WorkspaceMotionOrigin } from "./creationNavigation";
 
 const spring = { type: "spring", ...motionTokens.springObject } as const;
 const surfaceSpring = { type: "spring", ...motionTokens.springSurface } as const;
 
 /** Informational motion: a duration, never a spring. */
 const info = { duration: durationMs.state / 1000, ease: easePoints.info } as const;
+const navigation = { duration: durationMs.reveal / 1000, ease: easePoints.navigation } as const;
+
+const portalCircle = (origin: WorkspaceMotionOrigin, radius: number) =>
+  `circle(${radius}px at ${origin.x}px ${origin.y}px)`;
+
+/**
+ * An origin-aware opaque handoff between the library/reader and the blank-book
+ * workspace. The mounted scene changes only while this paper surface covers
+ * the viewport, so WebGL setup cannot flash as a navigation cut.
+ */
+export function WorkspaceTransition({
+  phase,
+  sourceOrigin,
+  actionOrigin,
+  onPhaseComplete,
+}: {
+  phase: CreationNavigationPhase;
+  sourceOrigin: WorkspaceMotionOrigin;
+  actionOrigin: WorkspaceMotionOrigin;
+  onPhaseComplete: () => void;
+}) {
+  const reduced = useReducedMotionConfig();
+  if (phase === "idle") return null;
+  const origin = phase === "covering-workspace" ? actionOrigin : sourceOrigin;
+  const point = portalCircle(origin, 0);
+  const cover = portalCircle(origin, origin.radius);
+  const revealWorkspace = phase === "revealing-workspace";
+  const revealSource = phase === "revealing-source";
+  const initial = revealWorkspace || revealSource
+    ? { opacity: 1, clipPath: cover }
+    : { opacity: 1, clipPath: point };
+  const animate = revealWorkspace
+    ? { opacity: 0, clipPath: cover }
+    : revealSource
+      ? { opacity: 1, clipPath: point }
+      : { opacity: 1, clipPath: cover };
+
+  return (
+    <motion.div
+      key={phase}
+      className="workspace-transition"
+      data-phase={phase}
+      aria-hidden="true"
+      initial={reduced ? false : initial}
+      animate={animate}
+      transition={reduced ? { duration: 0 } : revealWorkspace ? info : navigation}
+      onAnimationComplete={onPhaseComplete}
+    >
+      <span className="workspace-transition-mark">Apertale</span>
+    </motion.div>
+  );
+}
 
 export type SwitchOption<T extends string> = {
   value: T;

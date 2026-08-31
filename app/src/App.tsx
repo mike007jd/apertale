@@ -46,7 +46,13 @@ import { smootherstep } from "./design/curves";
 import { durationMs } from "./design/tokens.generated";
 import { announce, supportsWebGl2 } from "./readerShell";
 import { spreadFraction } from "./stageGeometry";
-import { Panel, Toast } from "./design/primitives";
+import { Panel, Toast, WorkspaceTransition } from "./design/primitives";
+import {
+  INITIAL_CREATION_NAVIGATION,
+  reduceCreationNavigation,
+  workspaceMotionOrigin,
+  type WorkspaceMotionOrigin,
+} from "./design/creationNavigation";
 import { ThemeSwitch } from "./design/ThemeSwitch";
 import { FallbackBook } from "./FallbackBook";
 import { completeImageHandoff, currentImageHandoff, describePartialImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
@@ -127,6 +133,13 @@ type OpeningBook = {
 
 type LibraryMotion = "idle" | "opening-book" | "closing-book";
 type LibraryTab = "yours" | "explore";
+
+function measureWorkspaceMotionOrigin(element: HTMLElement | null): WorkspaceMotionOrigin {
+  return workspaceMotionOrigin(element?.getBoundingClientRect() ?? null, {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
+}
 
 export function readerSceneShouldMount(state: {
   showLibrary: boolean;
@@ -262,7 +275,18 @@ export function App() {
   const [showLibrary, setShowLibrary] = useState(true);
   const [libraryMotion, setLibraryMotion] = useState<LibraryMotion>("idle");
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("yours");
-  const [showCreateGuide, setShowCreateGuide] = useState(false);
+  const [creationNavigation, dispatchCreationNavigation] = useReducer(
+    reduceCreationNavigation,
+    INITIAL_CREATION_NAVIGATION,
+  );
+  const creationNavigationRef = useRef(creationNavigation);
+  creationNavigationRef.current = creationNavigation;
+  const showCreateGuide = creationNavigation.workspaceOpen;
+  const creationTransitionBusy = creationNavigation.phase !== "idle";
+  const [creationTransitionOrigins, setCreationTransitionOrigins] = useState(() => {
+    const fallback = measureWorkspaceMotionOrigin(null);
+    return { source: fallback, action: fallback };
+  });
   const [showElementAgentGuide, setShowElementAgentGuide] = useState(false);
   const [elementPromptCopied, setElementPromptCopied] = useState(false);
   const [elementPromptCopyError, setElementPromptCopyError] = useState(false);
@@ -897,20 +921,60 @@ export function App() {
     return () => window.clearTimeout(failsafe);
   }, [beginOpenTransition, openingBook, readyBookId, snapshot.document.id]);
 
+  const restoreCreateGuideFocus = useCallback(() => {
+    window.setTimeout(() => {
+      const previousOpener = createGuideOpener.current;
+      const liveOpener = previousOpener?.isConnected
+        ? previousOpener
+        : document.querySelector<HTMLElement>("[data-creation-opener]");
+      liveOpener?.focus();
+    }, 0);
+  }, []);
+
   const closeCodexGuide = useCallback(() => {
     const request = currentImageHandoff();
     if (request) dismissImageHandoff(request.requestId);
     setPartialImageHandoff(null);
-    setShowCreateGuide(false);
-    window.setTimeout(() => createGuideOpener.current?.focus(), 0);
+    if (creationNavigationRef.current.phase !== "idle") return;
+    if (reducedMotionRef.current) {
+      dispatchCreationNavigation({ type: "hide-immediately" });
+      restoreCreateGuideFocus();
+      return;
+    }
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setCreationTransitionOrigins((current) => ({ ...current, action: measureWorkspaceMotionOrigin(active) }));
+    dispatchCreationNavigation({ type: "request-close" });
+  }, [restoreCreateGuideFocus]);
+
+  const beginOpenCodexGuide = useCallback((opener: HTMLElement | null) => {
+    const current = creationNavigationRef.current;
+    if (current.phase !== "idle" || current.workspaceOpen) return;
+    createGuideOpener.current = opener;
+    setCopied(false);
+    setCopyError(false);
+    if (reducedMotionRef.current) {
+      dispatchCreationNavigation({ type: "show-immediately" });
+      return;
+    }
+    const source = measureWorkspaceMotionOrigin(opener);
+    setCreationTransitionOrigins({ source, action: source });
+    dispatchCreationNavigation({ type: "request-open" });
   }, []);
 
   const openCodexGuide = useCallback(() => {
-    createGuideOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setCopied(false);
-    setCopyError(false);
-    setShowCreateGuide(true);
-  }, []);
+    beginOpenCodexGuide(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  }, [beginOpenCodexGuide]);
+
+  const handleCreationTransitionComplete = useCallback(() => {
+    const returnsToSource = creationNavigation.phase === "revealing-source";
+    dispatchCreationNavigation({ type: "animation-complete" });
+    if (returnsToSource) restoreCreateGuideFocus();
+  }, [creationNavigation.phase, restoreCreateGuideFocus]);
+
+  const cancelCreationTransitionToSource = useCallback(() => {
+    dispatchCreationNavigation({ type: "hide-immediately" });
+    restoreCreateGuideFocus();
+  }, [restoreCreateGuideFocus]);
 
   const closePublication = useCallback((expectedDocumentId?: string) => {
     if (expectedDocumentId && activeDocumentIdRef.current !== expectedDocumentId) return;
@@ -1044,7 +1108,7 @@ export function App() {
     };
     timeout = window.setTimeout(() => finishWithError(new Error("The requested authoring surface did not become visible.")), AUTHORING_SURFACE_TIMEOUT_MS);
     setAuthoringSurfaceRequest({ ...request, renderEvidenceToken: crypto.randomUUID() });
-    setShowCreateGuide(false);
+    dispatchCreationNavigation({ type: "hide-immediately" });
     setShowElementAgentGuide(false);
     setShowPublication(false);
     setTurn(null);
@@ -1195,6 +1259,20 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (creationTransitionBusy) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          cancelCreationTransitionToSource();
+        } else if (
+          event.key === "Tab"
+          || event.key === "Enter"
+          || event.key === " "
+          || event.key.startsWith("Arrow")
+        ) {
+          event.preventDefault();
+        }
+        return;
+      }
       if (event.key === "Escape" && showPublication) return;
       if (event.key === "Escape" && showElementAgentGuide) {
         closeElementAgentGuide();
@@ -1237,7 +1315,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeCodexGuide, closeElementAgentGuide, libraryMotion, openBookFromLibrary, openingBook, settleLibraryToReader, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
+  }, [cancelCreationTransitionToSource, closeCodexGuide, closeElementAgentGuide, creationTransitionBusy, libraryMotion, openBookFromLibrary, openingBook, settleLibraryToReader, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
 
   useEffect(() => {
     if (!showLibrary || libraryMotion !== "idle") return;
@@ -1345,7 +1423,7 @@ export function App() {
     bookEngine.setPreview(false);
     setShowElementAgentGuide(false);
     setShowPublication(false);
-    setShowCreateGuide(true);
+    beginOpenCodexGuide(null);
     if (request.assetUse === "source-photo") {
       // Reader references belong to the next creation brief. Generated final
       // art is deliberately registry-only and must never change this mode.
@@ -1434,7 +1512,7 @@ export function App() {
             setWorkshopImportError(outcome.reason);
           } else {
             setPartialImageHandoff(null);
-            if (isBookArt) setShowCreateGuide(false);
+            if (isBookArt) closeCodexGuide();
           }
         } else if (handoffRequestId === null && (rejected > 0 || failed > 0)) {
           setWorkshopImportError(describePartialImageHandoff({ accepted: deliveredAssetIds.length, rejected, failed }));
@@ -1522,7 +1600,10 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion={reducedMotion ? "always" : "never"}>
-      <main className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""}`}>
+      <main
+        className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""} ${creationTransitionBusy ? "is-workspace-transitioning" : ""}`}
+        aria-busy={creationTransitionBusy || undefined}
+      >
       <header className="topbar" hidden={showLibrary || showCreateGuide} aria-hidden={showElementAgentGuide || undefined}>
         {!snapshot.session.preview && <button className="library-button" onClick={openLibrary} aria-label="Open book library"><Books size={18} /> <span>Books</span></button>}
         <button className="wordmark" onClick={() => { bookEngine.setPreview(false); openLibrary(); }} aria-label="Open book library">Apertale</button>
@@ -1558,7 +1639,7 @@ export function App() {
               <h1 id="library-title">Open a world.<br />Then make one yours.</h1>
               <span>Browse anywhere. Create in Codex (ChatGPT desktop) with your own plan.</span>
               <div className="library-actions">
-                <button className="create-codex-button" onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create your own</button>
+                <button className="create-codex-button" data-creation-opener onClick={openCodexGuide} disabled={libraryBusy}><Sparkle size={18} weight="fill" /> Create your own</button>
                 <button className="guide-book-button" onClick={() => openBookFromLibrary("apertale-field-guide")} onPointerEnter={() => prewarmReader("apertale-field-guide")} onFocus={() => prewarmReader("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={18} /> Read the Guide Book</button>
               </div>
             </div>
@@ -1893,7 +1974,7 @@ export function App() {
               </button>
             )}
           </div>
-          <button className="agent-prompt" onClick={openCodexGuide} aria-label="Create your own">
+          <button className="agent-prompt" data-creation-opener onClick={openCodexGuide} aria-label="Create your own">
             <Sparkle size={17} weight="fill" />
             <span className="agent-prompt-label agent-prompt-label-full" aria-hidden="true">Create your own</span>
             <span className="agent-prompt-label agent-prompt-label-compact" aria-hidden="true">Create</span>
@@ -1931,7 +2012,7 @@ export function App() {
               <button className="workshop-close" autoFocus onClick={closeCodexGuide} aria-label={handoffIsBookArt ? "Close image handoff" : "Close creation workshop"}><X size={20} /></button>
             </header>
 
-            <div className="workshop-sheet">
+            <Panel from="scale" className="workshop-sheet">
               <div className="workshop-sheet-scroll">
                 <div className="workshop-headline">
                   <p>{handoffIsBookArt ? "Artwork handoff" : "New book"}</p>
@@ -2096,7 +2177,7 @@ export function App() {
                   </div>
                 )}
               </div>}
-            </div>
+            </Panel>
           </div>
         </section>
       )}
@@ -2145,6 +2226,13 @@ export function App() {
           onClose={closePublication}
         />
       )}
+
+      <WorkspaceTransition
+        phase={creationNavigation.phase}
+        sourceOrigin={creationTransitionOrigins.source}
+        actionOrigin={creationTransitionOrigins.action}
+        onPhaseComplete={handleCreationTransitionComplete}
+      />
 
       {!showLibrary && <div className="sr-only" aria-live="polite">
         {announce(

@@ -419,6 +419,7 @@ summary:focus-visible,
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scroll-padding-block: var(--space-6) var(--space-5);
   scrollbar-width: thin;
   pointer-events: auto;
 }
@@ -441,10 +442,11 @@ summary:focus-visible,
   gap: clamp(18px, 2.6vw, 32px);
   width: min(100%, 1240px);
   margin-inline: auto;
-  /* The shelf owns the page's remaining height, so its own padding is the
-     first place to give it back. These were never tuned; the larger type
-     scale is what made that visible. */
-  padding: var(--space-3) var(--space-2);
+  /* A focused or hovered hardcover rises inside this scrolling frame. The old
+     12px cap was smaller than that lift, so the scrollport cut the cover and
+     its shadow along one hard horizontal line. Keep the sides and foot compact
+     while reserving a real motion gutter above the books. */
+  padding: var(--space-6) var(--space-2) var(--space-3);
   perspective: 1400px;
 }
 
@@ -455,6 +457,7 @@ summary:focus-visible,
   min-width: 0;
   border: 0;
   padding: 0;
+  scroll-margin-block: var(--space-6) var(--space-5);
   text-align: center;
   color: var(--ink);
   background: transparent;
@@ -476,7 +479,7 @@ summary:focus-visible,
 .library-actions button:disabled,
 .library-topbar-actions button:disabled { opacity: .56; cursor: wait; }
 .library-card:hover,
-.library-card:focus-visible { transform: translateY(-14px) rotate(0deg) scale(1.025); filter: saturate(1.05); }
+.library-card:focus-visible { transform: translateY(-8px) rotate(0deg) scale(1.025); filter: saturate(1.05); }
 .library-card-1 { --book-rotation: -3deg; --book-shift: 9px; }
 .library-card-2 { --book-rotation: 1.5deg; --book-shift: 1px; }
 .library-card-3 { --book-rotation: -1deg; --book-shift: 5px; }
@@ -1188,6 +1191,44 @@ summary:focus-visible,
   pointer-events: none;
 }
 
+.app-shell.is-workspace-transitioning { cursor: progress; }
+
+/* Structural navigation crosses an opaque paper surface before React swaps
+   the reader/library scene for the blank-book workspace. This is not a generic
+   route fade: the circle is measured from the control that caused the change,
+   and the reverse reveal returns to that same place. */
+.workspace-transition {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #244d45;
+  background:
+    linear-gradient(rgba(248, 243, 234, .72), rgba(239, 231, 217, .78)),
+    url("/assets/generated/day-background.webp") center / cover;
+  pointer-events: auto;
+  will-change: clip-path, opacity;
+}
+
+.workspace-transition-mark {
+  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-size: var(--text-title);
+  font-weight: 700;
+  letter-spacing: -.035em;
+  opacity: .62;
+}
+
+.workspace-transition[data-phase^="revealing"] .workspace-transition-mark { opacity: 0; }
+
+:root[data-theme="night"] .workspace-transition {
+  color: #f2dfbd;
+  background:
+    linear-gradient(rgba(18, 13, 9, .76), rgba(26, 19, 14, .82)),
+    url("/assets/generated/night-background.webp") center / cover;
+}
+
 .stage.is-creation-workshop {
   z-index: 50;
   background: color-mix(in srgb, #f3ede2 74%, transparent);
@@ -1200,6 +1241,13 @@ summary:focus-visible,
   inset: 0 404px 0 0;
   width: auto;
   pointer-events: none;
+  transform-origin: 38% 54%;
+  animation: workspace-book-in var(--motion-navigation) var(--ease-navigation) both;
+}
+
+@keyframes workspace-book-in {
+  from { transform: scale(.965); }
+  to { transform: scale(1); }
 }
 
 .stage.is-creation-workshop .book-scene canvas { cursor: default; }
@@ -1211,7 +1259,6 @@ summary:focus-visible,
   overflow: hidden;
   color: var(--ink);
   pointer-events: none;
-  animation: workshop-in var(--motion-reveal) var(--ease-info) both;
 }
 
 @keyframes workshop-in { from { opacity: 0; } }

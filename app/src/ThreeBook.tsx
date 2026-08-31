@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { acquireAssetUrl, acquireAssetUrls, isStoredAssetId, type AssetUrlLease } from "./assetStore";
 import { smootherstep } from "./design/curves";
 import { recordDiagnostic } from "./diagnostics";
+import { createCoverEndpaperCanvas, negativeZEndpaperMaterials, paintCoverEndpaper } from "./endpaper";
 import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
 import { spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
@@ -824,7 +825,16 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     spineShell.castShadow = true;
     book.add(spineShell);
 
-    const endpaperMaterial = new THREE.MeshStandardMaterial({ color: 0xe3d6bb, roughness: 0.94, metalness: 0 });
+    const endpaperCanvas = createCoverEndpaperCanvas();
+    const endpaperTexture = new THREE.CanvasTexture(endpaperCanvas);
+    endpaperTexture.colorSpace = THREE.SRGBColorSpace;
+    endpaperTexture.anisotropy = 4;
+    const endpaperMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: endpaperTexture,
+      roughness: 0.94,
+      metalness: 0,
+    });
     /**
      * Box faces run [+x, -x, +y, -y, +z, -z]. The cover cloth wraps everything
      * except the inner face, which is the pastedown - and that is the face the
@@ -834,7 +844,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     const makeBoard = () => {
       const board = new THREE.Mesh(
         new THREE.BoxGeometry(BOARD_W, BOARD_H, BOARD_T, 1, 1, 1),
-        [coverMaterial, coverMaterial, coverMaterial, coverMaterial, coverMaterial, endpaperMaterial],
+        negativeZEndpaperMaterials(coverMaterial, endpaperMaterial),
       );
       board.castShadow = false;
       board.receiveShadow = true;
@@ -912,6 +922,10 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
           } else {
             texture.repeat.set(boardAspect / artAspect, 1);
             texture.offset.set((1 - boardAspect / artAspect) / 2, 0);
+          }
+          if (texture.image) {
+            paintCoverEndpaper(endpaperCanvas, texture.image as CanvasImageSource);
+            endpaperTexture.needsUpdate = true;
           }
           coverArtMaterial.map = texture;
           coverArtMaterial.needsUpdate = true;
@@ -1007,8 +1021,12 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     // Unit depth, so the two stacks can be driven by scale as the reader moves
     // through the book. They used to be fixed at 0.34 each, which meant spread
     // one and spread twelve had identical thickness on both sides.
-    const leftStack = new THREE.Mesh(new THREE.BoxGeometry(4.32, 5.32, 1), pageBlockMaterial);
-    const rightStack = leftStack.clone();
+    const pageBlockGeometry = new THREE.BoxGeometry(4.32, 5.32, 1);
+    const leftStack = new THREE.Mesh(
+      pageBlockGeometry,
+      negativeZEndpaperMaterials(pageBlockMaterial, endpaperMaterial),
+    );
+    const rightStack = new THREE.Mesh(pageBlockGeometry, pageBlockMaterial);
     /**
      * The block's FRONT face stays put at BLOCK_FRONT so the pages always rest
      * on top of it; only its back face moves as thickness shifts from one side
@@ -1961,11 +1979,12 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       rearBoard.geometry.dispose();
       frontBoard.geometry.dispose();
       coverMaterial.dispose();
+      endpaperTexture.dispose();
       endpaperMaterial.dispose();
       coverArt.geometry.dispose();
       coverArtMaterial.map?.dispose();
       coverArtMaterial.dispose();
-      leftStack.geometry.dispose();
+      pageBlockGeometry.dispose();
       pageBlockMaterial.dispose();
       shadowPlaneGeometry.dispose();
       shadowPlaneMaterial.dispose();
