@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
+import { bookCaseMatterPose, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
 
 const PAGE_WIDTH = 4.2;
 const PAGE_HEIGHT = 5.18;
 
 describe("page-turn deformation", () => {
+  it("binds the front matter to the case while preserving the settled spread", () => {
+    expect(bookCaseMatterPose(0)).toEqual({ foldY: -Math.PI, reliefZ: 0.08 });
+    expect(bookCaseMatterPose(0.5)).toEqual({ foldY: -Math.PI / 2, reliefZ: 0.54 });
+    expect(bookCaseMatterPose(1)).toEqual({ foldY: 0, reliefZ: 1 });
+  });
+
   it("keeps the correct illustrated spread on the moving leaf and underlay", () => {
     expect(resolveTurnContentPlan(3, "forward", 8)).toEqual({
       destinationIndex: 4,

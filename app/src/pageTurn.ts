@@ -36,6 +36,19 @@ type TurnContentPlan = {
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
+/**
+ * The illustrated front matter is bound to the moving cover while the whole
+ * book opens. Its page relief compresses under the closed case, then returns
+ * to the authored resting curve only when the spread lies flat.
+ */
+export function bookCaseMatterPose(openProgress: number) {
+  const openness = clamp01(openProgress);
+  return {
+    foldY: openness === 1 ? 0 : -Math.PI * (1 - openness),
+    reliefZ: 0.08 + 0.92 * openness,
+  };
+}
+
 /** A turn is available only when its destination exists and its rendering boundary is ready. */
 export function canTurnPage(
   direction: TurnDirection,
