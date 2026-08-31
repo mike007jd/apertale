@@ -6,9 +6,24 @@ const PAGE_HEIGHT = 5.18;
 
 describe("page-turn deformation", () => {
   it("binds the front matter to the case while preserving the settled spread", () => {
-    expect(bookCaseMatterPose(0)).toEqual({ foldY: -Math.PI, reliefZ: 0.08 });
-    expect(bookCaseMatterPose(0.5)).toEqual({ foldY: -Math.PI / 2, reliefZ: 0.54 });
-    expect(bookCaseMatterPose(1)).toEqual({ foldY: 0, reliefZ: 1 });
+    const flatPhi = 0.055;
+    expect(bookCaseMatterPose(0, flatPhi)).toEqual({ coverY: 0, foldY: Math.PI, reliefZ: 0.08 });
+    expect(bookCaseMatterPose(0.5, flatPhi)).toEqual({
+      coverY: -(Math.PI - flatPhi) / 2,
+      foldY: Math.PI / 2,
+      reliefZ: 0.54,
+    });
+    expect(bookCaseMatterPose(1, flatPhi)).toEqual({
+      coverY: -(Math.PI - flatPhi),
+      foldY: 0,
+      reliefZ: 1,
+    });
+
+    const midpoint = bookCaseMatterPose(0.5, flatPhi);
+    const coverOuterEdgeWorldZ = -Math.sin(midpoint.coverY);
+    const matterOuterEdgeWorldZ = Math.sin(midpoint.foldY);
+    expect(coverOuterEdgeWorldZ).toBeGreaterThan(0);
+    expect(matterOuterEdgeWorldZ).toBeGreaterThan(0);
   });
 
   it("keeps the correct illustrated spread on the moving leaf and underlay", () => {

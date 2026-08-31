@@ -992,8 +992,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       const phi = coverPhi;
       const closure = (1 - Math.cos(phi)) / 2;
       const openness = 1 - THREE.MathUtils.clamp((phi - FLAT_PHI) / (Math.PI - FLAT_PHI), 0, 1);
-      const matterPose = bookCaseMatterPose(openness);
-      frontBoardPivot.rotation.y = Math.PI - phi;
+      const matterPose = bookCaseMatterPose(openness, FLAT_PHI);
+      frontBoardPivot.rotation.y = matterPose.coverY;
       frontBoardPivot.position.set(
         -(spineGap / 2) * Math.cos(phi),
         0,
