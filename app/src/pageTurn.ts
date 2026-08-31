@@ -37,14 +37,16 @@ type TurnContentPlan = {
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
 /**
- * The illustrated front matter is bound to the moving cover while the whole
- * book opens. Its page relief compresses under the closed case, then returns
- * to the authored resting curve only when the spread lies flat.
+ * The cover and illustrated front matter share one physical opening arc. Their
+ * local x axes point in opposite directions, so the cover uses a negative
+ * rotation and the matter a positive one: both must rise toward the camera at
+ * mid-swing instead of diving through the static page block.
  */
-export function bookCaseMatterPose(openProgress: number) {
+export function bookCaseMatterPose(openProgress: number, flatPhi: number) {
   const openness = clamp01(openProgress);
   return {
-    foldY: openness === 1 ? 0 : -Math.PI * (1 - openness),
+    coverY: openness === 0 ? 0 : -(Math.PI - flatPhi) * openness,
+    foldY: openness === 1 ? 0 : Math.PI * (1 - openness),
     reliefZ: 0.08 + 0.92 * openness,
   };
 }
