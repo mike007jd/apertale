@@ -6,8 +6,8 @@
  * join left to twitch at.
  *
  * It lives here rather than in either caller because the two halves of the
- * same gesture read it — App drives the cover's openness over 760ms, ThreeBook
- * drives the book's travel in from the shelf against the same clock. Two
+ * same gesture read it — App drives the cover's openness over the book-handoff
+ * token, ThreeBook drives the travel from the shelf against that same clock. Two
  * copies of the polynomial meant retuning one desynchronised the other
  * mid-swing, which is precisely the jank the curve was chosen to remove.
  */

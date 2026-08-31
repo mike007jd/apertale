@@ -750,6 +750,10 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     key.position.set(-3.5, 5.5, 8);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
+    // Three r185's PCF path spreads its samples by this radius. Keep the
+    // existing 1024 map and blur the penumbra instead of spending more GPU on
+    // a larger target or selecting the deprecated PCFSoftShadowMap constant.
+    key.shadow.radius = 4;
     key.shadow.camera.left = -7;
     key.shadow.camera.right = 7;
     key.shadow.camera.top = 6;
@@ -1060,7 +1064,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     book.add(turnPage);
 
     const shadowPlaneGeometry = new THREE.PlaneGeometry(11, 7);
-    const shadowPlaneMaterial = new THREE.ShadowMaterial({ color: 0x130d08, opacity: 0.22 });
+    const shadowPlaneMaterial = new THREE.ShadowMaterial({ color: 0x130d08, opacity: 0.18 });
     const shadowPlane = new THREE.Mesh(shadowPlaneGeometry, shadowPlaneMaterial);
     shadowPlane.position.z = -0.39;
     shadowPlane.receiveShadow = true;
