@@ -3,6 +3,33 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import worker, { handleRequest } from "../worker/index.js";
 
+test("serves the root app shell in one asset lookup without materializing storage", async () => {
+  for (const method of ["GET", "HEAD"]) {
+    const calls = [];
+    const response = await worker.fetch(
+      new Request("https://example.test/?cold=1", {
+        method,
+        headers: { accept: "text/html,application/xhtml+xml" },
+      }),
+      {
+        get DB() { throw new Error("root HTML must not inspect D1"); },
+        get FILES() { throw new Error("root HTML must not inspect object storage"); },
+        ASSETS: {
+          fetch: async (request) => {
+            const url = new URL(request.url);
+            calls.push(`${request.method} ${url.pathname}${url.search}`);
+            return new Response(request.method === "HEAD" ? null : "app", { status: 200 });
+          },
+        },
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
+    assert.deepEqual(calls, [`${method} /app-shell`]);
+  }
+});
+
 test("serves existing static assets without a fallback", async () => {
   const calls = [];
   const response = await worker.fetch(new Request("https://example.test/assets/app.js"), {

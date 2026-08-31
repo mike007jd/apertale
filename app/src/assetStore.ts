@@ -3,6 +3,7 @@ import { IMAGE_ANALYSIS_VERSION, MAX_SOURCE_IMAGE_BYTES, analyzeStoredImage, opt
 import type { ImageContentAnalysis } from "./imageOptimizer";
 import type { ImageHandoffAssetUse } from "./imageHandoff";
 import { MAX_BOOK_UPLOADED_ASSETS } from "./qualityContract";
+import { bundledShelfCoverPreviewUrl } from "./shelfCoverPreview";
 
 export { isStoredAssetId } from "./assetId";
 
@@ -11,6 +12,10 @@ const DATABASE_VERSION = 1;
 const STORE_NAME = "assets";
 const ASSET_PREFIX = "asset:";
 const SUPPORTED_SOURCE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const SHELF_PREVIEW_VERSION = 1;
+const SHELF_PREVIEW_MAX_WIDTH = 384;
+const SHELF_PREVIEW_MAX_HEIGHT = 576;
+const SHELF_PREVIEW_QUALITY = 0.84;
 
 export type StoredAssetMetadata = {
   id: string;
@@ -30,7 +35,13 @@ export type StoredAssetMetadata = {
   createdAt: string;
 };
 
-type StoredAsset = StoredAssetMetadata & { blob: Blob };
+type StoredAsset = StoredAssetMetadata & {
+  blob: Blob;
+  previewBlob?: Blob;
+  previewWidth?: number;
+  previewHeight?: number;
+  previewVersion?: number;
+};
 
 export type AssetUrlLease = {
   assetId: string;
@@ -46,7 +57,54 @@ type AssetUrlEntry = {
 };
 
 const objectUrls = new Map<string, AssetUrlEntry>();
+const previewObjectUrls = new Map<string, AssetUrlEntry>();
 let objectUrlGeneration = 0;
+let previewObjectUrlGeneration = 0;
+let previewGenerationQueue: Promise<void> = Promise.resolve();
+
+function enqueuePreviewGeneration<T>(operation: () => Promise<T>) {
+  const result = previewGenerationQueue.then(operation, operation);
+  previewGenerationQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+async function createShelfPreviewBlob(source: Blob) {
+  if (!globalThis.createImageBitmap) throw new Error("Image preview decoding is unavailable in this browser.");
+  const bitmap = await createImageBitmap(source);
+  try {
+    if (bitmap.width <= 0 || bitmap.height <= 0) throw new Error("The cover has invalid dimensions.");
+    const scale = Math.min(1, SHELF_PREVIEW_MAX_WIDTH / bitmap.width, SHELF_PREVIEW_MAX_HEIGHT / bitmap.height);
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+
+    if (globalThis.OffscreenCanvas) {
+      const canvas = new OffscreenCanvas(width, height);
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("The shelf preview canvas is unavailable.");
+      context.drawImage(bitmap, 0, 0, width, height);
+      const blob = await canvas.convertToBlob({ type: "image/webp", quality: SHELF_PREVIEW_QUALITY });
+      if (blob.size <= 0) throw new Error("The shelf preview encoder returned an empty image.");
+      return { blob, width, height };
+    }
+
+    if (!globalThis.document) throw new Error("The shelf preview canvas is unavailable.");
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("The shelf preview canvas is unavailable.");
+    context.drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((encoded) => {
+        if (encoded && encoded.size > 0) resolve(encoded);
+        else reject(new Error("The shelf preview encoder returned an empty image."));
+      }, "image/webp", SHELF_PREVIEW_QUALITY);
+    });
+    return { blob, width, height };
+  } finally {
+    bitmap.close();
+  }
+}
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -201,6 +259,15 @@ function releaseAssetUrlEntry(assetId: string, entry: AssetUrlEntry) {
   entry.url = undefined;
 }
 
+function releaseAssetPreviewUrlEntry(assetId: string, entry: AssetUrlEntry) {
+  entry.references = Math.max(0, entry.references - 1);
+  if (entry.references > 0 || previewObjectUrls.get(assetId) !== entry) return;
+  previewObjectUrls.delete(assetId);
+  if (!entry.url) return;
+  URL.revokeObjectURL(entry.url);
+  entry.url = undefined;
+}
+
 /**
  * Acquires one identity-safe lease for a browser-local Blob URL. Concurrent
  * consumers share the IndexedDB read and URL, while the last release revokes
@@ -251,6 +318,84 @@ export async function acquireAssetUrl(assetId: string): Promise<AssetUrlLease> {
   }
 }
 
+/**
+ * Acquires a shelf-only cover lease. Local covers are resized once, cached in
+ * their existing IndexedDB row, and generated serially so a legacy library
+ * cannot decode every full-resolution cover at the same time.
+ */
+export async function acquireAssetPreviewUrl(assetId: string): Promise<AssetUrlLease> {
+  if (!isStoredAssetId(assetId)) {
+    return { assetId, url: bundledShelfCoverPreviewUrl(assetId), release: () => undefined };
+  }
+  let entry = previewObjectUrls.get(assetId);
+  if (!entry) {
+    const generation = previewObjectUrlGeneration;
+    const nextEntry: AssetUrlEntry = {
+      generation,
+      references: 0,
+      promise: Promise.resolve(""),
+    };
+    nextEntry.promise = enqueuePreviewGeneration(async () => {
+      const stored = await getStoredAsset(assetId);
+      if (!stored) throw new Error(`Local asset ${assetId} is missing.`);
+      if (generation !== previewObjectUrlGeneration || previewObjectUrls.get(assetId) !== nextEntry) {
+        throw new DOMException("The asset preview URL request was retired.", "AbortError");
+      }
+
+      let previewBlob = stored.previewVersion === SHELF_PREVIEW_VERSION && stored.previewBlob
+        ? stored.previewBlob
+        : null;
+      if (!previewBlob) {
+        try {
+          const preview = await createShelfPreviewBlob(stored.blob);
+          previewBlob = preview.blob;
+          await cacheStoredAssetMetadata({
+            ...stored,
+            previewBlob,
+            previewWidth: preview.width,
+            previewHeight: preview.height,
+            previewVersion: SHELF_PREVIEW_VERSION,
+          });
+        } catch {
+          // A browser without a usable encoder still gets the real cover. The
+          // fallback is intentionally uncached so a later capable browser can
+          // create the smaller derivative.
+          previewBlob = stored.blob;
+        }
+      }
+      if (generation !== previewObjectUrlGeneration || previewObjectUrls.get(assetId) !== nextEntry) {
+        throw new DOMException("The asset preview URL request was retired.", "AbortError");
+      }
+      const url = URL.createObjectURL(previewBlob);
+      if (generation !== previewObjectUrlGeneration || previewObjectUrls.get(assetId) !== nextEntry) {
+        URL.revokeObjectURL(url);
+        throw new DOMException("The asset preview URL request was retired.", "AbortError");
+      }
+      nextEntry.url = url;
+      return url;
+    });
+    entry = nextEntry;
+    previewObjectUrls.set(assetId, entry);
+  }
+  entry.references += 1;
+  try {
+    const url = await entry.promise;
+    let released = false;
+    return {
+      assetId,
+      url,
+      release: () => {
+        if (released) return;
+        released = true;
+        releaseAssetPreviewUrlEntry(assetId, entry);
+      },
+    };
+  } catch (error) {
+    releaseAssetPreviewUrlEntry(assetId, entry);
+    throw error;
+  }
+}
+
 /** Acquires an all-or-nothing ordered batch and releases partial success. */
 export async function acquireAssetUrls(assetIds: readonly string[]): Promise<AssetUrlLease[]> {
   const results = await Promise.allSettled(assetIds.map(acquireAssetUrl));
@@ -272,7 +417,14 @@ export async function getAssetMetadata(assetIds: string[]) {
   for (const assetId of uniqueIds) {
     const stored = await getStoredAsset(assetId);
     if (!stored) continue;
-    const { blob: _blob, ...analyzed } = await ensureAssetAnalysis(stored);
+    const {
+      blob: _blob,
+      previewBlob: _previewBlob,
+      previewWidth: _previewWidth,
+      previewHeight: _previewHeight,
+      previewVersion: _previewVersion,
+      ...analyzed
+    } = await ensureAssetAnalysis(stored);
     metadata.push(analyzed);
   }
   return metadata;
@@ -294,7 +446,14 @@ async function scanRecentAssetMetadata(limit: number) {
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor) return;
-      const { blob: _blob, ...metadata } = cursor.value as StoredAsset;
+      const {
+        blob: _blob,
+        previewBlob: _previewBlob,
+        previewWidth: _previewWidth,
+        previewHeight: _previewHeight,
+        previewVersion: _previewVersion,
+        ...metadata
+      } = cursor.value as StoredAsset;
       recent.push(metadata);
       recent.sort((left, right) => (
         right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
@@ -332,4 +491,11 @@ export function releaseAssetUrls() {
     entry.url = undefined;
   });
   objectUrls.clear();
+  previewObjectUrlGeneration += 1;
+  previewObjectUrls.forEach((entry) => {
+    if (!entry.url) return;
+    URL.revokeObjectURL(entry.url);
+    entry.url = undefined;
+  });
+  previewObjectUrls.clear();
 }

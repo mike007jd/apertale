@@ -17,7 +17,7 @@ vi.stubGlobal("window", {
   localStorage,
 });
 
-const { partitionLibraryBooks, shelfCoverAssetPlan } = await import("./App");
+const { partitionLibraryBooks, readerSceneShouldMount, shelfCoverAssetPlan } = await import("./App");
 
 describe("library shelf sections", () => {
   it("treats any book that is not a sample as the reader's own", () => {
@@ -42,5 +42,38 @@ describe("library shelf sections", () => {
     expect([...shelfCoverAssetPlan(true, yours)]).toEqual([["mine", "asset:mine"]]);
     expect([...shelfCoverAssetPlan(true, explore)]).toEqual([["guide", "asset:guide"]]);
     expect([...shelfCoverAssetPlan(false, yours)]).toEqual([]);
+  });
+
+  it("keeps the reader scene out of the settled shelf but mounts it for every transition target", () => {
+    expect(readerSceneShouldMount({
+      showLibrary: true,
+      showCreateGuide: false,
+      openingBookMatchesDocument: false,
+      libraryMotion: "idle",
+    })).toBe(false);
+    expect(readerSceneShouldMount({
+      showLibrary: true,
+      showCreateGuide: false,
+      openingBookMatchesDocument: true,
+      libraryMotion: "idle",
+    })).toBe(true);
+    expect(readerSceneShouldMount({
+      showLibrary: true,
+      showCreateGuide: false,
+      openingBookMatchesDocument: false,
+      libraryMotion: "closing-book",
+    })).toBe(true);
+    expect(readerSceneShouldMount({
+      showLibrary: true,
+      showCreateGuide: true,
+      openingBookMatchesDocument: false,
+      libraryMotion: "idle",
+    })).toBe(true);
+    expect(readerSceneShouldMount({
+      showLibrary: false,
+      showCreateGuide: false,
+      openingBookMatchesDocument: false,
+      libraryMotion: "idle",
+    })).toBe(true);
   });
 });

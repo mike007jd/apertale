@@ -1,4 +1,5 @@
 import { isProceduralElement, spreadBaseAssetId, type BookSnapshot, type Spread, type ThemeId } from "./types";
+import { bundledShelfCoverPreviewUrl } from "./shelfCoverPreview";
 
 type RenderBounds = {
   top: number;
@@ -61,7 +62,7 @@ export function shelfCoverTarget(
     documentId: book.id,
     revision: book.revision,
     assetId: resolved?.assetId ?? book.coverTextureUrl,
-    url: resolved?.url ?? book.coverTextureUrl,
+    url: resolved?.url ?? bundledShelfCoverPreviewUrl(book.coverTextureUrl),
   };
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { acquireAssetUrl, getAssetMetadata, getStoredAssetBlob, isStoredAssetId, listAssetMetadata, releaseAssetUrls, storeLocalImages } from "./assetStore";
+import { acquireAssetPreviewUrl, acquireAssetUrl, getAssetMetadata, getStoredAssetBlob, isStoredAssetId, listAssetMetadata, releaseAssetUrls, storeLocalImages } from "./assetStore";
 
 const imageOptimizer = vi.hoisted(() => ({ analyzeStoredImage: vi.fn(), optimizeImportedImage: vi.fn() }));
 
@@ -101,6 +101,81 @@ afterEach(() => {
 });
 
 describe("asset store blob access", () => {
+  it("maps bundled covers to shelf-sized derivatives without opening IndexedDB", async () => {
+    const open = vi.fn();
+    vi.stubGlobal("indexedDB", { open });
+
+    const lease = await acquireAssetPreviewUrl("/assets/covers/atlas-of-living-wonders-v2.png");
+
+    expect(lease).toMatchObject({
+      assetId: "/assets/covers/atlas-of-living-wonders-v2.png",
+      url: "/assets/covers/shelf/atlas-of-living-wonders-v2.webp",
+    });
+    lease.release();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("single-flights, caches, and releases a shelf preview for a local cover", async () => {
+    const records = installAssetDatabase();
+    const id = "asset:02345678-1234-4234-8234-123456789abc";
+    const source = new Blob([new Uint8Array(32)], { type: "image/png" });
+    const preview = new Blob([new Uint8Array(8)], { type: "image/webp" });
+    records.set(id, { id, name: "portrait.png", type: source.type, size: source.size, createdAt: "2026-08-31T00:00:00.000Z", blob: source });
+    const close = vi.fn();
+    const decode = vi.fn().mockResolvedValue({ width: 800, height: 1200, close });
+    const drawImage = vi.fn();
+    const convertToBlob = vi.fn().mockResolvedValue(preview);
+    vi.stubGlobal("createImageBitmap", decode);
+    vi.stubGlobal("OffscreenCanvas", class {
+      constructor(public width: number, public height: number) {}
+      getContext() { return { drawImage }; }
+      convertToBlob = convertToBlob;
+    });
+    vi.spyOn(URL, "createObjectURL").mockReturnValueOnce("blob:preview-one").mockReturnValueOnce("blob:preview-two");
+    const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    const [first, second] = await Promise.all([acquireAssetPreviewUrl(id), acquireAssetPreviewUrl(id)]);
+
+    expect(first.url).toBe("blob:preview-one");
+    expect(second.url).toBe(first.url);
+    expect(decode).toHaveBeenCalledOnce();
+    expect(drawImage).toHaveBeenCalledWith(expect.objectContaining({ width: 800, height: 1200 }), 0, 0, 384, 576);
+    expect(convertToBlob).toHaveBeenCalledWith({ type: "image/webp", quality: 0.84 });
+    expect(close).toHaveBeenCalledOnce();
+    expect(records.get(id)).toMatchObject({
+      previewBlob: preview,
+      previewWidth: 384,
+      previewHeight: 576,
+      previewVersion: 1,
+    });
+    first.release();
+    expect(revokeObjectUrl).not.toHaveBeenCalled();
+    second.release();
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:preview-one");
+
+    const cached = await acquireAssetPreviewUrl(id);
+    expect(cached.url).toBe("blob:preview-two");
+    expect(decode).toHaveBeenCalledOnce();
+    cached.release();
+  });
+
+  it("falls back to the original local cover when preview encoding is unavailable", async () => {
+    const records = installAssetDatabase();
+    const id = "asset:12345678-1234-4234-8234-123456789abe";
+    const source = new Blob([new Uint8Array(32)], { type: "image/png" });
+    records.set(id, { id, name: "fallback.png", type: source.type, size: source.size, createdAt: "2026-08-31T00:00:00.000Z", blob: source });
+    vi.stubGlobal("createImageBitmap", vi.fn().mockRejectedValue(new Error("decoder unavailable")));
+    const createObjectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:full-cover-fallback");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    const lease = await acquireAssetPreviewUrl(id);
+
+    expect(lease.url).toBe("blob:full-cover-fallback");
+    expect(createObjectUrl).toHaveBeenCalledWith(source);
+    expect(records.get(id)).not.toHaveProperty("previewBlob");
+    lease.release();
+  });
+
   it("single-flights concurrent URL leases and revokes after the last release", async () => {
     const records = installAssetDatabase();
     const id = "asset:12345678-1234-4234-8234-123456789abc";
@@ -262,6 +337,10 @@ describe("asset store blob access", () => {
       size: blob.size,
       createdAt: "2026-08-28T00:00:00.000Z",
       blob,
+      previewBlob: new Blob([new Uint8Array(1)], { type: "image/webp" }),
+      previewWidth: 384,
+      previewHeight: 576,
+      previewVersion: 1,
     });
     imageOptimizer.analyzeStoredImage.mockResolvedValue({ width: 800, height: 900, analysis: cutoutAnalysis });
 
@@ -273,6 +352,7 @@ describe("asset store blob access", () => {
     ]);
     expect(imageOptimizer.analyzeStoredImage).toHaveBeenCalledTimes(1);
     expect(records.get(id)).toMatchObject({ width: 800, height: 900, analysis: cutoutAnalysis });
+    expect((await getAssetMetadata([id]))[0]).not.toHaveProperty("previewBlob");
   });
 
   it("backfills original canvas dimensions for a verified unoptimized legacy asset without decoding it again", async () => {
@@ -310,11 +390,14 @@ describe("asset store blob access", () => {
       size: blob.size,
       createdAt: `2026-08-${String(28 + index).padStart(2, "0")}T00:00:00.000Z`,
       blob,
+      previewBlob: new Blob([new Uint8Array(1)], { type: "image/webp" }),
+      previewVersion: 1,
     }));
 
     const metadata = await listAssetMetadata(2);
 
     expect(metadata.map((asset) => asset.id)).toEqual([ids[2], ids[1]]);
     expect(metadata.every((asset) => !("blob" in asset))).toBe(true);
+    expect(metadata.every((asset) => !("previewBlob" in asset))).toBe(true);
   });
 });

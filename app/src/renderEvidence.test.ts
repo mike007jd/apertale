@@ -96,6 +96,21 @@ describe("render evidence readiness", () => {
     });
   });
 
+  it("uses the bundled shelf derivative while preserving curated cover identity", () => {
+    const book = {
+      id: "atlas",
+      revision: 1,
+      sample: true,
+      coverTextureUrl: "/assets/covers/atlas-of-living-wonders-v2.png",
+    };
+    expect(shelfCoverTarget(book, {})).toEqual({
+      documentId: "atlas",
+      revision: 1,
+      assetId: book.coverTextureUrl,
+      url: "/assets/covers/shelf/atlas-of-living-wonders-v2.webp",
+    });
+  });
+
   it("uses the final clean plate and real foreground layers for fallback rendering", () => {
     const plan = fallbackAssetPlan(spread());
     expect(plan.baseAssetId).toBe("/clean.png");

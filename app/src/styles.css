@@ -114,7 +114,7 @@ summary:focus-visible,
 }
 
 .app-shell::before {
-  background-image: url("/assets/generated/day-background.png");
+  background-image: url("/assets/generated/day-background.webp");
   opacity: 0.58;
 }
 
@@ -125,12 +125,12 @@ summary:focus-visible,
 :root[data-theme="night"] .app-shell::before { opacity: 0; }
 :root[data-theme="night"] .app-shell {
   background-color: #100d0a;
-  background-image: url("/assets/generated/night-background.png");
+  background-image: url("/assets/generated/night-background.webp");
   background-position: center;
   background-size: cover;
 }
 :root[data-theme="night"] .app-shell::after {
-  background-image: url("/assets/generated/night-background.png");
+  background-image: url("/assets/generated/night-background.webp");
   opacity: 1;
 }
 .app-shell::selection { background: var(--accent-soft); }
@@ -222,7 +222,7 @@ summary:focus-visible,
 .library-atmosphere {
   position: absolute;
   inset: 0;
-  background: url("/assets/generated/day-background.png") center / cover;
+  background: url("/assets/generated/day-background.webp") center / cover;
   opacity: .55;
   filter: saturate(.64) brightness(1.08);
   transition: opacity var(--motion-theme) ease, filter var(--motion-theme) ease;
@@ -230,7 +230,7 @@ summary:focus-visible,
 
 :root[data-theme="night"] .book-library { color: #f6eedf; background: #120d09; }
 :root[data-theme="night"] .library-atmosphere {
-  background-image: url("/assets/generated/night-background.png");
+  background-image: url("/assets/generated/night-background.webp");
   opacity: .52;
   filter: saturate(.82) brightness(.62);
 }

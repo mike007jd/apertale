@@ -26,7 +26,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
-import { acquireAssetUrl, releaseAssetUrls, storeLocalImages, type AssetUrlLease } from "./assetStore";
+import { acquireAssetPreviewUrl, acquireAssetUrl, releaseAssetUrls, storeLocalImages, type AssetUrlLease } from "./assetStore";
 import {
   CREATION_LENGTHS,
   CREATION_PHOTO_USES,
@@ -105,7 +105,20 @@ const forcedOpenProgress = (() => {
   const value = Number(raw);
   return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
 })();
-const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: module.ThreeBook })));
+let threeBookRendererPromise: Promise<typeof import("./ThreeBook")> | null = null;
+
+/** Shares one retryable renderer import across React.lazy, idle warmup, and reader intent. */
+export function warmThreeBookRenderer() {
+  if (!threeBookRendererPromise) {
+    threeBookRendererPromise = import("./ThreeBook").catch((error) => {
+      threeBookRendererPromise = null;
+      throw error;
+    });
+  }
+  return threeBookRendererPromise;
+}
+
+const ThreeBook = lazy(() => warmThreeBookRenderer().then((module) => ({ default: module.ThreeBook })));
 
 type OpeningBook = {
   id: string;
@@ -114,6 +127,18 @@ type OpeningBook = {
 
 type LibraryMotion = "idle" | "opening-book" | "closing-book";
 type LibraryTab = "yours" | "explore";
+
+export function readerSceneShouldMount(state: {
+  showLibrary: boolean;
+  showCreateGuide: boolean;
+  openingBookMatchesDocument: boolean;
+  libraryMotion: LibraryMotion;
+}) {
+  return state.showCreateGuide
+    || !state.showLibrary
+    || state.openingBookMatchesDocument
+    || state.libraryMotion !== "idle";
+}
 
 type PendingAuthoringSurface = {
   request: AuthoringSurfaceRequest;
@@ -357,8 +382,15 @@ export function App() {
   const readerSceneKey = readerSceneStructureKey(snapshot, "reader");
   const activeSceneKey = showCreateGuide ? readerSceneStructureKey(workshopSnapshot, "workshop") : readerSceneKey;
   const renderWebGl = webGlAvailable && !sceneFailureMatches(activeSceneKey, failedSceneKey);
-  rendererAvailableRef.current = renderWebGl;
-  const waitingForRenderer = pageTurnWaitState(renderWebGl, pageTurnNavigationKey, pageTurnReadiness);
+  const shouldMountReaderScene = readerSceneShouldMount({
+    showLibrary,
+    showCreateGuide,
+    openingBookMatchesDocument: openingBook?.id === snapshot.document.id,
+    libraryMotion,
+  });
+  const readerRendererAvailable = shouldMountReaderScene && renderWebGl;
+  rendererAvailableRef.current = readerRendererAvailable;
+  const waitingForRenderer = pageTurnWaitState(readerRendererAvailable, pageTurnNavigationKey, pageTurnReadiness);
   waitingForRendererRef.current = waitingForRenderer;
 
   /**
@@ -509,7 +541,7 @@ export function App() {
     for (const [bookId, assetId] of plannedAssets) {
       const retained = coverAssetLeases.current.get(bookId);
       if (retained?.assetId === assetId) continue;
-      void acquireAssetUrl(assetId).then((lease) => {
+      void acquireAssetPreviewUrl(assetId).then((lease) => {
         if (canceled) {
           lease.release();
           return;
@@ -629,14 +661,14 @@ export function App() {
   /**
    * Prewarm exactly what the next screen needs, and only after a reader shows
    * intent (hover, focus, or the click that starts the cover transition). The
-   * root shelf never reaches this, so Three.js, spreads, cutouts, and the Night
-   * background stay off the cold path.
+   * idle shelf warmup may already have cached the renderer code, but spreads,
+   * cutouts, and their Blob URLs stay behind this explicit reader intent.
    */
   const prewarmReader = useCallback((bookId: string) => {
     const info = bookEngine.getPrewarmMedia(bookId);
     const prewarmKey = `${bookId}:${info?.spreadId ?? ""}:${info?.mediaRef ?? ""}`;
     if (lastPrewarm.current?.key === prewarmKey) return lastPrewarm.current.entry;
-    const renderer: Promise<unknown> = import("./ThreeBook")
+    const renderer: Promise<unknown> = warmThreeBookRenderer()
       .catch(() => recordDiagnostic("book:prewarm-renderer-failed", { documentId: bookId }));
     const media: Promise<unknown> = info?.mediaRef
       ? acquireAssetUrl(info.mediaRef)
@@ -660,6 +692,30 @@ export function App() {
     lastPrewarm.current = { key: prewarmKey, entry };
     return entry;
   }, []);
+
+  useEffect(() => {
+    if (!showLibrary || libraryMotion !== "idle" || showCreateGuide || snapshot.session.preview) return undefined;
+    let idleHandle: number | null = null;
+    let usedIdleCallback = false;
+    const timer = window.setTimeout(() => {
+      const warmRenderer = () => {
+        idleHandle = null;
+        void warmThreeBookRenderer()
+          .then(() => recordDiagnostic("book:renderer-idle-prewarmed", {}))
+          .catch(() => recordDiagnostic("book:prewarm-renderer-failed", {}));
+      };
+      if ("requestIdleCallback" in window) {
+        usedIdleCallback = true;
+        idleHandle = window.requestIdleCallback(warmRenderer, { timeout: 1000 });
+      } else {
+        warmRenderer();
+      }
+    }, 2000);
+    return () => {
+      window.clearTimeout(timer);
+      if (usedIdleCallback && idleHandle !== null) window.cancelIdleCallback(idleHandle);
+    };
+  }, [libraryMotion, showCreateGuide, showLibrary, snapshot.session.preview]);
 
   /** Stages only move forward, so a late signal can never rewind the message. */
   const advanceLoadStage = useCallback((next: LoadStage) => {
@@ -1559,7 +1615,7 @@ export function App() {
                     <span className="library-cover-frame">
                       <img
                         key={`${book.id}:${book.revision}:${book.coverAssetId ?? book.coverTextureUrl}:${resolvedCoverAsset(book, resolvedCoverUrls)?.url ?? "unresolved"}`}
-                        src={resolvedCoverAsset(book, resolvedCoverUrls)?.url ?? book.coverTextureUrl}
+                        src={shelfCoverTarget(book, resolvedCoverUrls)?.url ?? "/assets/generated/day-background.webp"}
                         alt={`${book.title} cover`}
                         loading={index < 4 ? "eager" : "lazy"}
                         decoding="async"
@@ -1619,7 +1675,7 @@ export function App() {
         aria-busy={!showCreateGuide && stageIsLoading}
         aria-label={showCreateGuide ? "Blank three-dimensional book workshop" : `${spread.title}. Spread ${snapshot.session.currentSpreadIndex + 1} of ${snapshot.document.spreads.length}`}
       >
-        {renderWebGl ? (
+        {shouldMountReaderScene && (renderWebGl ? (
           <Suspense fallback={showCreateGuide
             ? <div className="fallback-book workshop-blank-fallback is-loading" />
             : <div className="fallback-book is-loading"><img src={spread.textureUrl} alt="" /></div>}>
@@ -1670,7 +1726,7 @@ export function App() {
             onUnavailable={handleBookUnavailable}
             onRendered={handleReaderRendered}
           />
-        )}
+        ))}
 
         {stageIsLoading && !showLibrary && !showCreateGuide && <BookLoadingFeedback title={openingBook?.title ?? snapshot.document.title} placement="stage" stage={loadStage} reducedMotion={reducedMotion} />}
 
