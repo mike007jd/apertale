@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { pathToFileURL } from "node:url";
 import { readFileSync } from "node:fs";
 
 const localManifest = JSON.parse(readFileSync(new URL("../site-manifest.json", import.meta.url), "utf8"));
@@ -113,8 +112,7 @@ export async function verifyDeployment(value, fetchImpl = fetch) {
   };
 }
 
-const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
-if (import.meta.url === invokedPath) {
+if (import.meta.main) {
   const target = process.argv[2];
   if (!target) {
     console.error("Usage: npm run verify:deployment -- https://your-public-site.example/");
