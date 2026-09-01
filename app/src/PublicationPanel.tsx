@@ -5,14 +5,12 @@ import {
   Copy,
   LinkSimple,
   Prohibit,
-  ShieldWarning,
   SpinnerGap,
-  Trash,
   UploadSimple,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { deletePublication, getPublicationRecord, publishDocument, revokePublication } from "./publishingClient";
+import { getPublicationRecord, publishDocument, revokePublication } from "./publishingClient";
 import type { PublicationProgress, PublicationRecord } from "./publishingClient";
 import { recordDiagnostic } from "./diagnostics";
 import { listStoredPublishedAssetIds } from "./projectArtifact";
@@ -20,7 +18,7 @@ import { groupQualityBlockers } from "./qualityContract";
 import type { QualityGateState } from "./qualityContract";
 import type { DocumentState } from "./types";
 
-type Busy = "publishing" | "revoking" | "deleting" | null;
+type Busy = "publishing" | "revoking" | null;
 
 type Props = {
   document: DocumentState;
@@ -123,7 +121,6 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const card = useRef<HTMLDialogElement | null>(null);
   const mountedDocumentId = useRef<string | null>(documentState.id);
 
@@ -200,7 +197,7 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
     const node = card.current;
     if (!node || node.contains(globalThis.document.activeElement)) return;
     node.querySelector<HTMLButtonElement>("header button")?.focus();
-  }, [busy, record?.status, confirmingDelete]);
+  }, [busy, record?.status]);
 
   const publish = useCallback(() => {
     if (record?.status !== "publishing" && !qualityGate.report?.publishAllowed) return;
@@ -212,16 +209,6 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
     if (!record) return;
     void run("revoking", () => revokePublication(record.documentId), "Apertale could not revoke this link.");
   }, [record, run]);
-
-  const remove = useCallback(() => {
-    if (!record) return;
-    void run("deleting", async () => {
-      await deletePublication(record.documentId);
-      return null;
-    }, "Apertale could not delete this publication.").then((result) => {
-      if (result?.applied && result.record === null) onClose(record.documentId);
-    });
-  }, [onClose, record, run]);
 
   /**
    * Success is claimed only after the clipboard write actually resolves. A
@@ -345,20 +332,6 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
 
           {error && <p className="publication-notice is-error" role="alert"><WarningCircle size={16} weight="fill" /><span>{error}</span></p>}
 
-          <ul className="publication-disclosures">
-            <li>
-              <ShieldWarning size={16} weight="fill" />
-              <span><strong>Public link</strong>Anyone with it can view.</span>
-            </li>
-            <li>
-              <ShieldWarning size={16} weight="fill" />
-              <span><strong>This browser</strong>Keep it to revoke or delete.</span>
-            </li>
-            <li>
-              <ShieldWarning size={16} weight="fill" />
-              <span><strong>Your photos</strong>Share only with permission.</span>
-            </li>
-          </ul>
         </div>
 
         <footer className="publication-actions">
@@ -376,24 +349,6 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
             </button>
           )}
 
-          {record && !confirmingDelete && (
-            <button className="publication-danger" onClick={() => setConfirmingDelete(true)} disabled={Boolean(busy)}>
-              <Trash size={17} /> Delete permanently
-            </button>
-          )}
-
-          {record && confirmingDelete && (
-            <div className="publication-confirm" role="alertdialog" aria-label="Confirm permanent delete">
-              <p><strong>Delete this publication?</strong> Removes the link, uploaded images, and server record. This cannot be undone.</p>
-              <div>
-                <button className="publication-secondary" onClick={() => setConfirmingDelete(false)} disabled={Boolean(busy)}>Keep it</button>
-                <button className="publication-danger" onClick={remove} disabled={Boolean(busy)}>
-                  {busy === "deleting" ? <SpinnerGap size={17} weight="bold" className="is-spinning" /> : <Trash size={17} weight="fill" />}
-                  {busy === "deleting" ? "Deleting" : "Delete forever"}
-                </button>
-              </div>
-            </div>
-          )}
         </footer>
       </dialog>
     </section>

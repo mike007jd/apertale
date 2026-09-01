@@ -27,6 +27,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
+import { deleteBookEverywhere } from "./bookLifecycle";
 import { acquireAssetPreviewUrl, acquireAssetUrl, releaseAssetUrls, storeLocalImages, type AssetUrlLease } from "./assetStore";
 import {
   CREATION_LENGTHS,
@@ -80,7 +81,7 @@ import {
 } from "./interaction";
 import { canTurnPage, createPageTurnSession, pageTurnNavDisabled, pageTurnWaitState, type TurnDirection, type TurnReadiness, type TurnWaitState } from "./pageTurn";
 import { PublicationPanel, commitPublicationRecordIfCurrent, publicationLauncherPresentation, publicationRecordForDocument } from "./PublicationPanel";
-import { getPublicationRecord } from "./publishingClient";
+import { deletePublication, getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
 import { MAX_BOOK_UPLOADED_ASSETS } from "./qualityContract";
 import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
@@ -134,7 +135,7 @@ type OpeningBook = {
 type LibraryMotion = "idle" | "opening-book" | "closing-book";
 type LibraryTab = "yours" | "explore";
 type PendingDestructiveAction =
-  | { kind: "delete-book"; book: { id: string; title: string }; busy: boolean; error: string | null }
+  | { kind: "delete-book"; book: { id: string; title: string }; hasPublication: boolean; busy: boolean; error: string | null }
   | { kind: "reset-sample"; busy: boolean; error: string | null };
 
 function measureWorkspaceMotionOrigin(element: HTMLElement | null): WorkspaceMotionOrigin {
@@ -279,7 +280,6 @@ export function App() {
   const [libraryMotion, setLibraryMotion] = useState<LibraryMotion>("idle");
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("yours");
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null);
-  const [libraryDeleteNotice, setLibraryDeleteNotice] = useState<string | null>(null);
   const [pendingDestructiveAction, setPendingDestructiveAction] = useState<PendingDestructiveAction | null>(null);
   const [creationNavigation, dispatchCreationNavigation] = useReducer(
     reduceCreationNavigation,
@@ -506,12 +506,9 @@ export function App() {
   }, [reducedMotion]);
 
   useEffect(() => () => openCleanup.current?.(), []);
-  const library = useMemo(() => bookEngine.getLibrary(), [snapshot.document.id, snapshot.document.revision]);
+  const library = bookEngine.getLibrary();
   const activeLibraryBook = library.books.find((book) => book.id === library.activeBookId);
-  const { personal: personalBooks, curated: curatedBooks, tabbed: libraryTabbed } = useMemo(
-    () => partitionLibraryBooks(library.books),
-    [library],
-  );
+  const { personal: personalBooks, curated: curatedBooks, tabbed: libraryTabbed } = partitionLibraryBooks(library.books);
   // With nothing personal yet there is no second section to offer, so Explore
   // is shown directly rather than parking the reader on an empty tab.
   const activeLibraryTab: LibraryTab = libraryTabbed ? libraryTab : "explore";
@@ -1608,13 +1605,8 @@ export function App() {
 
   const deleteBookFromLibrary = (book: { id: string; title: string }, opener: HTMLElement) => {
     if (libraryBusy) return;
-    setLibraryDeleteNotice(null);
-    if (getPublicationRecord(book.id)) {
-      setLibraryDeleteNotice(`“${book.title}” has a publication. Open it, choose Publish & share, and delete the publication before removing the local book.`);
-      return;
-    }
     destructiveActionOpener.current = opener;
-    setPendingDestructiveAction({ kind: "delete-book", book, busy: false, error: null });
+    setPendingDestructiveAction({ kind: "delete-book", book, hasPublication: Boolean(getPublicationRecord(book.id)), busy: false, error: null });
   };
 
   const runDestructiveAction = async () => {
@@ -1646,7 +1638,14 @@ export function App() {
 
     setDeletingBookId(action.book.id);
     try {
-      const result = await bookEngine.removeBookCoordinated(action.book.id);
+      const hasPublication = Boolean(getPublicationRecord(action.book.id));
+      const result = await deleteBookEverywhere(
+        action.book.id,
+        hasPublication,
+        deletePublication,
+        (documentId) => bookEngine.removeBookCoordinated(documentId),
+      );
+      handlePublicationRecordChange(action.book.id, getPublicationRecord(action.book.id));
       if (!result.ok) {
         setPendingDestructiveAction((current) => current?.kind === "delete-book" && current.book.id === action.book.id
           ? { ...current, busy: false, error: result.summary }
@@ -1659,12 +1658,14 @@ export function App() {
         delete next[action.book.id];
         return next;
       });
-      setLibraryDeleteNotice(null);
       destructiveActionOpener.current = null;
       setPendingDestructiveAction(null);
       announce(`${action.book.title} deleted from Your books.`);
+      setLibraryTab("yours");
+      settleLibraryToShelf();
       window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>("#library-shelf")?.focus(), 0);
     } catch (error) {
+      handlePublicationRecordChange(action.book.id, getPublicationRecord(action.book.id));
       setPendingDestructiveAction((current) => current?.kind === "delete-book" && current.book.id === action.book.id
         ? { ...current, busy: false, error: error instanceof Error ? error.message : "Apertale could not delete this book." }
         : current);
@@ -1841,12 +1842,12 @@ export function App() {
                         {deletingBookId === book.id
                           ? <SpinnerGap size={17} weight="bold" className="is-spinning" />
                           : <Trash size={17} weight="bold" />}
+                        <span>Delete</span>
                       </button>
                     )}
                   </div>
                 ))}
               </div>
-              {libraryDeleteNotice && <p className="library-delete-notice" role="status">{libraryDeleteNotice}</p>}
             </div>
             <p className="demo-disclosure">Curated samples use OpenAI-generated illustration. Create your own in Codex.</p>
             {openingBook && <BookLoadingFeedback title={openingBook.title} placement="library" stage={loadStage} reducedMotion={reducedMotion} />}
@@ -2075,20 +2076,31 @@ export function App() {
           <div className="bottom-left-actions">
             <button className="outline-button" onClick={() => setShowOutline(!showOutline)} aria-expanded={showOutline}>Story</button>
             {isCreatorBook && (
-              <button
-                className={`publish-button ${publicationLauncher.state === "shared" ? "is-live" : ""}`}
-                onClick={openPublication}
-                aria-haspopup="dialog"
-              >
-                {publicationLauncher.state === "shared"
-                  ? <LinkSimple size={17} weight="bold" />
-                  : publicationLauncher.state === "checking"
-                    ? <SpinnerGap size={17} weight="bold" className="is-spinning" />
-                    : publicationLauncher.state === "attention"
-                      ? <WarningCircle size={17} weight="fill" />
-                      : <UploadSimple size={17} weight="bold" />}
-                <span>{publicationLauncher.label}</span>
-              </button>
+              <>
+                <button
+                  className={`publish-button ${publicationLauncher.state === "shared" ? "is-live" : ""}`}
+                  onClick={openPublication}
+                  aria-haspopup="dialog"
+                >
+                  {publicationLauncher.state === "shared"
+                    ? <LinkSimple size={17} weight="bold" />
+                    : publicationLauncher.state === "checking"
+                      ? <SpinnerGap size={17} weight="bold" className="is-spinning" />
+                      : publicationLauncher.state === "attention"
+                        ? <WarningCircle size={17} weight="fill" />
+                        : <UploadSimple size={17} weight="bold" />}
+                  <span>{publicationLauncher.label}</span>
+                </button>
+                <button
+                  className="publish-button is-danger"
+                  onClick={(event) => deleteBookFromLibrary(snapshot.document, event.currentTarget)}
+                  aria-label={`Delete ${snapshot.document.title}`}
+                  aria-haspopup="dialog"
+                >
+                  <Trash size={17} weight="bold" />
+                  <span>Delete</span>
+                </button>
+              </>
             )}
           </div>
           <button className="agent-prompt" data-creation-opener onClick={openCodexGuide} aria-label="Create your own">
@@ -2357,20 +2369,18 @@ export function App() {
             closeDestructiveAction();
           }}
         >
-          <header>
-            <span><WarningCircle size={16} weight="fill" /> Confirm action</span>
-          </header>
           <div className="publication-body">
-            <p className="publication-status is-revoked"><i aria-hidden="true" />Cannot be undone</p>
             <h2 id="destructive-action-title">
               {pendingDestructiveAction.kind === "delete-book"
                 ? `Delete “${pendingDestructiveAction.book.title}”?`
-                : "Restore the original sample?"}
+                : "Restore original sample?"}
             </h2>
             <span className="publication-lede" id="destructive-action-description">
               {pendingDestructiveAction.kind === "delete-book"
-                ? "This removes the saved book from this browser."
-                : "Your local edits to this sample will be replaced."}
+                ? pendingDestructiveAction.hasPublication
+                  ? "This removes the saved book, its public link, and its uploaded copy. This cannot be undone."
+                  : "This removes the saved book from this browser. This cannot be undone."
+                : "This replaces your local edits with the original sample."}
             </span>
             {pendingDestructiveAction.error && (
               <p className="publication-notice is-error" role="alert">
@@ -2391,7 +2401,7 @@ export function App() {
                     ? <Trash size={17} weight="fill" />
                     : <ArrowCounterClockwise size={17} weight="bold" />}
                 {pendingDestructiveAction.kind === "delete-book"
-                  ? pendingDestructiveAction.busy ? "Deleting" : "Delete forever"
+                  ? pendingDestructiveAction.busy ? "Deleting" : "Delete book"
                   : pendingDestructiveAction.busy ? "Restoring" : "Restore sample"}
               </button>
             </div>

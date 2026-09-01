@@ -621,45 +621,31 @@ summary:focus-visible,
 :root[data-theme="night"] .library-cover-frame img { box-shadow: var(--elev-book); }
 
 .library-delete-button {
-  position: absolute;
-  top: 9px;
-  right: 9px;
-  z-index: 3;
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border: 1px solid rgba(255, 255, 255, .64);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: max-content;
+  min-height: 40px;
+  margin: 6px auto 0;
+  border: 1px solid transparent;
   border-radius: var(--shape-circle);
-  padding: 0;
-  color: #fff;
-  background: rgba(32, 23, 18, .78);
-  box-shadow: var(--elev-1);
+  padding: 0 12px;
+  color: var(--muted);
+  background: transparent;
   cursor: pointer;
-  transition: color var(--motion-feedback) var(--ease-info), background var(--motion-feedback) var(--ease-info), transform var(--motion-feedback) var(--ease-info);
+  font-size: var(--text-caption);
+  font-weight: 700;
 }
 
 .library-delete-button:hover:not(:disabled),
 .library-delete-button:focus-visible {
-  color: #fff;
-  background: #b54638;
-  transform: scale(1.06);
+  border-color: rgba(181, 70, 56, .28);
+  color: #b54638;
+  background: rgba(181, 70, 56, .08);
 }
 
 .library-delete-button:disabled { cursor: wait; opacity: .62; }
-
-.library-delete-notice {
-  width: min(100%, 720px);
-  margin: var(--space-2) auto 0;
-  border: 1px solid rgba(181, 70, 56, .34);
-  border-radius: var(--radius-m);
-  padding: 10px 13px;
-  color: var(--ink);
-  background: rgba(181, 70, 56, .08);
-  font-size: var(--text-caption);
-  line-height: 1.45;
-  text-align: center;
-}
 
 .library-card-copy { display: grid; gap: var(--space-1); min-width: 0; }
 .library-card-copy small { overflow: hidden; color: var(--accent); font-size: var(--text-caption); font-weight: var(--weight-strong); letter-spacing: var(--track-caps); text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
@@ -1356,7 +1342,7 @@ summary:focus-visible,
   background: linear-gradient(90deg, rgba(12, 9, 7, .18), rgba(12, 9, 7, 0) 56%, rgba(12, 9, 7, .7));
 }
 
-.workshop-ui { position: absolute; inset: 0; }
+.workshop-ui { position: absolute; inset: 0; width: 100%; height: 100%; }
 
 .workshop-topbar {
   position: absolute;
@@ -2343,7 +2329,10 @@ summary:focus-visible,
 
 .publish-button:hover { border-color: var(--accent); color: var(--accent); }
 .publish-button.is-live { border-color: color-mix(in srgb, #47a879 62%, var(--line)); color: #2f7f57; }
+.publish-button.is-danger { color: #b54638; }
+.publish-button.is-danger:hover { border-color: rgba(181, 70, 56, .48); color: #b54638; background: rgba(181, 70, 56, .08); }
 :root[data-theme="night"] .publish-button.is-live { color: #86d3ac; }
+:root[data-theme="night"] .publish-button.is-danger { color: #f0968a; }
 
 .publication-overlay {
   position: fixed;
@@ -2360,8 +2349,12 @@ summary:focus-visible,
 }
 
 .publication-card {
-  width: min(468px, calc(100vw - 32px));
+  position: fixed;
+  inset: 0;
+  width: min(420px, calc(100vw - 32px));
+  height: max-content;
   max-height: calc(100dvh - 48px);
+  margin: auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2414,7 +2407,7 @@ summary:focus-visible,
 .publication-body h2 {
   margin: 0;
   font-family: "Iowan Old Style", Baskerville, Georgia, serif;
-  font-size: var(--text-display-s);
+  font-size: var(--text-title);
   font-weight: 650;
   line-height: 1.02;
 }
@@ -2561,22 +2554,13 @@ summary:focus-visible,
 
 .publication-progress-track i { display: block; height: 100%; border-radius: var(--radius-pill); background: var(--accent); transition: width var(--motion-state) var(--ease-info); }
 
-.publication-disclosures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 18px 0 0; padding: 14px 0 0; border-top: 1px solid var(--line); list-style: none; }
-.publication-disclosures li { display: grid; grid-template-columns: 18px 1fr; align-items: start; gap: 7px; min-width: 0; color: var(--muted); font-size: var(--text-caption); line-height: 1.35; }
-.publication-disclosures svg { margin-top: 1px; color: var(--accent); }
-.publication-disclosures strong { display: block; margin-bottom: 2px; color: var(--ink); font-weight: 700; }
-
 .publication-actions { display: grid; gap: 9px; padding: 16px 24px 20px; border-top: 1px solid var(--line); background: #fff3e9; }
 :root[data-theme="night"] .publication-actions { background: #33261f; }
-.publication-confirm { display: grid; gap: 11px; border: 1px solid rgba(181, 70, 56, .4); border-radius: var(--radius-m); padding: 13px 14px; background: rgba(181, 70, 56, .07); }
-.publication-confirm p { margin: 0; color: var(--muted); font-size: var(--text-caption); line-height: 1.45; }
-.publication-confirm strong { display: block; margin-bottom: 4px; color: var(--ink); font-size: var(--text-body); }
-.publication-confirm > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 .destructive-action-card {
   position: fixed;
   inset: 0;
-  width: min(468px, calc(100vw - 32px));
+  width: min(420px, calc(100vw - 32px));
   height: max-content;
   margin: auto;
 }
@@ -2593,7 +2577,8 @@ summary:focus-visible,
   .publication-overlay { padding: 16px; }
   .publication-body { padding: 18px 20px 14px; }
   .publication-actions { padding: 14px 20px 18px; }
-  .publication-disclosures { grid-template-columns: 1fr; gap: 7px; }
+  .publish-button.is-danger { width: 48px; padding-inline: 0; }
+  .publish-button.is-danger > span { display: none; }
 }
 
 /* Hidden on desktop: the surface below belongs to the mobile portrait score. */

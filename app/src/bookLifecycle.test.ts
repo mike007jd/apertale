@@ -3,6 +3,7 @@ import {
   bookLifecycleLockManager,
   bookLifecycleLockName,
   BOOK_LIBRARY_STORAGE_KEY,
+  deleteBookEverywhere,
   storedLibraryDocumentMatches,
 } from "./bookLifecycle";
 import type { DocumentState } from "./types";
@@ -47,5 +48,38 @@ describe("book lifecycle coordination", () => {
     expect(storedLibraryDocumentMatches({ ...documentState, revision: 4 })).toBe(false);
     localStorage.removeItem(BOOK_LIBRARY_STORAGE_KEY);
     expect(storedLibraryDocumentMatches(documentState)).toBe(false);
+  });
+
+  it("deletes a publication before its local book", async () => {
+    const calls: string[] = [];
+    await expect(deleteBookEverywhere(
+      documentState.id,
+      true,
+      async () => { calls.push("publication"); },
+      async () => { calls.push("book"); return "deleted"; },
+    )).resolves.toBe("deleted");
+    expect(calls).toEqual(["publication", "book"]);
+  });
+
+  it("keeps the local book when publication deletion fails", async () => {
+    const calls: string[] = [];
+    await expect(deleteBookEverywhere(
+      documentState.id,
+      true,
+      async () => { calls.push("publication"); throw new Error("offline"); },
+      async () => { calls.push("book"); },
+    )).rejects.toThrow("offline");
+    expect(calls).toEqual(["publication"]);
+  });
+
+  it("deletes an unpublished local book directly", async () => {
+    const calls: string[] = [];
+    await deleteBookEverywhere(
+      documentState.id,
+      false,
+      async () => { calls.push("publication"); },
+      async () => { calls.push("book"); },
+    );
+    expect(calls).toEqual(["book"]);
   });
 });
