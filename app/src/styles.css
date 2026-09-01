@@ -81,7 +81,7 @@ button:hover:not(:disabled),
 button:active:not(:disabled),
 [role="button"]:active:not([aria-disabled="true"]) {
   scale: .965;
-  transition-duration: 60ms;
+  transition-duration: var(--motion-press);
 }
 
 button:disabled,
@@ -111,7 +111,7 @@ summary:focus-visible,
   height: 100%;
   isolation: isolate;
   background: #f4f0e8;
-  transition: color var(--motion-theme) ease, background-color var(--motion-theme) ease;
+  transition: color var(--motion-theme) var(--ease-info), background-color var(--motion-theme) var(--ease-info);
 }
 
 .app-shell::before,
@@ -122,7 +122,7 @@ summary:focus-visible,
   z-index: -2;
   background-position: center;
   background-size: cover;
-  transition: opacity var(--motion-theme) ease;
+  transition: opacity var(--motion-theme) var(--ease-info);
 }
 
 .app-shell::before {
@@ -310,7 +310,7 @@ summary:focus-visible,
   background: url("/assets/generated/day-background.webp") center / cover;
   opacity: .55;
   filter: saturate(.64) brightness(1.08);
-  transition: opacity var(--motion-theme) ease, filter var(--motion-theme) ease;
+  transition: opacity var(--motion-theme) var(--ease-info), filter var(--motion-theme) var(--ease-info);
 }
 
 :root[data-theme="night"] .book-library { color: #f6eedf; background: #120d09; }
@@ -455,8 +455,6 @@ summary:focus-visible,
   align-self: center;
   padding: 4px;
   border-radius: var(--radius-pill);
-  background: var(--surface-strong);
-  box-shadow: var(--elev-2);
   pointer-events: auto;
 }
 
@@ -470,16 +468,11 @@ summary:focus-visible,
   padding: 0 15px;
   color: var(--muted);
   font-size: var(--text-body);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
   letter-spacing: -.005em;
   white-space: nowrap;
   background: transparent;
   cursor: pointer;
-  transition:
-    color var(--motion-feedback) var(--ease-info),
-    background-color var(--motion-feedback) var(--ease-info),
-    box-shadow var(--motion-feedback) var(--ease-info),
-    transform 90ms ease-out;
 }
 
 .library-tabs button:disabled { cursor: wait; }
@@ -487,12 +480,12 @@ summary:focus-visible,
 .library-tabs button.is-active {
   color: var(--ink);
   background: var(--surface-strong);
-  box-shadow: var(--elev-1);
+  box-shadow: var(--ring-inset-accent);
 }
 
 .library-tab-count {
   font-size: var(--text-caption);
-  font-weight: 700;
+  font-weight: var(--weight-text);
   font-variant-numeric: tabular-nums;
   opacity: .55;
 }
@@ -542,7 +535,7 @@ summary:focus-visible,
   scroll-margin-block: var(--space-6) var(--space-5);
   transform: translateY(var(--book-shift, 0)) rotate(var(--book-rotation, 0deg));
   transform-origin: 50% 100%;
-  transition: transform 260ms cubic-bezier(.2, .8, .2, 1), filter 260ms ease;
+  transition: transform var(--motion-state) var(--ease-object), filter var(--motion-state) var(--ease-info);
 }
 
 .library-card {
@@ -605,7 +598,7 @@ summary:focus-visible,
 }
 
 .library-opening-badge svg,
-.book-loading-icon svg { animation: book-loading-spin 900ms linear infinite; }
+.book-loading-icon svg { animation: book-loading-spin var(--motion-spin) linear infinite; }
 
 .book-loading-feedback {
   position: absolute;
@@ -679,7 +672,7 @@ summary:focus-visible,
   object-fit: cover;
   border-radius: var(--shape-cover);
   box-shadow: var(--elev-book);
-  transition: box-shadow 260ms ease;
+  transition: box-shadow var(--motion-state) var(--ease-info);
 }
 
 .library-card-shell:hover .library-cover-frame img,
@@ -746,6 +739,7 @@ summary:focus-visible,
 
 /* Resting on the paper: chrome that belongs to the page itself. */
 .theme-switch,
+.library-tabs,
 .preview-button,
 .outline-button,
 .page-arrow,
@@ -804,11 +798,6 @@ summary:focus-visible,
   color: var(--ink-3);
   background: transparent;
   cursor: pointer;
-  transition:
-    color var(--motion-feedback) var(--ease-info),
-    background-color var(--motion-feedback) var(--ease-info),
-    box-shadow var(--motion-feedback) var(--ease-info),
-    transform 90ms ease-out;
 }
 
 .theme-switch button.is-active { color: var(--ink); }
@@ -822,7 +811,7 @@ summary:focus-visible,
   z-index: 0;
   border-radius: var(--radius-pill);
   background: var(--surface-strong);
-  box-shadow: var(--elev-1);
+  box-shadow: var(--ring-inset-accent);
 }
 
 .theme-switch .switch-label {
@@ -974,7 +963,7 @@ summary:focus-visible,
   border-radius: var(--shape-circle);
   transform: translateY(-50%);
   cursor: pointer;
-  transition: transform 160ms ease, opacity 160ms ease;
+  transition: transform var(--motion-feedback) var(--ease-object), opacity var(--motion-feedback) var(--ease-info);
 }
 
 .page-arrow:hover:not(:disabled) { transform: translateY(-50%) scale(1.06); }
@@ -1297,7 +1286,7 @@ summary:focus-visible,
   cursor: pointer;
 }
 
-.is-spinning { animation: book-loading-spin 850ms linear infinite; }
+.is-spinning { animation: book-loading-spin var(--motion-spin) linear infinite; }
 
 /* Status is a line of type with a dot, not a bordered pill around a line of
    type with a dot. */
@@ -2087,7 +2076,7 @@ summary:focus-visible,
   background: transparent;
   cursor: pointer;
   text-align: left;
-  transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+  transition: transform var(--motion-feedback) var(--ease-object);
 }
 
 .element-rail button:hover,
@@ -2118,7 +2107,7 @@ summary:focus-visible,
   transform: translateX(-50%);
   color: var(--muted);
   font-size: var(--text-body);
-  animation: action-in 200ms ease-out both;
+  animation: action-in var(--motion-state) var(--ease-info) both;
 }
 
 .reveal-card {
@@ -2130,7 +2119,7 @@ summary:focus-visible,
   overflow: auto;
   border-radius: var(--radius-l);
   padding: 22px 22px 18px;
-  animation: reveal-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: reveal-in var(--motion-reveal) var(--ease-object) both;
 }
 
 /* The card opens on the page opposite the element so the object stays visible. */
@@ -2780,7 +2769,6 @@ summary:focus-visible,
     color: var(--ink);
     background: var(--surface);
     cursor: pointer;
-    transition: transform 90ms ease-out, border-color var(--motion-feedback) ease;
   }
 
   .reader-sheet-controls button:active:not(:disabled) { border-color: var(--accent); }

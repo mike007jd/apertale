@@ -78,12 +78,14 @@
   --elev-accent-press: 0 5px 12px color-mix(in srgb, var(--accent) 22%, transparent);
 
   /* — motion —————————————————————————————————— */
+  --motion-press: 60ms;
   --motion-feedback: 120ms;
   --motion-state: 220ms;
   --motion-theme: 240ms;
   --motion-reveal: 320ms;
   --motion-book: 1100ms;
   --motion-navigation: 760ms;
+  --motion-spin: 900ms;
   --ease-object: cubic-bezier(.22, 1, .36, 1);
   --ease-info: cubic-bezier(.2, .8, .2, 1);
   --ease-navigation: cubic-bezier(.22, .72, .16, 1);
