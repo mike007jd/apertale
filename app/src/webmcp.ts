@@ -1257,7 +1257,7 @@ export function registerWebMcpTools(
         name: SITE_TOOL.requestImageHandoff,
         title: "Request an image handoff",
         description:
-          "Ask the reader to hand off source photos or finished book artwork. Opens the matching image drawer with your reason, then resolves with browser-local asset ids and accepted/rejected/failed counts. A mixed batch returns partial and leaves the drawer open for replacements. Source photos join the next creation brief; book art only joins the reusable asset registry. The browser requires the reader's own click to choose files.",
+          "Ask the reader to hand off source photos or finished book artwork. Opens the matching image drawer with your reason, then resolves with browser-local asset ids and accepted/rejected/failed counts. A mixed batch returns partial and leaves the drawer open for replacements. Source photos join the next creation brief; book art only joins the reusable asset registry. The browser requires one reader gesture: book art accepts one folder choice; source photos accept files or paste.",
         inputSchema: {
           type: "object",
           properties: {

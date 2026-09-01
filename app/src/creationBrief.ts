@@ -175,7 +175,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "- If running quality review and no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and one evidence item with scope: \"book\" and locator: \"creationBrief.sourceAssets\", explaining that no personal source material exists. When any spread declares one, record per-spread evidence.",
     "- Quality review is optional and advisory. Apply useful patches at most once; never delay or block a user-requested share.",
     "- Verify all spreads against the completion gates.",
-    "You cannot send image bytes through a tool call, and I have to click the file picker myself. Call request_image_handoff with the correct assetUse and the page will open the matching drawer with your reason printed in it. Do not pretend a media transfer succeeded.",
+    "You cannot send image bytes through a tool call. Call request_image_handoff with the correct assetUse and the page will open the matching drawer with your reason printed in it. For book art I choose the finished-art folder once; source photos accept files or paste. Do not pretend a media transfer succeeded.",
     "",
     "Completion gates:",
     renderGates(gates),

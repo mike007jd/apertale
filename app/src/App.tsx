@@ -2114,7 +2114,11 @@ export function App() {
           <div className="workshop-atmosphere" aria-hidden="true" />
           <dialog className="workshop-ui" ref={createGuideCard} aria-labelledby="codex-guide-title">
             <header className="workshop-topbar">
-              <button className="workshop-wordmark" onClick={closeCodexGuide}><BookOpenText size={19} /> Apertale</button>
+              <button
+                className="library-button"
+                onClick={() => { setShowLibrary(true); setLibraryMotion("idle"); closeCodexGuide(); }}
+                aria-label="Return to book library"
+              ><Books size={18} /> <span>Books</span></button>
               <button className="workshop-close" autoFocus onClick={closeCodexGuide} aria-label={handoffIsBookArt ? "Close image handoff" : "Close creation workshop"}><X size={20} /></button>
             </header>
 
@@ -2219,14 +2223,14 @@ export function App() {
                         disabled={!pickerReady || assetImporting || pickerAtCapacity}
                       >
                         {!pickerReady || assetImporting ? <SpinnerGap size={15} className="is-spinning" /> : <Plus size={15} weight="bold" />}
-                        <span>{!pickerReady ? "Restoring" : assetImporting ? "Adding" : "Add"}</span>
+                        <span>{!pickerReady ? "Restoring" : assetImporting ? "Adding" : handoffIsBookArt ? "Choose folder" : "Add"}</span>
                       </button>
                     </div>
 
                     {handoffIsBookArt || workshopAssets.length === 0 ? (
                       <button type="button" className="workshop-photo-empty" onClick={() => fileInput.current?.click()} disabled={!pickerReady || assetImporting}>
                         <ImageSquare size={22} />
-                        <span>{handoffIsBookArt ? "Add the generated cover, spreads, clean plates, or cutouts" : "Add photos in the order they should appear"}</span>
+                        <span>{handoffIsBookArt ? "Choose the finished-art folder once" : "Add photos in the order they should appear"}</span>
                       </button>
                     ) : (
                       <ol className="workshop-photo-strip">
@@ -2251,7 +2255,7 @@ export function App() {
                       </ol>
                     )}
 
-                    <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" disabled={!pickerReady || assetImporting} onChange={(event) => { void importWorkshopPhotos(event.currentTarget.files); event.currentTarget.value = ""; }} />
+                    <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,image/webp" {...(handoffIsBookArt ? { webkitdirectory: "" } : {})} disabled={!pickerReady || assetImporting} onChange={(event) => { void importWorkshopPhotos(event.currentTarget.files); event.currentTarget.value = ""; }} />
 
                     {workshopImportError && (
                       <p className="workshop-import-error" role="alert">
