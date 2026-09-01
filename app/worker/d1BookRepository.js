@@ -51,7 +51,7 @@ export class D1BookRepository {
       windowStart,
       maxBooksPerWindow,
     ).run();
-    if (changes(result) === 1) return "created";
+    if (changes(result) > 0) return "created";
     const existing = await this.findBook(id);
     if (existing) return existing.manage_token_hash === manageTokenHash ? "existing" : "conflict";
     const deleted = await this.findDeletedBook(id);
@@ -270,7 +270,7 @@ export class D1BookRepository {
       manageTokenHash,
       shareTokenHash,
     ).run();
-    return changes(result) === 1;
+    return changes(result) > 0;
   }
 
   async completeRevocation({ id, manageTokenHash, shareTokenHash, now }) {
@@ -310,7 +310,7 @@ export class D1BookRepository {
     WHERE id = ?
       AND manage_token_hash = ?
       AND status IN ('draft', 'published', 'revoked', 'deleting')`).bind(now, id, manageTokenHash).run();
-    return changes(result) === 1;
+    return changes(result) > 0;
   }
 
   async listAssetsForRevocation({ id, manageTokenHash, shareTokenHash }) {
@@ -347,6 +347,6 @@ export class D1BookRepository {
         )`).bind(id, id, manageTokenHash).run();
     const result = await this.db.prepare(`DELETE FROM living_books
       WHERE id = ? AND manage_token_hash = ? AND status = 'deleting'`).bind(id, manageTokenHash).run();
-    return changes(result) === 1;
+    return changes(result) > 0;
   }
 }

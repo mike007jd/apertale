@@ -16,8 +16,10 @@ class NodeD1Statement {
   }
 
   async run() {
-    const result = this.database.prepare(this.sql).run(...this.values);
-    return { meta: { changes: Number(result.changes) } };
+    const before = this.database.prepare("SELECT total_changes() AS count").get().count;
+    this.database.prepare(this.sql).run(...this.values);
+    const after = this.database.prepare("SELECT total_changes() AS count").get().count;
+    return { meta: { changes: Number(after - before) } };
   }
 
   async first() {
