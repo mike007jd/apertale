@@ -4,6 +4,7 @@ import {
   MAX_BOOK_PUBLISHABLE_ASSETS,
   assessCreationReadiness,
   creationBriefSourceAssetIds,
+  interactionLayerTarget,
   supportedBookType,
   type CreationBookType,
   type CreationBriefPayload,
@@ -258,6 +259,7 @@ function evaluateCreationArtifactQuality(
   creationBrief?: CreationBriefPayload | null,
 ): QualityCheckResult[] {
   const checks: QualityCheckResult[] = [];
+  const interactionTarget = interactionLayerTarget(creationBrief?.interactionDensity);
   const elementIds = documentState.spreads.flatMap((spread) => spread.elements.map((element) => element.id));
   const globallyUniqueElementIds = new Set(elementIds).size === elementIds.length;
   checks.push(evidence(
@@ -307,22 +309,28 @@ function evaluateCreationArtifactQuality(
     ));
 
     const foreground = spread.elements.filter((element) => !isProceduralElement(element));
-    const layered = Boolean(cleanPlate) && foreground.length >= 2 && foreground.length <= 4;
+    const layered = Boolean(cleanPlate)
+      && foreground.length >= interactionTarget.minimum
+      && foreground.length <= interactionTarget.maximum;
     checks.push(evidence(
       "layered-spread-contract",
       layered ? "pass" : "blocker",
       layered
         ? `Spread ${spread.order + 1} has one final base and ${foreground.length} foreground layers.`
-        : `Spread ${spread.order + 1} needs one final base and 2–4 foreground layers; found ${foreground.length}.`,
+        : `Spread ${spread.order + 1} needs one final base and ${interactionTarget.count} interactive layers for ${interactionTarget.label.toLowerCase()} density; found ${foreground.length}.`,
       [spreadLocation],
-      layered ? undefined : "Prepare the generated clean plate or preserved-photo final base and add 2–4 true-alpha foreground or interactive layers.",
+      layered ? undefined : `Prepare the final base and ${interactionTarget.count} true-alpha interactive layers.`,
     ));
 
-    const hasInteraction = meaningfulInteraction(documentState, spread.id);
+    const hasInteraction = interactionTarget.minimum === 0 || meaningfulInteraction(documentState, spread.id);
     checks.push(evidence(
       "meaningful-interaction",
       hasInteraction ? "pass" : "blocker",
-      hasInteraction ? `Spread ${spread.order + 1} has an authored interaction.` : `Spread ${spread.order + 1} has no authored interaction.`,
+      interactionTarget.minimum === 0
+        ? `Spread ${spread.order + 1} intentionally has no interactive layers.`
+        : hasInteraction
+          ? `Spread ${spread.order + 1} has an authored interaction.`
+          : `Spread ${spread.order + 1} has no authored interaction.`,
       [spreadLocation],
       hasInteraction ? undefined : "Add a spread-specific hover, focus response, or click reveal.",
     ));

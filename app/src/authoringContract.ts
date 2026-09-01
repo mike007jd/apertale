@@ -16,6 +16,21 @@ export const MAX_BOOK_PUBLISHABLE_ASSETS = 50 as const;
 export const CREATION_BOOK_TYPES = ["illustrated-storybook", "photo-led-keepsake", "preserved-photo-album"] as const;
 export type CreationBookType = (typeof CREATION_BOOK_TYPES)[number];
 
+export const INTERACTION_DENSITIES = [
+  { id: "none", label: "None", count: "0", minimum: 0, maximum: 0 },
+  { id: "low", label: "Low", count: "1", minimum: 1, maximum: 1 },
+  { id: "balanced", label: "Balanced", count: "2–3", minimum: 2, maximum: 3 },
+  { id: "rich", label: "Rich", count: "3–6", minimum: 3, maximum: 6 },
+] as const;
+export type InteractionDensity = (typeof INTERACTION_DENSITIES)[number]["id"];
+
+const LEGACY_INTERACTION_TARGET = { id: "legacy", label: "Standard", count: "2–4", minimum: 2, maximum: 4 } as const;
+
+/** Missing values belong to existing books created under the original 2–4 layer contract. */
+export function interactionLayerTarget(value: unknown) {
+  return INTERACTION_DENSITIES.find((target) => target.id === value) ?? LEGACY_INTERACTION_TARGET;
+}
+
 export const PHOTO_SOURCE_USES = ["reference-and-compose", "preserve-original-layout"] as const;
 type PhotoSourceUse = (typeof PHOTO_SOURCE_USES)[number];
 
@@ -39,6 +54,7 @@ export type CreationBriefPayload = {
   audience?: string;
   spreadCount?: number;
   visualDirection?: string;
+  interactionDensity?: InteractionDensity;
   sourceAssets?: readonly CreationSourceAsset[];
   photoPolicy?: CreationPhotoPolicy;
 };
@@ -137,6 +153,9 @@ export function assessCreationReadiness(
   if (!briefString(input?.visualDirection)) {
     addBlocker("visualDirection", "A visual direction is required before generating a coherent asset set.", "What visual style should the book use?");
   }
+  if (input?.interactionDensity !== undefined && !INTERACTION_DENSITIES.some((target) => target.id === input.interactionDensity)) {
+    addBlocker("interactionDensity", "Choose none, low, balanced, or rich interaction density.");
+  }
 
   const requestedSpreadCount = Number.isInteger(input?.spreadCount) ? Number(input?.spreadCount) : null;
   const expectedSpreadCount = Number.isInteger(options.expectedSpreadCount) ? Number(options.expectedSpreadCount) : null;
@@ -202,6 +221,7 @@ export function assessCreationReadiness(
     addBlocker("photoPolicy.allowColorCorrection", "Colour correction needs an explicit boundary for preserved originals.", "May I make gentle colour and exposure corrections, or leave the photos untouched?");
   }
 
+  const interactionTarget = interactionLayerTarget(input?.interactionDensity);
   const suggestedSpreadCount = isPhotoBook
     ? Math.max(4, Math.min(8, assets.length || 6))
     : 6;
@@ -226,7 +246,7 @@ export function assessCreationReadiness(
         bookType === "preserved-photo-album"
           ? "1 source-true layout composed for the approximately 1.62:1 stage per spread; 0 generated interiors"
           : "1 complete generated clean plate composed for the approximately 1.62:1 stage per spread",
-        "2–4 native-alpha foreground or interactive subjects per spread",
+        `${interactionTarget.count} native-alpha interactive ${interactionTarget.maximum === 1 ? "subject" : "subjects"} per spread`,
         `at most ${MAX_BOOK_PUBLISHABLE_ASSETS} distinct browser-local reader-visible cover, final-base, layer, and frame assets across the book; author-only source provenance is private and excluded unless it is also rendered`,
         ...(isPhotoBook ? [`${recommendedSourceCount} ordered source photo${recommendedSourceCount === 1 ? "" : "s"} with identity preserved`] : []),
       ],
@@ -337,7 +357,7 @@ export function creationCompletionGates(input: AuthoringCountSpec): CreationComp
     {
       id: "layout",
       token: "[GATE:layout]",
-      requirement: `Only after the complete asset plan and final cover/spread asset set exist, hand off every exact asset, deduplicate the reader-visible cover, resolved final bases, rendered layers, and frames and stay at or below ${MAX_BOOK_PUBLISHABLE_ASSETS}, then call manage_book create once with the verified cover plus every spread's background, 2–4 foreground layers, and meaningful interaction. Source-photo provenance remains private unless selected for rendering. Verify all spreads after the atomic create; use set-cover or patch only for later critique fixes.`,
+      requirement: `Only after the complete asset plan and final cover/spread asset set exist, hand off every exact asset, deduplicate the reader-visible cover, resolved final bases, rendered layers, and frames and stay at or below ${MAX_BOOK_PUBLISHABLE_ASSETS}, then call manage_book create once with the verified cover plus every spread's background and the foreground-layer count selected in creationBrief.interactionDensity. None uses 0, low 1, balanced 2–3, and rich lets Codex choose 3–6. Source-photo provenance remains private unless selected for rendering. Verify all spreads after the atomic create; use set-cover or patch only for later critique fixes.`,
     },
     {
       id: "evidence",
@@ -400,11 +420,11 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "layout",
-      rule: `Hand off the complete final asset set, keep the deduplicated reader-visible cover, resolved final bases, rendered layers, and frames at or below ${MAX_BOOK_PUBLISHABLE_ASSETS}, then atomically create with coverAssetId and every spread's background and 2–4 layers. Author-only source provenance stays private unless selected for rendering. Never create a text-only shell or overwrite a curated sample; set-cover and patch are later critique fixes only.`,
+      rule: `Hand off the complete final asset set, keep the deduplicated reader-visible cover, resolved final bases, rendered layers, and frames at or below ${MAX_BOOK_PUBLISHABLE_ASSETS}, then atomically create with coverAssetId, every spread's background, and the layer count selected in creationBrief.interactionDensity. Author-only source provenance stays private unless selected for rendering. Never create a text-only shell or overwrite a curated sample; set-cover and patch are later critique fixes only.`,
     },
     {
       id: "interaction",
-      rule: "Every non-guide spread requires a spread-specific hover/focus/click interaction.",
+      rule: "Honor creationBrief.interactionDensity: none uses no floating layers, low uses 1, balanced uses 2–3, and rich lets Codex choose 3–6. Every included layer needs a story-relevant, spread-specific hover/focus/click interaction; none is exempt.",
     },
     {
       id: "cutouts",
@@ -459,7 +479,7 @@ export function buildAuthoringGuide() {
     gates,
     hardGates,
     interaction: {
-      required: "Every non-guide spread needs a spread-specific hover/focus/click response.",
+      required: "Follow creationBrief.interactionDensity; every included layer needs a spread-specific hover/focus/click response, while none is exempt.",
       hover: HOVER_RESPONSES,
       focus: FOCUS_RESPONSES,
       reveal: REVEAL_KINDS,
@@ -484,7 +504,7 @@ export function buildAuthoringGuide() {
     verify: [
       "content: title, agreed spread count, and complete story arc",
       "asset counts: generated cover 1 plus one generated illustration or preserved original-photo layout per spread, according to book type",
-      "interaction: spread-specific hover/focus/click on every non-guide spread",
+      "interaction: selected density is respected; every included layer has a spread-specific hover/focus/click response",
       "undo evidence: active revision plus undo tokens for the last reversible changes",
       "optional quality: actual cover/spread frames inspected after set_presentation(surface: \"shelf\") for the cover and set_presentation(surface: \"reader\", spreadId) for every spread; normal navigation and screenshots do not record revision-bound evidence; at most two advisory critique rounds",
       "photo fidelity: without artwork.personalSourceAssetId, record outcome: \"note\" with one evidence item whose scope is \"book\" and locator is \"creationBrief.sourceAssets\"; with any personalSourceAssetId, record per-spread evidence",

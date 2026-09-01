@@ -7,6 +7,7 @@ import {
   type StoredAssetMetadata,
 } from "./assetStore";
 import { buildCreationBrief, type AuthoringMode, type CreationBrief } from "./creationBrief";
+import { INTERACTION_DENSITIES, type InteractionDensity } from "./authoringContract";
 
 export const CREATION_STYLES = ["Paper collage", "Watercolor", "Cinematic", "Surprise me"] as const;
 export const CREATION_LENGTHS = [4, 6, 8, 10, 12] as const;
@@ -19,6 +20,7 @@ export const CREATION_PHOTO_USES = [
   { id: "illustrated-keepsake", label: "Illustrated keepsake" },
   { id: "preserve-originals", label: "Keep original photos" },
 ] as const;
+export const CREATION_INTERACTION_DENSITIES = INTERACTION_DENSITIES;
 type CreationPhotoUse = (typeof CREATION_PHOTO_USES)[number]["id"];
 
 /** One source image per spread covers a full book without overloading the horizontal strip. */
@@ -32,6 +34,7 @@ type CreationWorkshopState = {
   mode: AuthoringMode;
   spreadCount: number;
   visualDirection: CreationStyle;
+  interactionDensity: InteractionDensity;
   photoUse: CreationPhotoUse | null;
   assets: WorkshopAsset[];
 };
@@ -40,6 +43,7 @@ export const INITIAL_CREATION_WORKSHOP: CreationWorkshopState = {
   mode: "idea",
   spreadCount: 6,
   visualDirection: "Paper collage",
+  interactionDensity: "balanced",
   photoUse: null,
   assets: [],
 };
@@ -48,6 +52,7 @@ type CreationWorkshopAction =
   | { type: "set-mode"; mode: AuthoringMode }
   | { type: "set-spread-count"; spreadCount: number }
   | { type: "set-visual-direction"; visualDirection: CreationStyle }
+  | { type: "set-interaction-density"; interactionDensity: InteractionDensity }
   | { type: "set-photo-use"; photoUse: CreationPhotoUse }
   | { type: "restore-assets"; assets: WorkshopAsset[] }
   | { type: "append-assets"; assets: WorkshopAsset[] }
@@ -84,6 +89,7 @@ export function reduceCreationWorkshop(
       : state;
   }
   if (action.type === "set-visual-direction") return { ...state, visualDirection: action.visualDirection };
+  if (action.type === "set-interaction-density") return { ...state, interactionDensity: action.interactionDensity };
   if (action.type === "set-photo-use") return { ...state, photoUse: action.photoUse };
   if (action.type === "restore-assets") {
     return { ...state, assets: uniqueAssets([...action.assets, ...state.assets]) };
@@ -200,6 +206,7 @@ export function buildCreationWorkshopBrief(state: CreationWorkshopState): Creati
     mode: state.mode,
     spreadCount: state.spreadCount,
     visualDirection: state.visualDirection,
+    interactionDensity: state.interactionDensity,
     sourceAssets: (state.mode === "idea" ? [] : state.assets).map(({ id, name }) => ({ id, name })),
     validatedSourceAssetIds: state.assets.map(({ id }) => id),
     bookType,

@@ -1378,7 +1378,7 @@ describe("WebMCP registration", () => {
     expect(statuses).toEqual([false]);
   });
 
-  it("keeps a superseded handoff isolated from the older execution signal", async () => {
+  it("returns immediately so Computer Use can fill the opened file picker", async () => {
     const tools: WebMCP.ModelContextTool[] = [];
     vi.stubGlobal("document", {
       modelContext: {
@@ -1388,32 +1388,26 @@ describe("WebMCP registration", () => {
     const cleanup = registerWebMcpTools(() => undefined);
     await vi.waitFor(() => expect(tools).toHaveLength(SITE_TOOL_NAMES.length));
     const handoff = tools.find((tool) => tool.name === "request_image_handoff")!;
-    const firstController = new AbortController();
-    const secondController = new AbortController();
-
     await expect(handoff.execute({ requestId: "handoff-missing-use", reason: "Missing purpose." }, {
       signal: new AbortController().signal,
     })).rejects.toThrow("assetUse");
 
-    const first = handoff.execute({ requestId: "handoff-a", assetUse: "source-photo", reason: "First request." }, { signal: firstController.signal });
-    await vi.waitFor(() => expect(currentImageHandoff()?.requestId).toBe("handoff-a"));
-    const second = handoff.execute({ requestId: "handoff-b", assetUse: "book-art", reason: "Second request." }, { signal: secondController.signal });
-    expect(currentImageHandoff()?.requestId).toBe("handoff-b");
-
-    // Abort A before its superseded execution has unwound and removed the old
-    // listener. This is the exact window that used to let A cancel B.
-    const firstCancellation = expect(first).rejects.toMatchObject({ name: "AbortError" });
-    expect(completeImageHandoff("handoff-a", { assetIds: ["asset:from-a"], rejected: 0, failed: 0 })).toBeNull();
-    firstController.abort();
-    await Promise.resolve();
-    expect(currentImageHandoff()?.requestId).toBe("handoff-b");
-    await firstCancellation;
-    expect(completeImageHandoff("handoff-b", { assetIds: ["asset:for-b"], rejected: 0, failed: 0 })).toMatchObject({ status: "provided" });
-    await expect(second).resolves.toContain("asset:for-b");
+    const result = JSON.parse(String(await handoff.execute({
+      requestId: "handoff-computer-use",
+      assetUse: "book-art",
+      reason: "Add the finished book art.",
+    }, { signal: new AbortController().signal }))) as Record<string, unknown>;
+    expect(result).toMatchObject({
+      status: "awaiting-files",
+      assetUse: "book-art",
+      next: expect.stringMatching(/Computer Use.*refresh get_project_context/i),
+      fallback: expect.stringMatching(/reader.*once/i),
+    });
+    expect(currentImageHandoff()?.requestId).toBe("handoff-computer-use");
     cleanup();
   });
 
-  it("returns explicit counts when an image handoff is only partially accepted", async () => {
+  it("keeps the drawer available when an imported image batch is only partially accepted", async () => {
     const tools: WebMCP.ModelContextTool[] = [];
     vi.stubGlobal("document", {
       modelContext: {
@@ -1423,7 +1417,7 @@ describe("WebMCP registration", () => {
     const cleanup = registerWebMcpTools(() => undefined);
     await vi.waitFor(() => expect(tools).toHaveLength(SITE_TOOL_NAMES.length));
     const handoff = tools.find((tool) => tool.name === "request_image_handoff")!;
-    const pending = handoff.execute({
+    await handoff.execute({
       requestId: "handoff-partial",
       assetUse: "book-art",
       reason: "Add a cover and two spreads.",
@@ -1435,14 +1429,6 @@ describe("WebMCP registration", () => {
       rejected: 1,
       failed: 1,
     })).toMatchObject({ status: "partial" });
-    const result = JSON.parse(String(await pending)) as Record<string, unknown>;
-    expect(result).toMatchObject({
-      status: "partial",
-      assetIds: ["asset:cover"],
-      counts: { accepted: 1, rejected: 1, failed: 1 },
-      reason: expect.stringContaining("Only the returned asset ids are available"),
-      note: expect.stringContaining("drawer remains open"),
-    });
     cleanup();
   });
 
@@ -1456,13 +1442,12 @@ describe("WebMCP registration", () => {
     const cleanup = registerWebMcpTools(() => undefined);
     await vi.waitFor(() => expect(tools).toHaveLength(SITE_TOOL_NAMES.length));
     const handoff = tools.find((tool) => tool.name === "request_image_handoff")!;
-    const pending = handoff.execute({ requestId: "handoff-cleanup", assetUse: "source-photo", reason: "Wait for a photo." }, {
+    await handoff.execute({ requestId: "handoff-cleanup", assetUse: "source-photo", reason: "Wait for a photo." }, {
       signal: new AbortController().signal,
     });
     await vi.waitFor(() => expect(currentImageHandoff()?.requestId).toBe("handoff-cleanup"));
 
     cleanup();
-    await expect(pending).resolves.toContain("cancelled before the reader chose");
     expect(currentImageHandoff()).toBeNull();
   });
 });

@@ -6,8 +6,10 @@ import {
   assessCreationReadiness,
   creationCompletionGates,
   creationReportRequirements,
+  interactionLayerTarget,
   type CreationBookType,
   type CreationCompletionGate,
+  type InteractionDensity,
   type CreationPhotoPolicy,
   type CreationReadinessAssessment,
   type CreationSourceAsset,
@@ -25,6 +27,7 @@ export type CreationBriefInput = {
   mode: AuthoringMode;
   spreadCount: number;
   visualDirection: string;
+  interactionDensity?: InteractionDensity;
   sourceAssets: readonly CreationSourceAsset[];
   bookType?: CreationBookType;
   premise?: string;
@@ -89,6 +92,9 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
   }
   const visualDirection = typeof input.visualDirection === "string" ? input.visualDirection.trim() : "";
   if (!visualDirection || visualDirection.length > 120) invalid("visualDirection must be a non-empty string no longer than 120 characters.");
+  const interactionDensity = input.interactionDensity ?? "balanced";
+  const interactionTarget = interactionLayerTarget(interactionDensity);
+  if (interactionTarget.id === "legacy") invalid("interactionDensity must be none, low, balanced, or rich.");
   const sourceAssets = normalizeSourceAssets(input.sourceAssets);
   const bookType = input.bookType ?? (input.mode === "idea" ? "illustrated-storybook" : undefined);
   const generatedCoverCount = GENERATED_COVER_COUNT;
@@ -115,6 +121,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     audience: input.audience,
     spreadCount: input.spreadCount,
     visualDirection,
+    interactionDensity,
     sourceAssets,
     photoPolicy: input.photoPolicy,
   }, {
@@ -127,6 +134,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     `Authoring mode: ${input.mode}.`,
     `Book type: ${bookType ?? "not chosen yet"}.`,
     `Use exactly ${input.spreadCount} spreads and the visual direction: ${visualDirection}.`,
+    `Interactive layer density: ${interactionDensity} (${interactionTarget.count} per spread). Pass interactionDensity: "${interactionDensity}" unchanged in every structured creation brief.`,
     bookType === "preserved-photo-album"
       ? "Preserve each original photo's layout and identity. Use only authorised crop or colour correction, with restrained captions and overlays."
       : photoLed
@@ -167,7 +175,9 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "- Refresh get_project_context(detail: \"assets\") and continue only when every cover, background, composite, cutout, and frame id in the plan exists in the browser registry.",
     `- Deduplicate the browser-local reader-visible cover, resolved final base per spread, rendered layers, and frame ids. At most ${MAX_BOOK_PUBLISHABLE_ASSETS} may be uploaded. Author-only source and personal-photo provenance stays private and is excluded unless it is also selected for rendering.`,
     "- Create one new independent book with a single manage_book create call; never overwrite a curated sample. Pass the same creationBrief, coverAssetId, and every complete spread manifest.",
-    "- Each spread manifest must include background.sourceAssetId, background.cleanPlateAssetId, the book-type separation, personalSourceAssetId when declared, and 2–4 native-alpha layers with a meaningful hover/focus/click interaction.",
+    interactionTarget.maximum === 0
+      ? "- Each spread manifest must use an empty layers array. Do not invent floating cutouts or interactions when interactionDensity is none."
+      : `- Each spread manifest must include background.sourceAssetId, background.cleanPlateAssetId, the book-type separation, personalSourceAssetId when declared, and ${interactionTarget.count} native-alpha interactive ${interactionTarget.maximum === 1 ? "layer" : "layers"}. Use only story-relevant subjects; do not pad the count with guessed decoration.`,
     "- A text-only shell is not a book. If any prepared asset is missing, do not create; finish or hand off the asset set first. Use set-cover and apply_scene_patch only for later critique fixes.",
     "- Use the same requestId only for an exact unchanged request. If a successful mutation returns presentation status pending, retry the same requestId to confirm the frame. After any ok:false correction or payload or asset change, use a fresh requestId.",
     "- Present the cover with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId). Normal navigation and screenshots are observation only and do not record revision-bound evidence.",
@@ -175,7 +185,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "- If running quality review and no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and one evidence item with scope: \"book\" and locator: \"creationBrief.sourceAssets\", explaining that no personal source material exists. When any spread declares one, record per-spread evidence.",
     "- Quality review is optional and advisory. Apply useful patches at most once; never delay or block a user-requested share.",
     "- Verify all spreads against the completion gates.",
-    "You cannot send image bytes through a tool call. Call request_image_handoff with the correct assetUse and the page will open the matching drawer with your reason printed in it. For book art I choose the finished-art folder once; source photos accept files or paste. Do not pretend a media transfer succeeded.",
+    "You cannot send image bytes through a JSON tool argument. Call request_image_handoff with the correct assetUse; it opens the matching drawer and returns immediately. If Computer Use or a browser file chooser is available, select the generated local files yourself, then refresh get_project_context(detail: \"assets\"). Otherwise ask me to choose the finished-art folder once; source photos accept files or paste. Do not pretend a media transfer succeeded.",
     "",
     "Completion gates:",
     renderGates(gates),

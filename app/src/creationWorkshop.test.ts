@@ -145,6 +145,17 @@ describe("creation workshop session", () => {
     expect(buildCreationWorkshopBrief(ideaOnly).sourceAssets).toEqual([]);
   });
 
+  it("defaults to balanced layers and carries an explicit none choice into the brief", () => {
+    expect(INITIAL_CREATION_WORKSHOP.interactionDensity).toBe("balanced");
+    const none = reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
+      type: "set-interaction-density",
+      interactionDensity: "none",
+    });
+    const prompt = buildCreationWorkshopBrief(none).prompt;
+    expect(prompt).toContain("Interactive layer density: none (0 per spread)");
+    expect(prompt).toContain("must use an empty layers array");
+  });
+
   it("maps the user's explicit photo treatment to one consistent book contract", () => {
     const withPhoto = reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
       type: "append-assets",

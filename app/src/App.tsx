@@ -31,6 +31,7 @@ import { deleteBookEverywhere } from "./bookLifecycle";
 import { acquireAssetPreviewUrl, acquireAssetUrl, releaseAssetUrls, storeLocalImages, type AssetUrlLease } from "./assetStore";
 import {
   CREATION_LENGTHS,
+  CREATION_INTERACTION_DENSITIES,
   CREATION_PHOTO_USES,
   CREATION_SOURCES,
   CREATION_STYLES,
@@ -302,6 +303,7 @@ export function App() {
   }));
   const creationSpreadCount = creationWorkshop.spreadCount;
   const creationStyle = creationWorkshop.visualDirection;
+  const creationInteractionDensity = creationWorkshop.interactionDensity;
   const creationSource = creationWorkshop.mode;
   const creationPhotoUse = creationWorkshop.photoUse;
   const workshopAssets = creationWorkshop.assets;
@@ -1430,9 +1432,8 @@ export function App() {
       // art is deliberately registry-only and must never change this mode.
       dispatchCreationWorkshop({ type: "set-mode", mode: "both" });
     }
-    // The picker itself still needs a real user gesture - the browser requires
-    // one and the host cannot automate uploads - so the page gets as far as it
-    // is allowed to and leaves exactly one click.
+    // The page cannot choose a local path itself. Focus the control so host
+    // Computer Use or the reader can make the one file-picker choice.
     window.setTimeout(() => addPhotoButton.current?.focus(), 60);
   }), []);
 
@@ -1555,6 +1556,7 @@ export function App() {
   const pickerReady = handoffIsBookArt || workshopHydrated;
   const pickerAtCapacity = !handoffIsBookArt && workshopAssets.length >= MAX_WORKSHOP_ASSETS;
   const creationBrief = useMemo(() => buildCreationWorkshopBrief(creationWorkshop), [creationWorkshop]);
+  const creationInteractionChoice = CREATION_INTERACTION_DENSITIES.find((choice) => choice.id === creationInteractionDensity)!;
   const briefAssets = creationBrief.sourceAssets;
   const createPrompt = creationBrief.prompt;
   const copied = copiedPrompt === createPrompt;
@@ -1563,7 +1565,7 @@ export function App() {
     const didCopy = await copyPlainText(createPrompt);
     setCopiedPrompt(didCopy ? createPrompt : null);
     setCopyError(!didCopy);
-    recordDiagnostic(didCopy ? "workbench:starter-copied" : "workbench:copy-blocked", { spreads: creationSpreadCount, style: creationStyle, source: creationSource, assets: briefAssets.length });
+    recordDiagnostic(didCopy ? "workbench:starter-copied" : "workbench:copy-blocked", { spreads: creationSpreadCount, style: creationStyle, interactionDensity: creationInteractionDensity, source: creationSource, assets: briefAssets.length });
   };
 
   function closeDestructiveAction() {
@@ -2180,6 +2182,22 @@ export function App() {
                   </div>
                 </fieldset>}
 
+                {!handoffIsBookArt && <fieldset className="workshop-field">
+                  <legend>Interactive layers</legend>
+                  <div className="workshop-segment">
+                    {CREATION_INTERACTION_DENSITIES.map((choice) => (
+                      <button
+                        type="button"
+                        key={choice.id}
+                        className={`workshop-option ${creationInteractionDensity === choice.id ? "is-selected" : ""}`}
+                        onClick={() => dispatchCreationWorkshop({ type: "set-interaction-density", interactionDensity: choice.id })}
+                        aria-pressed={creationInteractionDensity === choice.id}
+                        aria-label={`${choice.label}: ${choice.count} per spread`}
+                      >{choice.label}{choice.id === "low" || choice.id === "balanced" ? ` · ${choice.count}` : ""}</button>
+                    ))}
+                  </div>
+                </fieldset>}
+
                 {/* Photo use sits at the END of the panel, beside the photos
                     it describes. It used to be inserted between Start from and
                     Spreads, so choosing a photo mode shoved everything the
@@ -2274,7 +2292,7 @@ export function App() {
 
               {!handoffIsBookArt && <div className="workshop-actionbar">
                 <p className="workshop-summary">
-                  {creationSpreadCount} spreads · {creationStyle}{briefAssets.length > 0 ? ` · ${briefAssets.length} photo${briefAssets.length === 1 ? "" : "s"}` : ""}
+                  {creationSpreadCount} spreads · {creationStyle} · {creationInteractionChoice.label}{briefAssets.length > 0 ? ` · ${briefAssets.length} photo${briefAssets.length === 1 ? "" : "s"}` : ""}
                 </p>
                 <div className={`workshop-starter-actions ${copied ? "is-followup" : ""}`}>
                   <button

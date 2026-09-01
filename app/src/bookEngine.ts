@@ -7,7 +7,7 @@ import {
   BOOK_LIBRARY_STORAGE_KEY,
 } from "./bookLifecycle";
 import { isStoredAssetId } from "./assetId";
-import { CREATION_READINESS_VERSION, MAX_BOOK_PUBLISHABLE_ASSETS, assessCreationReadiness, type CreationBriefPayload } from "./authoringContract";
+import { CREATION_READINESS_VERSION, MAX_BOOK_PUBLISHABLE_ASSETS, assessCreationReadiness, interactionLayerTarget, type CreationBriefPayload } from "./authoringContract";
 import {
   bookAssetReferenceFindings,
   bookAssetReferenceIssueKey,
@@ -1526,6 +1526,7 @@ export class BookEngine {
     const validatedLocalAssetIds = new Set(command.validatedLocalAssetIds ?? []);
     const validLocalAssetId = (assetId: string) => isStoredAssetId(assetId) && validatedLocalAssetIds.has(assetId);
     const artifactIssues: string[] = [];
+    const interactionTarget = interactionLayerTarget(command.creationBrief.interactionDensity);
     if (!command.coverAssetId || !validLocalAssetId(command.coverAssetId)) {
       artifactIssues.push("The dedicated cover must be a verified browser-local image asset.");
     }
@@ -1575,8 +1576,8 @@ export class BookEngine {
         }
       }
       const layers = spread.layers ?? [];
-      if (layers.length < 2 || layers.length > 4) {
-        artifactIssues.push(`Spread ${spreadNumber} needs 2–4 prepared foreground layers; found ${layers.length}.`);
+      if (layers.length < interactionTarget.minimum || layers.length > interactionTarget.maximum) {
+        artifactIssues.push(`Spread ${spreadNumber} needs ${interactionTarget.count} prepared interactive layers for ${interactionTarget.label.toLowerCase()} density; found ${layers.length}.`);
       }
       if (new Set(layers.map((layer) => layer.id)).size !== layers.length) {
         artifactIssues.push(`Spread ${spreadNumber} foreground layer ids must be unique.`);
@@ -1584,7 +1585,7 @@ export class BookEngine {
       if (nextDocument.spreads[index].elements.length !== layers.length) {
         artifactIssues.push(`Spread ${spreadNumber} contains an invalid or unverified foreground layer.`);
       }
-      if (!layers.some(hasAuthoredInteraction)) {
+      if (interactionTarget.minimum > 0 && !layers.some(hasAuthoredInteraction)) {
         artifactIssues.push(`Spread ${spreadNumber} needs at least one explicit story-relevant interaction.`);
       }
     });

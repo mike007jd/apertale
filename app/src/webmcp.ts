@@ -33,6 +33,7 @@ import {
   AUTHORING_GUIDE_DETAIL,
   CREATION_BOOK_TYPES,
   CREATION_READINESS_VERSION,
+  INTERACTION_DENSITIES,
   MAX_BOOK_PUBLISHABLE_ASSETS,
   PHOTO_SOURCE_USES,
   PROJECT_CONTEXT_DETAILS,
@@ -40,6 +41,7 @@ import {
   assessCreationReadiness,
   buildAuthoringGuide,
   creationBriefSourceAssetIds,
+  interactionLayerTarget,
   type CreationBriefPayload,
 } from "./authoringContract";
 
@@ -368,6 +370,7 @@ const creationBriefSchema = {
     audience: { type: "string", maxLength: 160 },
     spreadCount: { type: "integer", minimum: 1, maximum: 12 },
     visualDirection: { type: "string", maxLength: 160 },
+    interactionDensity: { type: "string", enum: INTERACTION_DENSITIES.map((target) => target.id) },
     sourceAssets: {
       type: "array",
       maxItems: 24,
@@ -646,7 +649,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.manageBook,
         title: "Manage book",
-        description: "Open, atomically create a complete prepared book from the exact brief, adopt-creation-brief for one legacy book, set a cover, begin critique, or record critique. Create requires a verified cover and every spread's final base plus 2–4 layers, including preserved-photo-album layouts. If assets are incomplete, do not mutate or enter the shelf or reader. Critique is optional and never blocks sharing.",
+        description: "Open, atomically create a complete prepared book from the exact brief, adopt-creation-brief for one legacy book, set a cover, begin critique, or record critique. Create requires a verified cover, every spread's final base, and the layer count selected by creationBrief.interactionDensity, including preserved-photo-album layouts. If assets are incomplete, do not mutate or enter the shelf or reader. Critique is optional and never blocks sharing.",
         inputSchema: {
           type: "object",
           properties: {
@@ -668,10 +671,10 @@ export function registerWebMcpTools(
                   background: preparedBackgroundSchema,
                   layers: {
                     type: "array",
-                    minItems: 2,
-                    maxItems: 4,
+                    minItems: 0,
+                    maxItems: 6,
                     items: preparedLayerSchema,
-                    description: "Two to four native-alpha foreground layers; at least one needs an authored interaction.",
+                    description: "Native-alpha interactive layers. Count must match creationBrief.interactionDensity: none 0, low 1, balanced 2–3, rich 3–6.",
                   },
                 },
                 required: ["title", "body", "background", "layers"],
@@ -865,8 +868,9 @@ export function registerWebMcpTools(
               invalid(`spreads[${index}].background requires a supported separation.`);
             }
             const { op: _backgroundOp, ...background } = backgroundOperation;
-            if (!Array.isArray(draft.layers) || draft.layers.length < 2 || draft.layers.length > 4) {
-              invalid(`spreads[${index}].layers must contain 2–4 prepared foreground layers.`);
+            const interactionTarget = interactionLayerTarget(creationBrief?.interactionDensity);
+            if (!Array.isArray(draft.layers) || draft.layers.length < interactionTarget.minimum || draft.layers.length > interactionTarget.maximum) {
+              invalid(`spreads[${index}].layers must contain ${interactionTarget.count} prepared interactive layers for ${interactionTarget.label.toLowerCase()} density.`);
             }
             const layers = draft.layers.map((layer, layerIndex): PreparedBookLayer => {
               if (!layer || typeof layer !== "object" || Array.isArray(layer)) invalid(`spreads[${index}].layers[${layerIndex}] must be an object.`);
@@ -1257,7 +1261,7 @@ export function registerWebMcpTools(
         name: SITE_TOOL.requestImageHandoff,
         title: "Request an image handoff",
         description:
-          "Ask the reader to hand off source photos or finished book artwork. Opens the matching image drawer with your reason, then resolves with browser-local asset ids and accepted/rejected/failed counts. A mixed batch returns partial and leaves the drawer open for replacements. Source photos join the next creation brief; book art only joins the reusable asset registry. The browser requires one reader gesture: book art accepts one folder choice; source photos accept files or paste.",
+          "Open the matching image drawer and return immediately. Continue with Computer Use or the browser file chooser to select local source photos or finished book art, then refresh get_project_context(detail: assets). If host UI control is unavailable, ask the reader to choose once. Source photos join the next creation brief; book art only joins the reusable asset registry.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1279,35 +1283,17 @@ export function registerWebMcpTools(
           const assetUse = requiredString(input, "assetUse");
           if (!IMAGE_HANDOFF_ASSET_USES.includes(assetUse as (typeof IMAGE_HANDOFF_ASSET_USES)[number])) invalid("assetUse is not supported.");
           const reason = boundedString(input, "reason", 220);
-          const signal = options?.signal ?? uncancelledToolSignal;
-          let pendingOutcome = activeImageHandoffs.get(requestId);
-          if (!pendingOutcome) {
-            pendingOutcome = requestImageHandoff({ requestId, assetUse: assetUse as (typeof IMAGE_HANDOFF_ASSET_USES)[number], reason });
-            activeImageHandoffs.set(requestId, pendingOutcome);
-          }
-          // Agent-side cancellation has to reach the drawer, or a cancelled
-          // request would leave it open with nothing listening.
-          const onAbort = () => dismissImageHandoff(requestId, CANCELLED_HANDOFF_REASON);
-          signal.addEventListener("abort", onAbort, { once: true });
-          if (signal.aborted) onAbort();
-          try {
-            const outcome = await pendingOutcome;
-            const result = outcome.status === "dismissed"
-              ? { status: "dismissed", reason: outcome.reason }
-              : {
-                  status: outcome.status,
-                  assetIds: outcome.assetIds,
-                  counts: outcome.counts,
-                  ...(outcome.status === "partial" ? { reason: outcome.reason } : {}),
-                  note: outcome.status === "partial"
-                    ? "Only the returned ids were accepted. The image drawer remains open for replacements; refresh get_project_context(detail: \"assets\") before referencing any ids."
-                    : "Refresh get_project_context(detail: \"assets\") before referencing these ids.",
-                };
-            return remember(requestId, result);
-          } finally {
-            signal.removeEventListener("abort", onAbort);
+          const pendingOutcome = requestImageHandoff({ requestId, assetUse: assetUse as (typeof IMAGE_HANDOFF_ASSET_USES)[number], reason });
+          activeImageHandoffs.set(requestId, pendingOutcome);
+          void pendingOutcome.finally(() => {
             if (activeImageHandoffs.get(requestId) === pendingOutcome) activeImageHandoffs.delete(requestId);
-          }
+          });
+          return remember(requestId, {
+            status: "awaiting-files",
+            assetUse,
+            next: "Use Computer Use or the browser file chooser to select the local files, then refresh get_project_context(detail: \"assets\") before referencing ids.",
+            fallback: "If UI control is unavailable, ask the reader to choose the files or finished-art folder once.",
+          });
         }),
       },
       { signal: controller.signal },

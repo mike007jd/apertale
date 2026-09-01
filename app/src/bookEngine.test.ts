@@ -1531,11 +1531,31 @@ describe("BookEngine document contract", () => {
     expect(engine.getSnapshot().document.revision).toBe(1);
   });
 
+  it("accepts a finished illustrated spread with no floating layers when the brief selects none", () => {
+    const engine = new BookEngine();
+    const prepared = preparedBook([{ id: "quiet-spread", title: "Quiet Spread", body: "The complete illustration stands on its own." }]);
+    prepared.spreads[0].layers = [];
+    const result = engine.dispatch({
+      type: "create-book",
+      requestId: "create-without-floating-layers",
+      expectedDocumentId: engine.getSnapshot().document.id,
+      expectedRevision: 1,
+      documentId: "quiet-illustrated-book",
+      title: "Quiet Illustrated Book",
+      ...prepared,
+      creationBrief: { ...readyStoryBrief(1), interactionDensity: "none" },
+      validatedSourceAssetIds: [],
+    }, "agent");
+
+    expect(result).toMatchObject({ ok: true });
+    expect(engine.getSnapshot().document.spreads[0].elements).toEqual([]);
+  });
+
   it.each([
     {
       name: "only one foreground layer",
       mutate: (command: CreateBookCommand) => { command.spreads[0].layers = command.spreads[0].layers.slice(0, 1); },
-      issue: /2–4 prepared foreground layers/i,
+      issue: /2–4 prepared interactive layers/i,
     },
     {
       name: "no explicit interaction",
