@@ -164,6 +164,7 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("cannot be represented as simply placing uploaded source photos on the right page");
     expect(brief.prompt).toContain("asset:ticket-stub — Ticket stub.jpg");
     expect(brief.prompt).toContain("generated full-spread count 4");
+    expect(brief.prompt).toMatch(/tool inventory.*Computer Use.*work\/final-assets.*drag/i);
   });
 
   it("preserves caller-selected source-asset order and rejects incomplete or remote ids", () => {

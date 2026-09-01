@@ -1378,7 +1378,7 @@ describe("WebMCP registration", () => {
     expect(statuses).toEqual([false]);
   });
 
-  it("returns immediately so Computer Use can fill the opened file picker", async () => {
+  it("returns immediately with automation and drag-drop handoff paths", async () => {
     const tools: WebMCP.ModelContextTool[] = [];
     vi.stubGlobal("document", {
       modelContext: {
@@ -1398,10 +1398,13 @@ describe("WebMCP registration", () => {
       reason: "Add the finished book art.",
     }, { signal: new AbortController().signal }))) as Record<string, unknown>;
     expect(result).toMatchObject({
-      status: "awaiting-files",
+      status: "ready-for-import",
       assetUse: "book-art",
-      next: expect.stringMatching(/Computer Use.*refresh get_project_context/i),
-      fallback: expect.stringMatching(/reader.*once/i),
+      ui: expect.stringMatching(/drag-and-drop target.*open/i),
+      capabilityCheck: expect.stringMatching(/tool inventory.*cannot detect/i),
+      next: expect.stringMatching(/Computer Use.*work\/final-assets/i),
+      fallback: expect.stringMatching(/open.*directory.*drag.*once/i),
+      after: expect.stringMatching(/refresh get_project_context/i),
     });
     expect(currentImageHandoff()?.requestId).toBe("handoff-computer-use");
     cleanup();

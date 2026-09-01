@@ -9,17 +9,13 @@
  * across two or three context switches to become an asset id the Agent could
  * reference.
  *
- * What cannot change is the transport. WebMCP tool arguments cross the agent
- * boundary as a JSON string, so a Blob cannot be passed; and the model never
- * holds the bytes of a photo anyway — an uploaded image reaches it as vision
- * tokens, not as a file it could re-emit. The browser also requires a real user
- * gesture to open a file picker, and the host documents that it cannot automate
- * file uploads. The final click is permanently the reader's.
- *
- * What can change is everything around that click. The Agent opens the drawer,
- * its own sentence is printed inside it, and the tool call stays pending until
- * the reader has chosen — so the asset ids return to the conversation directly
- * and nobody has to go back and say "I uploaded it".
+ * WebMCP arguments are JSON, so image bytes still enter through the browser's
+ * file input or drop target. The tool opens that target and returns immediately;
+ * the calling Agent can then use Computer Use or a browser file chooser without
+ * being blocked by its own WebMCP call. The page cannot inspect the Agent's tool
+ * inventory, so the Agent owns that capability check. When host UI automation
+ * is unavailable, it opens the real asset folder and asks the reader to drag
+ * its files once instead of making them hunt through a hidden work directory.
  */
 
 export const IMAGE_HANDOFF_ASSET_USES = ["source-photo", "book-art"] as const;

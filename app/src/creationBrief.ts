@@ -185,7 +185,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "- If running quality review and no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and one evidence item with scope: \"book\" and locator: \"creationBrief.sourceAssets\", explaining that no personal source material exists. When any spread declares one, record per-spread evidence.",
     "- Quality review is optional and advisory. Apply useful patches at most once; never delay or block a user-requested share.",
     "- Verify all spreads against the completion gates.",
-    "You cannot send image bytes through a JSON tool argument. Call request_image_handoff with the correct assetUse; it opens the matching drawer and returns immediately. If Computer Use or a browser file chooser is available, select the generated local files yourself, then refresh get_project_context(detail: \"assets\"). Otherwise ask me to choose the finished-art folder once; source photos accept files or paste. Do not pretend a media transfer succeeded.",
+    "You cannot send image bytes through a JSON tool argument. Call request_image_handoff with the correct assetUse; it opens the matching drawer and drop target, then returns immediately. Inspect your current tool inventory: if Computer Use or a browser file chooser is available, select the local files yourself. Otherwise open the actual asset directory in my file manager (generated book art is normally in work/final-assets) and ask me to drag its files onto the visible target once. Then refresh get_project_context(detail: \"assets\"). Do not pretend a media transfer succeeded.",
     "",
     "Completion gates:",
     renderGates(gates),

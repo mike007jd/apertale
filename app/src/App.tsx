@@ -1498,8 +1498,8 @@ export function App() {
         recordDiagnostic("workbench:asset-handed-off", { assetId: asset.id, assetUse: requestAtStart?.assetUse ?? "source-photo", originalSize: asset.originalSize ?? asset.size, size: asset.size, optimized: asset.optimized ?? false });
       }
       if (deliveredAssetIds.length > 0) {
-        // The pending tool call resolves with real ids, so the Agent resumes
-        // immediately instead of waiting to be told the upload finished.
+        // The drawer request already returned. Completing it now closes the UI
+        // state while the Agent refreshes the asset registry for the real ids.
         const outcome = handoffRequestId
           ? completeImageHandoff(handoffRequestId, { assetIds: deliveredAssetIds, rejected, failed })
           : null;
@@ -2223,7 +2223,19 @@ export function App() {
                   </fieldset>
                 )}
                 {showImagePicker && (
-                  <section className="workshop-photos" aria-label={handoffIsBookArt ? "Generated book artwork handoff" : "Source images, in book order"}>
+                  <section
+                    className="workshop-photos"
+                    aria-label={handoffIsBookArt ? "Generated book artwork handoff" : "Source images, in book order"}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = pickerReady && !assetImporting && !pickerAtCapacity ? "copy" : "none";
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      if (!pickerReady || assetImporting || pickerAtCapacity) return;
+                      void importWorkshopPhotos(event.dataTransfer.files);
+                    }}
+                  >
                     {/* The Agent's own sentence, printed where the reader acts
                         on it. A request that only exists in the chat pane is
                         what made this step feel disconnected. */}
@@ -2247,8 +2259,8 @@ export function App() {
 
                     {handoffIsBookArt || workshopAssets.length === 0 ? (
                       <button type="button" className="workshop-photo-empty" onClick={() => fileInput.current?.click()} disabled={!pickerReady || assetImporting}>
-                        <ImageSquare size={22} />
-                        <span>{handoffIsBookArt ? "Choose the finished-art folder once" : "Add photos in the order they should appear"}</span>
+                        <UploadSimple size={22} />
+                        <span>{handoffIsBookArt ? "Drop finished art here, or choose its folder" : "Drop photos here, paste, or choose files"}</span>
                       </button>
                     ) : (
                       <ol className="workshop-photo-strip">

@@ -1261,7 +1261,7 @@ export function registerWebMcpTools(
         name: SITE_TOOL.requestImageHandoff,
         title: "Request an image handoff",
         description:
-          "Open the matching image drawer and return immediately. Continue with Computer Use or the browser file chooser to select local source photos or finished book art, then refresh get_project_context(detail: assets). If host UI control is unavailable, ask the reader to choose once. Source photos join the next creation brief; book art only joins the reusable asset registry.",
+          "Open the matching image drawer and drop target, then return immediately. Check your own available tools: use Computer Use or a browser file chooser when present. Otherwise open the local asset folder and ask the reader to drag its files into the page once. Source photos join the next creation brief; book art only joins the reusable asset registry.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1289,10 +1289,17 @@ export function registerWebMcpTools(
             if (activeImageHandoffs.get(requestId) === pendingOutcome) activeImageHandoffs.delete(requestId);
           });
           return remember(requestId, {
-            status: "awaiting-files",
+            status: "ready-for-import",
             assetUse,
-            next: "Use Computer Use or the browser file chooser to select the local files, then refresh get_project_context(detail: \"assets\") before referencing ids.",
-            fallback: "If UI control is unavailable, ask the reader to choose the files or finished-art folder once.",
+            ui: "The matching drawer and drag-and-drop target are open.",
+            capabilityCheck: "Inspect your current tool inventory; the page cannot detect whether Computer Use or a browser file chooser is available.",
+            next: assetUse === "book-art"
+              ? "If Computer Use or a browser file chooser is available, select the generated files from the actual output directory (normally work/final-assets)."
+              : "If Computer Use or a browser file chooser is available, select the requested source photos now.",
+            fallback: assetUse === "book-art"
+              ? "Otherwise open the actual generated-assets directory in the user's file manager and ask the reader to drag its files onto the visible drop target once."
+              : "Otherwise open the source-photo directory in the user's file manager and ask the reader to drag the requested files onto the visible drop target once.",
+            after: "Refresh get_project_context(detail: \"assets\") before referencing asset ids.",
           });
         }),
       },
