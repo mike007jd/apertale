@@ -3,14 +3,7 @@ import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MOTION_PRESETS } from "./types";
 import {
   AUTHORING_GUIDE_DETAIL,
-  AUTHORING_GUIDE_FULL_SPREAD_COUNT,
-  AUTHORING_GUIDE_ID,
-  AUTHORING_GUIDE_PROVENANCE_COUNT,
-  AUTHORING_GUIDE_PRESERVED_SPREAD_COUNT,
-  AUTHORING_GUIDE_SKILL_MIRROR,
-  AUTHORING_GUIDE_VERSION,
   AUTHORING_HARD_GATE_IDS,
-  AUTHORING_LAYOUT_SEQUENCE,
   CREATION_READINESS_VERSION,
   GENERATED_COVER_COUNT,
   MAX_BOOK_PUBLISHABLE_ASSETS,
@@ -28,10 +21,9 @@ import { buildCreationBrief } from "./creationBrief";
 describe("site-native authoring guide contract", () => {
   it("returns a machine-readable quality contract that mirrors the two-phase skill and creation brief", () => {
     const guide = buildAuthoringGuide();
-    expect(guide.id).toBe(AUTHORING_GUIDE_ID);
-    expect(AUTHORING_GUIDE_VERSION).toBe(4);
-    expect(guide.version).toBe(AUTHORING_GUIDE_VERSION);
-    expect(guide.skillMirror).toBe(AUTHORING_GUIDE_SKILL_MIRROR);
+    expect(guide.id).toBe("apertale-authoring-guide");
+    expect(guide.version).toBe(4);
+    expect(guide.skillMirror).toBe("apertale-authoring");
     expect(guide.contract).toBe("two-phase");
     expect(guide.tools).toEqual([...SITE_TOOL_NAMES]);
     expect(PROJECT_CONTEXT_DETAILS).toEqual([
@@ -49,14 +41,14 @@ describe("site-native authoring guide contract", () => {
         id: "layout",
         mutationAllowed: true,
         requiresCompleteAssetSet: true,
-        sequence: [...AUTHORING_LAYOUT_SEQUENCE],
+        sequence: ["handoff", "create", "verify"],
       },
     ]);
     expect(guide.requiredCounts).toEqual({
       generatedCoverCount: GENERATED_COVER_COUNT,
-      generatedFullSpreadCount: AUTHORING_GUIDE_FULL_SPREAD_COUNT,
-      preservedPhotoSpreadCount: AUTHORING_GUIDE_PRESERVED_SPREAD_COUNT,
-      provenanceEntryCount: AUTHORING_GUIDE_PROVENANCE_COUNT,
+      generatedFullSpreadCount: "one per spread for illustrated storybook or photo-led keepsake; 0 for preserved-photo-album",
+      preservedPhotoSpreadCount: "exactly the agreed spread count for preserved-photo-album",
+      provenanceEntryCount: "1 cover + one per spread",
     });
     expect(guide.gates.map((gate) => gate.id)).toEqual([...REQUIRED_GATE_IDS]);
     expect(guide.gates.map((gate) => gate.token)).toEqual(REQUIRED_GATE_IDS.map((id) => `[GATE:${id}]`));

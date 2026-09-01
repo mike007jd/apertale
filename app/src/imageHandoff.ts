@@ -139,11 +139,3 @@ export function dismissImageHandoff(
 ) {
   return settleImageHandoff(requestId, { status: "dismissed", reason });
 }
-
-/** Cancellation from the agent side, through the tool's AbortSignal. */
-export function abortImageHandoff(requestId: string) {
-  return settleImageHandoff(requestId, {
-    status: "dismissed",
-    reason: "The request was cancelled before the reader chose.",
-  });
-}

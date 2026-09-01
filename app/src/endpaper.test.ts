@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { coverBoardMaterials, createCoverEndpaperCanvas, negativeZEndpaperMaterials, paintCoverEndpaper } from "./endpaper";
+import { coverBoardMaterials, createCoverEndpaperCanvas, paintCoverEndpaper } from "./endpaper";
 
 type RecordedContext = CanvasRenderingContext2D & {
   operations: string[];
@@ -42,7 +42,7 @@ describe("cover endpaper", () => {
     const paper = { id: "paper" };
     const endpaper = { id: "endpaper" };
 
-    expect(negativeZEndpaperMaterials(paper, endpaper)).toEqual([
+    expect(coverBoardMaterials(paper, paper, endpaper)).toEqual([
       paper,
       paper,
       paper,

@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { exposeDiagnostics, recordDiagnostic } from "./diagnostics";
 // Scales first, so styles.css can only consume them and never redefine them.
-import "./design/tokens.generated.css";
+import "./design/tokens.css";
 import "./styles.css";
 
 exposeDiagnostics();

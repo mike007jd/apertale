@@ -3,15 +3,12 @@ import { centeredCoverCrop } from "./imageCrop";
 const ENDPAPER_WIDTH = 768;
 const ENDPAPER_HEIGHT = 1034;
 
-/** BoxGeometry orders faces [+x, -x, +y, -y, +z, -z]. */
-export function negativeZEndpaperMaterials<T>(body: T, endpaper: T): [T, T, T, T, T, T] {
-  return [body, body, body, body, body, endpaper];
-}
-
 /**
- * A front board needs the printed cover on the geometry itself. A separate
- * coplanar plane can be culled or clipped while the case swings edge-on,
- * briefly exposing the plain cloth underneath even though the image loaded.
+ * BoxGeometry orders faces [+x, -x, +y, -y, +z, -z]. A front board needs the
+ * printed cover on the geometry itself: a separate coplanar plane can be
+ * culled or clipped while the case swings edge-on, briefly exposing the plain
+ * cloth underneath even though the image loaded. Pass the body as `cover` for
+ * a board with no printed face.
  */
 export function coverBoardMaterials<T>(body: T, cover: T, endpaper: T): [T, T, T, T, T, T] {
   return [body, body, body, body, cover, endpaper];

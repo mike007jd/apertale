@@ -43,20 +43,7 @@ function replaceExtension(name: string, type: string) {
   return `${name.replace(/\.[^.]+$/, "") || "Imported image"}${extension}`;
 }
 
-async function decodeImage(blob: Blob): Promise<DecodedImage> {
-  if ("createImageBitmap" in globalThis) return await createImageBitmap(blob);
-  const url = URL.createObjectURL(blob);
-  try {
-    return await new Promise<HTMLImageElement>((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = () => reject(new TypeError("The selected image could not be decoded."));
-      image.src = url;
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
+const decodeImage = (blob: Blob): Promise<DecodedImage> => createImageBitmap(blob);
 
 function encode(canvas: HTMLCanvasElement, type: "image/png" | "image/jpeg", quality?: number) {
   return new Promise<Blob>((resolve, reject) => {

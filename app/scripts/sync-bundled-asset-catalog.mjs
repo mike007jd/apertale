@@ -8,17 +8,11 @@ const publicRoot = path.join(appRoot, "public");
 const assetRoot = path.join(publicRoot, "assets");
 const outputPath = path.join(appRoot, "worker", "bundledAssetCatalog.json");
 
-function filesUnder(directory) {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const absolute = path.join(directory, entry.name);
-    return entry.isDirectory() ? filesUnder(absolute) : [absolute];
-  });
-}
-
 const catalog = {
   version: 1,
-  assets: filesUnder(assetRoot)
-    .map((absolute) => `/${path.relative(publicRoot, absolute).split(path.sep).join("/")}`)
+  assets: readdirSync(assetRoot, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => `/${path.relative(publicRoot, path.join(entry.parentPath, entry.name)).split(path.sep).join("/")}`)
     .sort(),
 };
 const expected = `${JSON.stringify(catalog, null, 2)}\n`;

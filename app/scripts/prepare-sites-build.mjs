@@ -18,7 +18,7 @@ for (const file of [index, worker, hosting]) {
 mkdirSync(path.join(dist, "server"), { recursive: true });
 mkdirSync(path.join(dist, ".openai"), { recursive: true });
 for (const entry of readdirSync(workerDirectory, { withFileTypes: true })) {
-  if (entry.isFile() && (entry.name.endsWith(".js") || entry.name.endsWith(".json"))) {
+  if (entry.isFile() && entry.name.endsWith(".js")) {
     copyFileSync(path.join(workerDirectory, entry.name), path.join(dist, "server", entry.name));
   }
 }
@@ -30,21 +30,14 @@ for (const moduleName of jsonModules) {
 }
 
 const builtBookShareApi = path.join(dist, "server", "bookShareApi.js");
-const compatibleBookShareApi = jsonModules.reduce(
-  (source, moduleName) => {
-    const attributedImport = `./${moduleName}.json\" with { type: \"json\" }`;
-    const compatibleImport = `./${moduleName}.js\"`;
-    if (source.split(attributedImport).length !== 2) {
-      throw new Error(`Expected exactly one JSON import in built Worker: ${moduleName}`);
-    }
-    const compatibleSource = source.replace(attributedImport, compatibleImport);
-    if (compatibleSource.split(compatibleImport).length !== 2) {
-      throw new Error(`Expected exactly one compatible import in built Worker: ${moduleName}`);
-    }
-    return compatibleSource;
-  },
-  readFileSync(builtBookShareApi, "utf8"),
-);
+let compatibleBookShareApi = readFileSync(builtBookShareApi, "utf8");
+for (const moduleName of jsonModules) {
+  const attributedImport = `./${moduleName}.json" with { type: "json" }`;
+  if (compatibleBookShareApi.split(attributedImport).length !== 2) {
+    throw new Error(`Expected exactly one JSON import in built Worker: ${moduleName}`);
+  }
+  compatibleBookShareApi = compatibleBookShareApi.replace(attributedImport, `./${moduleName}.js"`);
+}
 writeFileSync(builtBookShareApi, compatibleBookShareApi);
 
 copyFileSync(index, appShell);

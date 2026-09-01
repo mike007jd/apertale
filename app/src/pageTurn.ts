@@ -1,5 +1,5 @@
 import { recordDiagnostic } from "./diagnostics";
-import { durationMs } from "./design/tokens.generated";
+import { durationMs } from "./design/tokens";
 import type { TurnState } from "./types";
 
 export type TurnDirection = "forward" | "backward";

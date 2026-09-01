@@ -29,7 +29,7 @@
 import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
 import type { HTMLMotionProps } from "motion/react";
 import type { ReactNode } from "react";
-import { durationMs, easePoints, motion as motionTokens } from "./tokens.generated";
+import { durationMs, easePoints, motion as motionTokens } from "./tokens";
 import type { CreationNavigationPhase, WorkspaceMotionOrigin } from "./creationNavigation";
 
 const spring = { type: "spring", ...motionTokens.springObject } as const;

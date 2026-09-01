@@ -4,18 +4,11 @@ import { MOTION_PRESETS } from "./types";
 import siteManifest from "../site-manifest.json";
 
 export const SITE_TOOL = Object.freeze(siteManifest.webMcp.tools);
-const manifestToolNames = Object.values(SITE_TOOL);
-if (manifestToolNames.length !== 7 || new Set(manifestToolNames).size !== manifestToolNames.length) {
-  throw new TypeError("Invalid Apertale manifest: exactly seven unique WebMCP tools are required.");
-}
-export const SITE_TOOL_NAMES = Object.freeze(manifestToolNames) as readonly [string, string, string, string, string, string, string];
+export const SITE_TOOL_NAMES: readonly string[] = Object.freeze(Object.values(SITE_TOOL));
 
 export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", "authoring-guide", "creation-readiness", "quality-review"] as const;
 
 export const AUTHORING_GUIDE_DETAIL = "authoring-guide" as const;
-export const AUTHORING_GUIDE_ID = "apertale-authoring-guide" as const;
-export const AUTHORING_GUIDE_VERSION = 4 as const;
-export const AUTHORING_GUIDE_SKILL_MIRROR = "apertale-authoring" as const;
 
 export const CREATION_READINESS_VERSION = 2 as const;
 /** Browser-local image capacity shared by readiness, quality review, and publishing. */
@@ -83,7 +76,7 @@ type CreationReadinessOptions = {
 
 const briefString = (value: unknown) => typeof value === "string" ? value.trim() : "";
 
-function supportedBookType(value: unknown): value is CreationBookType {
+export function supportedBookType(value: unknown): value is CreationBookType {
   return typeof value === "string" && (CREATION_BOOK_TYPES as readonly string[]).includes(value);
 }
 
@@ -254,9 +247,6 @@ export function assessCreationReadiness(
 }
 
 export const GENERATED_COVER_COUNT = 1 as const;
-export const AUTHORING_GUIDE_FULL_SPREAD_COUNT = "one per spread for illustrated storybook or photo-led keepsake; 0 for preserved-photo-album" as const;
-export const AUTHORING_GUIDE_PRESERVED_SPREAD_COUNT = "exactly the agreed spread count for preserved-photo-album" as const;
-export const AUTHORING_GUIDE_PROVENANCE_COUNT = "1 cover + one per spread" as const;
 
 export const REQUIRED_GATE_IDS = ["inspect", "story", "plan", "art", "photo-truth", "layout", "evidence"] as const;
 type RequiredGateId = (typeof REQUIRED_GATE_IDS)[number];
@@ -278,8 +268,6 @@ type AuthoringHardGateId = (typeof AUTHORING_HARD_GATE_IDS)[number];
 
 export const PHOTO_TRUTH_REQUIREMENT =
   "Use source photos as references and story truth. Do not use a raw uploaded photo as finished interior or right-page artwork unless the user explicitly requested a literal photo album.";
-
-export const AUTHORING_LAYOUT_SEQUENCE = ["handoff", "create", "verify"] as const;
 
 export type CreationCompletionGate = {
   id: RequiredGateId;
@@ -308,50 +296,6 @@ function spreadAssetMode(input: Pick<AuthoringCountSpec, "preservedPhotoSpreadCo
     : "generated";
 }
 
-type AuthoringGuide = {
-  id: typeof AUTHORING_GUIDE_ID;
-  version: typeof AUTHORING_GUIDE_VERSION;
-  skillMirror: typeof AUTHORING_GUIDE_SKILL_MIRROR;
-  contract: "two-phase";
-  tools: typeof SITE_TOOL_NAMES;
-  phases: readonly [
-    {
-      id: "plan-and-prepare";
-      mutationAllowed: false;
-      steps: readonly ["inspect", "story", "plan", "prepare-assets"];
-    },
-    {
-      id: "layout";
-      mutationAllowed: true;
-      requiresCompleteAssetSet: true;
-      sequence: typeof AUTHORING_LAYOUT_SEQUENCE;
-    },
-  ];
-  requiredCounts: {
-    generatedCoverCount: typeof GENERATED_COVER_COUNT;
-    generatedFullSpreadCount: typeof AUTHORING_GUIDE_FULL_SPREAD_COUNT;
-    preservedPhotoSpreadCount: typeof AUTHORING_GUIDE_PRESERVED_SPREAD_COUNT;
-    provenanceEntryCount: typeof AUTHORING_GUIDE_PROVENANCE_COUNT;
-  };
-  gates: CreationCompletionGate[];
-  hardGates: AuthoringHardGate[];
-  interaction: {
-    required: string;
-    hover: readonly string[];
-    focus: readonly string[];
-    reveal: readonly string[];
-    motion: readonly string[];
-  };
-  cutouts: {
-    nativeAlpha: true;
-    oneSubjectPerRequest: true;
-    reject: readonly string[];
-  };
-  provenance: string;
-  revisions: string;
-  verify: readonly string[];
-  report: string[];
-};
 
 export function creationCompletionGates(input: AuthoringCountSpec): CreationCompletionGate[] {
   const mode = spreadAssetMode(input);
@@ -477,12 +421,12 @@ export function authoringHardGates(): AuthoringHardGate[] {
   ];
 }
 
-export function buildAuthoringGuide(): AuthoringGuide {
+export function buildAuthoringGuide() {
   const requiredCounts = {
     generatedCoverCount: GENERATED_COVER_COUNT,
-    generatedFullSpreadCount: AUTHORING_GUIDE_FULL_SPREAD_COUNT,
-    preservedPhotoSpreadCount: AUTHORING_GUIDE_PRESERVED_SPREAD_COUNT,
-    provenanceEntryCount: AUTHORING_GUIDE_PROVENANCE_COUNT,
+    generatedFullSpreadCount: "one per spread for illustrated storybook or photo-led keepsake; 0 for preserved-photo-album",
+    preservedPhotoSpreadCount: "exactly the agreed spread count for preserved-photo-album",
+    provenanceEntryCount: "1 cover + one per spread",
   } as const;
   const gates = creationCompletionGates(requiredCounts);
   if (REQUIRED_GATE_IDS.some((id, index) => gates[index]?.id !== id)) {
@@ -493,9 +437,9 @@ export function buildAuthoringGuide(): AuthoringGuide {
     throw new TypeError("Invalid authoring guide: hard gates are incomplete.");
   }
   return {
-    id: AUTHORING_GUIDE_ID,
-    version: AUTHORING_GUIDE_VERSION,
-    skillMirror: AUTHORING_GUIDE_SKILL_MIRROR,
+    id: "apertale-authoring-guide",
+    version: 4,
+    skillMirror: "apertale-authoring",
     contract: "two-phase",
     tools: SITE_TOOL_NAMES,
     phases: [
@@ -508,7 +452,7 @@ export function buildAuthoringGuide(): AuthoringGuide {
         id: "layout",
         mutationAllowed: true,
         requiresCompleteAssetSet: true,
-        sequence: AUTHORING_LAYOUT_SEQUENCE,
+        sequence: ["handoff", "create", "verify"],
       },
     ],
     requiredCounts,

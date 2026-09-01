@@ -7,7 +7,7 @@ import {
   BOOK_LIBRARY_STORAGE_KEY,
 } from "./bookLifecycle";
 import { isStoredAssetId } from "./assetId";
-import { CREATION_READINESS_VERSION, assessCreationReadiness, type CreationBriefPayload } from "./authoringContract";
+import { CREATION_READINESS_VERSION, MAX_BOOK_PUBLISHABLE_ASSETS, assessCreationReadiness, type CreationBriefPayload } from "./authoringContract";
 import {
   bookAssetReferenceFindings,
   bookAssetReferenceIssueKey,
@@ -19,7 +19,6 @@ import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS, has
 import { listProjectAssetReferences, listStoredPublishedAssetIds } from "./projectArtifact";
 import { getPublicationRecord } from "./publishingClient";
 import {
-  MAX_BOOK_UPLOADED_ASSETS,
   QUALITY_REVIEW_MAX_ROUNDS,
   QUALITY_REVIEW_STATUSES,
   buildQualityReport,
@@ -1111,6 +1110,20 @@ export class BookEngine {
     }
   }
 
+  /** Records a failed command result and surfaces it in one step. */
+  private failCommand(
+    requestId: string,
+    source: CommandSource,
+    code: "revision_conflict" | "undo_conflict" | "not_found" | "locked" | "invalid",
+    summary: string,
+    elementId?: string,
+  ): DocumentResult {
+    const result = this.conflict(code, summary);
+    this.requestResults.set(requestId, result);
+    this.showAction(source, "error", result.summary, elementId);
+    return result;
+  }
+
   private conflict(code: "revision_conflict" | "undo_conflict" | "not_found" | "locked" | "invalid", summary: string): DocumentResult {
     return { ok: false, code, currentRevision: this.documentState.revision, summary };
   }
@@ -1267,7 +1280,6 @@ export class BookEngine {
   setTheme(theme: ThemeId, source: CommandSource = "human") {
     this.sessionState = { ...this.sessionState, sceneThemeId: theme };
     this.showAction(source, "success", `${source === "agent" ? "Codex switched" : "Switched"} to ${theme === "paper-atelier" ? "Day" : "Night"}`);
-    return { ok: true as const, theme, summary: `Scene theme is now ${theme}.` };
   }
 
   setQuality(quality: QualityTier) {
@@ -1349,18 +1361,12 @@ export class BookEngine {
 
     const location = findElement(this.documentState, command.elementId);
     if (!location) {
-      const result = this.conflict("not_found", `Element ${command.elementId} was not found.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "not_found", `Element ${command.elementId} was not found.`);
     }
 
     const currentElement = this.documentState.spreads[location.spreadIndex].elements[location.elementIndex];
     if (currentElement.locked && command.type !== "edit") {
-      const result = this.conflict("locked", `${currentElement.label} is locked.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary, currentElement.id);
-      return result;
+      return this.failCommand(command.requestId, source, "locked", `${currentElement.label} is locked.`, currentElement.id);
     }
 
     const before = clone(currentElement);
@@ -1451,10 +1457,7 @@ export class BookEngine {
         : null;
     const lockManager = bookLifecycleLockManager();
     if (!lockManager) {
-      const result = this.conflict("invalid", "This browser cannot safely coordinate saved book changes across tabs.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "invalid", "This browser cannot safely coordinate saved book changes across tabs.");
     }
     const lockOptions: LockOptions = { mode: "exclusive", ...(signal ? { signal } : {}) };
     const throwIfCanceled = () => {
@@ -1463,10 +1466,7 @@ export class BookEngine {
     const commit = () => {
       throwIfCanceled();
       if (!lifecycleDocumentId && !this.adoptDurableLibraryBaseline()) {
-        const result = this.conflict("revision_conflict", "The saved library changed in another tab; reopen the book before editing it.");
-        this.requestResults.set(command.requestId, result);
-        this.showAction(source, "error", result.summary);
-        return result;
+        return this.failCommand(command.requestId, source, "revision_conflict", "The saved library changed in another tab; reopen the book before editing it.");
       }
       return this.dispatch(command, source);
     };
@@ -1513,10 +1513,7 @@ export class BookEngine {
         && (typeof spread.kicker === "undefined" || spread.kicker.trim().length <= 100)
       ));
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(command.documentId) || title.length < 1 || title.length > 100 || !validSpreads) {
-      const result = this.conflict("invalid", "Book title, id, or spread plan is outside the supported authoring limits.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "invalid", "Book title, id, or spread plan is outside the supported authoring limits.");
     }
     const before = clone(this.documentState);
     let beforeLibrary = clone(this.libraryState);
@@ -1608,23 +1605,14 @@ export class BookEngine {
 
     const durableLibrary = readLibraryForLifecycleMutation(this.libraryState);
     if (!durableLibrary) {
-      const result = this.conflict("invalid", "Apertale did not create the book because its saved library could not be read safely.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "invalid", "Apertale did not create the book because its saved library could not be read safely.");
     }
     const durableBefore = durableLibrary.documents.find((book) => book.id === before.id);
     if (!durableBefore || !equalField(durableBefore, before)) {
-      const result = this.conflict("revision_conflict", "The saved library changed in another tab; reopen it before creating this book.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "revision_conflict", "The saved library changed in another tab; reopen it before creating this book.");
     }
     if (durableLibrary.documents.some((book) => book.id === command.documentId)) {
-      const result = this.conflict("invalid", `Book ${command.documentId} already exists. Open it or choose a new id.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "invalid", `Book ${command.documentId} already exists. Open it or choose a new id.`);
     }
     this.libraryState = durableLibrary;
     beforeLibrary = clone(durableLibrary);
@@ -1664,10 +1652,7 @@ export class BookEngine {
       this.libraryState = beforeLibrary;
       this.sessionState = beforeSession;
       this.undoRecords = beforeUndoRecords;
-      const failure = this.conflict("invalid", "Apertale did not create the book because this browser could not save it.");
-      this.requestResults.set(command.requestId, failure);
-      this.showAction(source, "error", failure.summary);
-      return failure;
+      return this.failCommand(command.requestId, source, "invalid", "Apertale did not create the book because this browser could not save it.");
     }
     this.requestResults.set(command.requestId, result);
     this.showAction(source, "success", summary, undefined, undoToken);
@@ -1678,10 +1663,7 @@ export class BookEngine {
     const validAssetId = isStoredAssetId(command.assetId)
       && command.validatedLocalAssetIds.includes(command.assetId);
     if (!validAssetId) {
-      const result = this.conflict("invalid", "Book covers require a validated browser-local image asset.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "invalid", "Book covers require a validated browser-local image asset.");
     }
 
     const before = this.documentState.coverAssetId;
@@ -1694,27 +1676,18 @@ export class BookEngine {
     const newReferenceIssue = bookAssetReferenceFindings(bookAssetReferenceManifest(nextDocument))
       .find((issue) => !existingReferenceIssues.has(bookAssetReferenceIssueKey(issue)));
     if (newReferenceIssue) {
-      const result = this.conflict("invalid", formatBookAssetReferenceIssue(newReferenceIssue));
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "invalid", formatBookAssetReferenceIssue(newReferenceIssue));
     }
     const creationBrief = this.qualityLifecycle()?.creationBrief;
     if (creationBrief?.bookType) {
       const policyIssue = creationAssetPolicyIssues(nextDocument, creationBrief)[0];
       if (policyIssue) {
-        const result = this.conflict("invalid", policyIssue);
-        this.requestResults.set(command.requestId, result);
-        this.showAction(source, "error", result.summary);
-        return result;
+        return this.failCommand(command.requestId, source, "invalid", policyIssue);
       }
     }
     const localAssetCount = listStoredPublishedAssetIds(nextDocument).length;
-    if (localAssetCount > MAX_BOOK_UPLOADED_ASSETS) {
-      const result = this.conflict("invalid", `The cover would raise this book to ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+    if (localAssetCount > MAX_BOOK_PUBLISHABLE_ASSETS) {
+      return this.failCommand(command.requestId, source, "invalid", `The cover would raise this book to ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_PUBLISHABLE_ASSETS}.`);
     }
     this.documentState = nextDocument;
 
@@ -1743,10 +1716,7 @@ export class BookEngine {
   private applyComposeSpread(command: ComposeSpreadCommand, source: CommandSource): DocumentResult {
     const spreadIndex = this.documentState.spreads.findIndex((spread) => spread.id === command.spreadId);
     if (spreadIndex < 0) {
-      const result = this.conflict("not_found", `Spread ${command.spreadId} was not found.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "not_found", `Spread ${command.spreadId} was not found.`);
     }
     const hasChange = [command.title, command.body, command.kicker].some((value) => typeof value !== "undefined");
     const valid = hasChange
@@ -1754,10 +1724,7 @@ export class BookEngine {
       && (typeof command.body === "undefined" || command.body.trim().length <= 800)
       && (typeof command.kicker === "undefined" || command.kicker.trim().length <= 100);
     if (!valid) {
-      const result = this.conflict("invalid", "Compose spread requires at least one bounded text field.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "invalid", "Compose spread requires at least one bounded text field.");
     }
 
     const currentSpread = this.documentState.spreads[spreadIndex];
@@ -1797,10 +1764,7 @@ export class BookEngine {
     const spreadIndex = this.documentState.spreads.findIndex((spread) => spread.id === command.spreadId);
     const visibleSpread = this.documentState.spreads[this.sessionState.currentSpreadIndex];
     if (spreadIndex < 0 || visibleSpread.id !== command.spreadId || command.operations.length < 1 || command.operations.length > 24) {
-      const result = this.conflict("invalid", "Scene patches require 1–24 operations on the visible spread.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "invalid", "Scene patches require 1–24 operations on the visible spread.");
     }
 
     const before = clone(this.documentState);
@@ -1838,10 +1802,7 @@ export class BookEngine {
     );
     const changedIds: string[] = [];
     const fail = (summary: string) => {
-      const result = this.conflict("invalid", summary);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "invalid", summary);
     };
     for (const operation of command.operations) {
       if (operation.op === "set-background") {
@@ -1956,8 +1917,8 @@ export class BookEngine {
       if (policyIssues.length > 0) return fail(policyIssues[0]);
     }
     const localAssetCount = listStoredPublishedAssetIds(nextDocument).length;
-    if (localAssetCount > MAX_BOOK_UPLOADED_ASSETS) {
-      return fail(`This patch would raise the book to ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`);
+    if (localAssetCount > MAX_BOOK_PUBLISHABLE_ASSETS) {
+      return fail(`This patch would raise the book to ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_PUBLISHABLE_ASSETS}.`);
     }
 
     nextDocument.revision += 1;
@@ -2062,8 +2023,8 @@ export class BookEngine {
       if (policyIssue) return policyIssue;
     }
     const localAssetCount = listStoredPublishedAssetIds(candidate).length;
-    if (localAssetCount > MAX_BOOK_UPLOADED_ASSETS) {
-      return `Undo would raise this book to ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`;
+    if (localAssetCount > MAX_BOOK_PUBLISHABLE_ASSETS) {
+      return `Undo would raise this book to ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_PUBLISHABLE_ASSETS}.`;
     }
     return null;
   }
@@ -2071,16 +2032,10 @@ export class BookEngine {
   private applyUndo(command: Extract<DocumentCommand, { type: "undo" }>, source: CommandSource): DocumentResult {
     const record = this.undoRecords.get(command.undoToken);
     if (!record) {
-      const result = this.conflict("not_found", "That undo token is no longer available.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "not_found", "That undo token is no longer available.");
     }
     if (record.documentId !== this.documentState.id) {
-      const result = this.conflict("undo_conflict", "That undo belongs to another book; the active book was not changed.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", "That undo belongs to another book; the active book was not changed.");
     }
     if (record.operation === "create-book") return this.applyCreateBookUndo(command, record, source);
     if (record.operation === "set-cover") return this.applyBookCoverUndo(command, record, source);
@@ -2091,10 +2046,7 @@ export class BookEngine {
     const current = this.documentState.spreads[location.spreadIndex].elements[location.elementIndex];
     const conflictField = record.fields.find((field) => !equalField(current[field], record.after[field]));
     if (conflictField) {
-      const result = this.conflict("undo_conflict", `${current.label} changed again in ${conflictField}; undo did not overwrite the newer edit.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary, current.id);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", `${current.label} changed again in ${conflictField}; undo did not overwrite the newer edit.`, current.id);
     }
     const restored = clone(current);
     record.fields.forEach((field) => {
@@ -2136,42 +2088,27 @@ export class BookEngine {
     const structureChanged = !equalField(record.beforeOrder, record.afterOrder)
       || record.elements.some((change) => !change.before || !change.after);
     if (structureChanged && !equalField(currentElements.map((element) => element.id), record.afterOrder)) {
-      const result = this.conflict("undo_conflict", "The scene structure changed again; undo did not overwrite newer work.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", "The scene structure changed again; undo did not overwrite newer work.");
     }
     if (record.artwork && !equalField(currentArtwork, record.artwork.after)) {
-      const result = this.conflict("undo_conflict", "The clean background changed again; undo preserved the newer artwork.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", "The clean background changed again; undo preserved the newer artwork.");
     }
 
     for (const change of record.elements) {
       const current = currentById.get(change.elementId) ?? null;
       if (!change.before) {
         if (!current || !equalField(current, change.after)) {
-          const result = this.conflict("undo_conflict", `Added element ${change.elementId} changed again; undo did not remove it.`);
-          this.requestResults.set(command.requestId, result);
-          this.showAction(source, "error", result.summary, change.elementId);
-          return result;
+          return this.failCommand(command.requestId, source, "undo_conflict", `Added element ${change.elementId} changed again; undo did not remove it.`, change.elementId);
         }
       } else if (!change.after) {
         if (current) {
-          const result = this.conflict("undo_conflict", `Removed element ${change.elementId} was recreated; undo did not replace it.`);
-          this.requestResults.set(command.requestId, result);
-          this.showAction(source, "error", result.summary, change.elementId);
-          return result;
+          return this.failCommand(command.requestId, source, "undo_conflict", `Removed element ${change.elementId} was recreated; undo did not replace it.`, change.elementId);
         }
       } else {
         if (!current) return this.conflict("not_found", `Element ${change.elementId} was not found.`);
         const conflictField = change.fields.find((field) => !equalField(current[field], change.after?.[field]));
         if (conflictField) {
-          const result = this.conflict("undo_conflict", `${current.label} changed again in ${conflictField}; undo preserved the newer edit.`);
-          this.requestResults.set(command.requestId, result);
-          this.showAction(source, "error", result.summary, current.id);
-          return result;
+          return this.failCommand(command.requestId, source, "undo_conflict", `${current.label} changed again in ${conflictField}; undo preserved the newer edit.`, current.id);
         }
       }
     }
@@ -2195,10 +2132,7 @@ export class BookEngine {
     else if (record.artwork) delete nextSpread.artwork;
     const contractIssue = this.restoredDocumentIssue(nextDocument);
     if (contractIssue) {
-      const result = this.conflict("undo_conflict", contractIssue);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", contractIssue);
     }
     nextDocument.revision += 1;
     this.documentState = nextDocument;
@@ -2240,10 +2174,7 @@ export class BookEngine {
     source: CommandSource,
   ): DocumentResult {
     if (this.documentState.coverAssetId !== record.after) {
-      const result = this.conflict("undo_conflict", "The book cover changed again; undo preserved the newer cover.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", "The book cover changed again; undo preserved the newer cover.");
     }
 
     const nextDocument = clone(this.documentState);
@@ -2251,10 +2182,7 @@ export class BookEngine {
     else delete nextDocument.coverAssetId;
     const contractIssue = this.restoredDocumentIssue(nextDocument);
     if (contractIssue) {
-      const result = this.conflict("undo_conflict", contractIssue);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", contractIssue);
     }
     nextDocument.revision += 1;
     this.documentState = nextDocument;
@@ -2289,21 +2217,14 @@ export class BookEngine {
   ): DocumentResult {
     const expected = record.direction === "undo" ? record.created : record.previous;
     if (!equalField(this.documentState, expected)) {
-      const result = this.conflict("undo_conflict", "The active book changed again; undo did not replace newer work.");
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", "The active book changed again; undo did not replace newer work.");
     }
 
     let previousForReverse = clone(record.previous);
     let createdIndexForUndo = -1;
     let next: DocumentState;
-    const reject = (code: "undo_conflict" | "invalid", summary: string) => {
-      const result = this.conflict(code, summary);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
-    };
+    const reject = (code: "undo_conflict" | "invalid", summary: string) =>
+      this.failCommand(command.requestId, source, code, summary);
 
     const durableLibrary = readLibraryForLifecycleMutation(this.libraryState);
     if (!durableLibrary) {
@@ -2343,6 +2264,13 @@ export class BookEngine {
       [...this.undoRecords].map(([token, undoRecord]) => [token, clone(undoRecord)] as const),
     );
     const beforeRequestResults = new BoundedMap(REQUEST_RESULT_LIMIT, [...this.requestResults]);
+    const rollback = () => {
+      this.documentState = beforeDocument;
+      this.libraryState = beforeLibrary;
+      this.sessionState = beforeSession;
+      this.undoRecords = beforeUndoRecords;
+      this.requestResults = beforeRequestResults;
+    };
     const previousQuality = this.qualityLifecycle(record.previous.id);
     const createdQuality = this.qualityLifecycle(record.created.id);
 
@@ -2383,44 +2311,23 @@ export class BookEngine {
       record.direction === "undo"
       && getPublicationRecord(record.created.id)
     ) {
-      this.documentState = beforeDocument;
-      this.libraryState = beforeLibrary;
-      this.sessionState = beforeSession;
-      this.undoRecords = beforeUndoRecords;
-      this.requestResults = beforeRequestResults;
+      rollback();
       return reject("undo_conflict", "Publishing began; creation undo preserved the book.");
     }
     if (!this.persist(true)) {
-      this.documentState = beforeDocument;
-      this.libraryState = beforeLibrary;
-      this.sessionState = beforeSession;
-      this.undoRecords = beforeUndoRecords;
-      this.requestResults = beforeRequestResults;
+      rollback();
       const attemptedAction = record.direction === "undo" ? "undo book creation" : "redo book creation";
-      const failure = this.conflict("invalid", `Apertale did not ${attemptedAction} because this browser could not save it.`);
-      this.requestResults.set(command.requestId, failure);
-      this.showAction(source, "error", failure.summary);
-      return failure;
+      return this.failCommand(command.requestId, source, "invalid", `Apertale did not ${attemptedAction} because this browser could not save it.`);
     }
     if (
       record.direction === "undo"
       && getPublicationRecord(record.created.id)
     ) {
-      this.documentState = beforeDocument;
-      this.libraryState = beforeLibrary;
-      this.sessionState = beforeSession;
-      this.undoRecords = beforeUndoRecords;
-      this.requestResults = beforeRequestResults;
+      rollback();
       const restored = this.persist(true);
-      const result = this.conflict(
-        "undo_conflict",
-        restored
-          ? "Publishing began in another tab; creation undo restored the book instead of orphaning its share."
-          : "Publishing began in another tab, and this browser could not safely restore the book.",
-      );
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", restored
+        ? "Publishing began in another tab; creation undo restored the book instead of orphaning its share."
+        : "Publishing began in another tab, and this browser could not safely restore the book.");
     }
     const committedLibrary = readLibraryForLifecycleMutation(this.libraryState);
     const committed = record.direction === "undo"
@@ -2434,15 +2341,8 @@ export class BookEngine {
           && equalField(committedLibrary.documents.find((book) => book.id === record.created.id), next),
         );
     if (!committed) {
-      this.documentState = beforeDocument;
-      this.libraryState = beforeLibrary;
-      this.sessionState = beforeSession;
-      this.undoRecords = beforeUndoRecords;
-      this.requestResults = beforeRequestResults;
-      const failure = this.conflict("invalid", "Apertale could not verify the saved book lifecycle change.");
-      this.requestResults.set(command.requestId, failure);
-      this.showAction(source, "error", failure.summary);
-      return failure;
+      rollback();
+      return this.failCommand(command.requestId, source, "invalid", "Apertale could not verify the saved book lifecycle change.");
     }
     this.requestResults.set(command.requestId, result);
     this.showAction(source, "success", summary, undefined, token);
@@ -2459,10 +2359,7 @@ export class BookEngine {
     const currentSpread = this.documentState.spreads[spreadIndex];
     const conflictField = record.fields.find((field) => !equalField(currentSpread[field], record.after[field]));
     if (conflictField) {
-      const result = this.conflict("undo_conflict", `${currentSpread.title} changed again in ${conflictField}; undo preserved the newer edit.`);
-      this.requestResults.set(command.requestId, result);
-      this.showAction(source, "error", result.summary);
-      return result;
+      return this.failCommand(command.requestId, source, "undo_conflict", `${currentSpread.title} changed again in ${conflictField}; undo preserved the newer edit.`);
     }
 
     const nextDocument = clone(this.documentState);

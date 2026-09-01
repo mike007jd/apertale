@@ -7,20 +7,15 @@ const publicDir = join(process.cwd(), "public");
 const write = process.argv.includes("--write");
 const temporaryDir = mkdtempSync(join(tmpdir(), "apertale-images-"));
 
-function walk(directory) {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name);
-    return entry.isDirectory() ? walk(path) : [path];
-  });
-}
-
 function run(command, args) {
   const result = spawnSync(command, args, { encoding: "utf8" });
   if (result.status !== 0) throw new Error(`${command} failed for ${args.at(-1)}: ${result.stderr || result.stdout}`);
   return result.stdout.trim();
 }
 
-const files = walk(publicDir).filter((file) => extname(file).toLowerCase() === ".png");
+const files = readdirSync(publicDir, { recursive: true, withFileTypes: true })
+  .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === ".png")
+  .map((entry) => join(entry.parentPath, entry.name));
 let beforeBytes = 0;
 let afterBytes = 0;
 let replacedCount = 0;

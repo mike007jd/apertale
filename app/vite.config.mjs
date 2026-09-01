@@ -17,16 +17,10 @@ export default defineConfig({
       },
     },
   },
-  optimizeDeps: {
-    include: ["react", "react-dom/client"],
-  },
   server: {
     host: "0.0.0.0",
     allowedHosts: ["terminal.local"],
     headers: webMcpHeaders,
-    warmup: {
-      clientFiles: ["./src/main.tsx"],
-    },
   },
   preview: {
     headers: webMcpHeaders,

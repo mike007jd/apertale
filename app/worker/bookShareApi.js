@@ -44,15 +44,24 @@ function json(payload, init = {}) {
   return new Response(JSON.stringify(payload), { ...init, headers });
 }
 
-function tokenFromBytes(bytes) {
-  let binary = "";
-  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
-}
-
 async function hashToken(token) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-  return tokenFromBytes(new Uint8Array(digest));
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function requireShareToken(payload, message) {
+  const shareToken = payload?.shareToken;
+  if (typeof shareToken !== "string" || !TOKEN_PATTERN.test(shareToken)) {
+    throw new HttpError(400, "invalid_share_token", message);
+  }
+  return shareToken;
+}
+
+function isPublishedWith(book, shareTokenHash) {
+  return book?.status === "published"
+    && book.share_token_hash === shareTokenHash
+    && Number.isSafeInteger(book.revision);
 }
 
 function bearerToken(request) {
@@ -667,21 +676,30 @@ export function createBookShareApi({
     return json({ ok: true, bookId, assetId, byteSize: bytes.byteLength });
   }
 
-  async function publish(request, bookId) {
+  function publishedJson(request, bookId, shareToken, revision) {
+    return json({
+      ok: true,
+      bookId,
+      status: "published",
+      shareUrl: new URL(`/share/${shareToken}`, request.url).href,
+      publishedRevision: revision,
+    });
+  }
+
+  async function publishContext(request, bookId) {
     const { book, manageTokenHash } = await managedBook(request, bookId);
     const payload = await readJsonBody(request);
-    const shareToken = payload?.shareToken;
-    if (typeof shareToken !== "string" || !TOKEN_PATTERN.test(shareToken)) {
-      throw new HttpError(400, "invalid_share_token", "A valid share token is required.");
-    }
-    const shareTokenHash = await hashToken(shareToken);
-    const shareUrl = new URL(`/share/${shareToken}`, request.url).href;
+    const shareToken = requireShareToken(payload, "A valid share token is required.");
+    return { book, manageTokenHash, payload, shareToken, shareTokenHash: await hashToken(shareToken) };
+  }
 
+  async function publish(request, bookId) {
+    const { book, manageTokenHash, payload, shareToken, shareTokenHash } = await publishContext(request, bookId);
     if (book.status === "published") {
       if (book.share_token_hash !== shareTokenHash || !Number.isSafeInteger(book.revision)) {
         throw new HttpError(409, "invalid_state", "Only a fresh draft generation can be published.");
       }
-      return json({ ok: true, bookId, status: "published", shareUrl, publishedRevision: book.revision });
+      return publishedJson(request, bookId, shareToken, book.revision);
     }
 
     if (book.status === "revoked" && await repository.isRetiredShareToken(shareTokenHash)) {
@@ -704,14 +722,8 @@ export function createBookShareApi({
     });
     if (!claimed) {
       const current = await repository.findManagedBook(bookId, manageTokenHash);
-      if (current?.status === "published" && current.share_token_hash === shareTokenHash && Number.isSafeInteger(current.revision)) {
-        return json({
-          ok: true,
-          bookId,
-          status: "published",
-          shareUrl,
-          publishedRevision: current.revision,
-        });
+      if (isPublishedWith(current, shareTokenHash)) {
+        return publishedJson(request, bookId, shareToken, current.revision);
       }
       throw new HttpError(409, "publish_conflict", "Another publication attempt already owns this book state.");
     }
@@ -741,34 +753,16 @@ export function createBookShareApi({
       now: now(),
     });
     if (!published) throw new HttpError(409, "publish_conflict", "The book changed before it could be published.");
-    return json({
-      ok: true,
-      bookId,
-      status: "published",
-      shareUrl,
-      publishedRevision: published,
-    });
+    return publishedJson(request, bookId, shareToken, published);
   }
 
   async function reconcilePublish(request, bookId) {
-    const { book, manageTokenHash } = await managedBook(request, bookId);
-    const payload = await readJsonBody(request);
-    const shareToken = payload?.shareToken;
-    if (typeof shareToken !== "string" || !TOKEN_PATTERN.test(shareToken)) {
-      throw new HttpError(400, "invalid_share_token", "A valid share token is required.");
-    }
-    const shareTokenHash = await hashToken(shareToken);
+    const { book, manageTokenHash, shareToken, shareTokenHash } = await publishContext(request, bookId);
     if (book.status === "published") {
       if (book.share_token_hash !== shareTokenHash || !Number.isSafeInteger(book.revision)) {
         throw new HttpError(409, "invalid_state", "The committed publication belongs to another share capability.");
       }
-      return json({
-        ok: true,
-        bookId,
-        status: "published",
-        shareUrl: new URL(`/share/${shareToken}`, request.url).href,
-        publishedRevision: book.revision,
-      });
+      return publishedJson(request, bookId, shareToken, book.revision);
     }
     if (book.status === "revoked") {
       return json({ ok: true, bookId, status: "revoked" });
@@ -791,14 +785,8 @@ export function createBookShareApi({
       return json({ ok: true, bookId, status: "publishing" });
     }
     const current = await repository.findManagedBook(bookId, manageTokenHash);
-    if (current?.status === "published" && current.share_token_hash === shareTokenHash && Number.isSafeInteger(current.revision)) {
-      return json({
-        ok: true,
-        bookId,
-        status: "published",
-        shareUrl: new URL(`/share/${shareToken}`, request.url).href,
-        publishedRevision: current.revision,
-      });
+    if (isPublishedWith(current, shareTokenHash)) {
+      return publishedJson(request, bookId, shareToken, current.revision);
     }
     if (await repository.isRetiredShareToken(shareTokenHash)) {
       return json({ ok: true, bookId, status: "revoked" });
@@ -848,10 +836,7 @@ export function createBookShareApi({
   async function revoke(request, bookId) {
     const { book, manageTokenHash } = await managedBook(request, bookId);
     const payload = await readJsonBody(request);
-    const shareToken = payload?.shareToken;
-    if (typeof shareToken !== "string" || !TOKEN_PATTERN.test(shareToken)) {
-      throw new HttpError(400, "invalid_share_token", "The published share token is required for revocation.");
-    }
+    const shareToken = requireShareToken(payload, "The published share token is required for revocation.");
     const shareTokenHash = await hashToken(shareToken);
     // Revocation retains the last public token hash as a tombstone and clears
     // any in-flight publish claim. A retry is therefore idempotent without
@@ -887,8 +872,7 @@ export function createBookShareApi({
       ) return json({ ok: true, bookId, status: "revoked" });
       throw new HttpError(409, "revoke_conflict", "The book changed before it could be revoked.");
     }
-    const assets = await repository.listAssetsForRevocation({ id: bookId, manageTokenHash, shareTokenHash });
-    const objectKeys = [...new Set(assets.map((asset) => asset.object_key).filter(Boolean))];
+    const objectKeys = await repository.listAssetsForRevocation({ id: bookId, manageTokenHash, shareTokenHash });
     if (objectKeys.length > 0) await objects.delete(objectKeys);
     if (!await repository.completeRevocation({
       id: bookId,
@@ -914,8 +898,7 @@ export function createBookShareApi({
     if (!await repository.markDeleting({ id: bookId, manageTokenHash, now: now() })) {
       throw new HttpError(409, "delete_conflict", "The book changed before deletion began.");
     }
-    const assets = await repository.listAssetsForDeletion({ id: bookId, manageTokenHash });
-    const objectKeys = [...new Set(assets.map((asset) => asset.object_key).filter(Boolean))];
+    const objectKeys = await repository.listAssetsForDeletion({ id: bookId, manageTokenHash });
     if (objectKeys.length > 0) await objects.delete(objectKeys);
     if (!await repository.deleteBook({ id: bookId, manageTokenHash })) {
       throw new HttpError(409, "delete_conflict", "The book files were removed, but its metadata cleanup must be retried.");

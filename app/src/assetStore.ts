@@ -2,7 +2,7 @@ import { isStoredAssetId } from "./assetId";
 import { IMAGE_ANALYSIS_VERSION, MAX_SOURCE_IMAGE_BYTES, analyzeStoredImage, optimizeImportedImage } from "./imageOptimizer";
 import type { ImageContentAnalysis } from "./imageOptimizer";
 import type { ImageHandoffAssetUse } from "./imageHandoff";
-import { MAX_BOOK_UPLOADED_ASSETS } from "./qualityContract";
+import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import { bundledShelfCoverPreviewUrl } from "./shelfCoverPreview";
 
 export { isStoredAssetId } from "./assetId";
@@ -56,10 +56,14 @@ type AssetUrlEntry = {
   url?: string;
 };
 
-const objectUrls = new Map<string, AssetUrlEntry>();
-const previewObjectUrls = new Map<string, AssetUrlEntry>();
-let objectUrlGeneration = 0;
-let previewObjectUrlGeneration = 0;
+type AssetUrlPool = {
+  label: string;
+  entries: Map<string, AssetUrlEntry>;
+  generation: number;
+};
+
+const assetUrlPool: AssetUrlPool = { label: "asset URL", entries: new Map(), generation: 0 };
+const previewUrlPool: AssetUrlPool = { label: "asset preview URL", entries: new Map(), generation: 0 };
 let previewGenerationQueue: Promise<void> = Promise.resolve();
 
 function enqueuePreviewGeneration<T>(operation: () => Promise<T>) {
@@ -69,37 +73,21 @@ function enqueuePreviewGeneration<T>(operation: () => Promise<T>) {
 }
 
 async function createShelfPreviewBlob(source: Blob) {
-  if (!globalThis.createImageBitmap) throw new Error("Image preview decoding is unavailable in this browser.");
+  if (!globalThis.createImageBitmap || !globalThis.OffscreenCanvas) {
+    throw new Error("Image preview decoding is unavailable in this browser.");
+  }
   const bitmap = await createImageBitmap(source);
   try {
     if (bitmap.width <= 0 || bitmap.height <= 0) throw new Error("The cover has invalid dimensions.");
     const scale = Math.min(1, SHELF_PREVIEW_MAX_WIDTH / bitmap.width, SHELF_PREVIEW_MAX_HEIGHT / bitmap.height);
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));
-
-    if (globalThis.OffscreenCanvas) {
-      const canvas = new OffscreenCanvas(width, height);
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("The shelf preview canvas is unavailable.");
-      context.drawImage(bitmap, 0, 0, width, height);
-      const blob = await canvas.convertToBlob({ type: "image/webp", quality: SHELF_PREVIEW_QUALITY });
-      if (blob.size <= 0) throw new Error("The shelf preview encoder returned an empty image.");
-      return { blob, width, height };
-    }
-
-    if (!globalThis.document) throw new Error("The shelf preview canvas is unavailable.");
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    const canvas = new OffscreenCanvas(width, height);
     const context = canvas.getContext("2d");
     if (!context) throw new Error("The shelf preview canvas is unavailable.");
     context.drawImage(bitmap, 0, 0, width, height);
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((encoded) => {
-        if (encoded && encoded.size > 0) resolve(encoded);
-        else reject(new Error("The shelf preview encoder returned an empty image."));
-      }, "image/webp", SHELF_PREVIEW_QUALITY);
-    });
+    const blob = await canvas.convertToBlob({ type: "image/webp", quality: SHELF_PREVIEW_QUALITY });
+    if (blob.size <= 0) throw new Error("The shelf preview encoder returned an empty image.");
     return { blob, width, height };
   } finally {
     bitmap.close();
@@ -250,54 +238,49 @@ export async function getStoredAssetBlob(assetId: string): Promise<Blob | null> 
   return stored?.blob ?? null;
 }
 
-function releaseAssetUrlEntry(assetId: string, entry: AssetUrlEntry) {
+function releaseEntry(pool: AssetUrlPool, assetId: string, entry: AssetUrlEntry) {
   entry.references = Math.max(0, entry.references - 1);
-  if (entry.references > 0 || objectUrls.get(assetId) !== entry) return;
-  objectUrls.delete(assetId);
+  if (entry.references > 0 || pool.entries.get(assetId) !== entry) return;
+  pool.entries.delete(assetId);
   if (!entry.url) return;
   URL.revokeObjectURL(entry.url);
   entry.url = undefined;
 }
 
-function releaseAssetPreviewUrlEntry(assetId: string, entry: AssetUrlEntry) {
-  entry.references = Math.max(0, entry.references - 1);
-  if (entry.references > 0 || previewObjectUrls.get(assetId) !== entry) return;
-  previewObjectUrls.delete(assetId);
-  if (!entry.url) return;
-  URL.revokeObjectURL(entry.url);
-  entry.url = undefined;
+function assertEntryLive(pool: AssetUrlPool, generation: number, assetId: string, entry: AssetUrlEntry) {
+  if (generation !== pool.generation || pool.entries.get(assetId) !== entry) {
+    throw new DOMException(`The ${pool.label} request was retired.`, "AbortError");
+  }
 }
 
-/**
- * Acquires one identity-safe lease for a browser-local Blob URL. Concurrent
- * consumers share the IndexedDB read and URL, while the last release revokes
- * it. Bundled/procedural references use the same API with a no-op release.
- */
-export async function acquireAssetUrl(assetId: string): Promise<AssetUrlLease> {
-  if (!isStoredAssetId(assetId)) return { assetId, url: assetId, release: () => undefined };
-  let entry = objectUrls.get(assetId);
+/** Publishes a Blob URL onto a live entry, revoking it if the entry retired mid-flight. */
+function commitEntryUrl(pool: AssetUrlPool, generation: number, assetId: string, entry: AssetUrlEntry, blob: Blob) {
+  assertEntryLive(pool, generation, assetId, entry);
+  const url = URL.createObjectURL(blob);
+  if (generation !== pool.generation || pool.entries.get(assetId) !== entry) {
+    URL.revokeObjectURL(url);
+    throw new DOMException(`The ${pool.label} request was retired.`, "AbortError");
+  }
+  entry.url = url;
+  return url;
+}
+
+async function acquireFromPool(
+  pool: AssetUrlPool,
+  assetId: string,
+  load: (generation: number, entry: AssetUrlEntry) => Promise<string>,
+): Promise<AssetUrlLease> {
+  let entry = pool.entries.get(assetId);
   if (!entry) {
-    const generation = objectUrlGeneration;
+    const generation = pool.generation;
     const nextEntry: AssetUrlEntry = {
       generation,
       references: 0,
       promise: Promise.resolve(""),
     };
-    nextEntry.promise = getStoredAsset(assetId).then((stored) => {
-      if (!stored) throw new Error(`Local asset ${assetId} is missing.`);
-      if (generation !== objectUrlGeneration || objectUrls.get(assetId) !== nextEntry) {
-        throw new DOMException("The asset URL request was retired.", "AbortError");
-      }
-      const url = URL.createObjectURL(stored.blob);
-      if (generation !== objectUrlGeneration || objectUrls.get(assetId) !== nextEntry) {
-        URL.revokeObjectURL(url);
-        throw new DOMException("The asset URL request was retired.", "AbortError");
-      }
-      nextEntry.url = url;
-      return url;
-    });
+    nextEntry.promise = load(generation, nextEntry);
     entry = nextEntry;
-    objectUrls.set(assetId, entry);
+    pool.entries.set(assetId, entry);
   }
   entry.references += 1;
   try {
@@ -309,13 +292,27 @@ export async function acquireAssetUrl(assetId: string): Promise<AssetUrlLease> {
       release: () => {
         if (released) return;
         released = true;
-        releaseAssetUrlEntry(assetId, entry);
+        releaseEntry(pool, assetId, entry);
       },
     };
   } catch (error) {
-    releaseAssetUrlEntry(assetId, entry);
+    releaseEntry(pool, assetId, entry);
     throw error;
   }
+}
+
+/**
+ * Acquires one identity-safe lease for a browser-local Blob URL. Concurrent
+ * consumers share the IndexedDB read and URL, while the last release revokes
+ * it. Bundled/procedural references use the same API with a no-op release.
+ */
+export async function acquireAssetUrl(assetId: string): Promise<AssetUrlLease> {
+  if (!isStoredAssetId(assetId)) return { assetId, url: assetId, release: () => undefined };
+  return acquireFromPool(assetUrlPool, assetId, (generation, entry) =>
+    getStoredAsset(assetId).then((stored) => {
+      if (!stored) throw new Error(`Local asset ${assetId} is missing.`);
+      return commitEntryUrl(assetUrlPool, generation, assetId, entry, stored.blob);
+    }));
 }
 
 /**
@@ -327,20 +324,11 @@ export async function acquireAssetPreviewUrl(assetId: string): Promise<AssetUrlL
   if (!isStoredAssetId(assetId)) {
     return { assetId, url: bundledShelfCoverPreviewUrl(assetId), release: () => undefined };
   }
-  let entry = previewObjectUrls.get(assetId);
-  if (!entry) {
-    const generation = previewObjectUrlGeneration;
-    const nextEntry: AssetUrlEntry = {
-      generation,
-      references: 0,
-      promise: Promise.resolve(""),
-    };
-    nextEntry.promise = enqueuePreviewGeneration(async () => {
+  return acquireFromPool(previewUrlPool, assetId, (generation, entry) =>
+    enqueuePreviewGeneration(async () => {
       const stored = await getStoredAsset(assetId);
       if (!stored) throw new Error(`Local asset ${assetId} is missing.`);
-      if (generation !== previewObjectUrlGeneration || previewObjectUrls.get(assetId) !== nextEntry) {
-        throw new DOMException("The asset preview URL request was retired.", "AbortError");
-      }
+      assertEntryLive(previewUrlPool, generation, assetId, entry);
 
       let previewBlob = stored.previewVersion === SHELF_PREVIEW_VERSION && stored.previewBlob
         ? stored.previewBlob
@@ -363,37 +351,8 @@ export async function acquireAssetPreviewUrl(assetId: string): Promise<AssetUrlL
           previewBlob = stored.blob;
         }
       }
-      if (generation !== previewObjectUrlGeneration || previewObjectUrls.get(assetId) !== nextEntry) {
-        throw new DOMException("The asset preview URL request was retired.", "AbortError");
-      }
-      const url = URL.createObjectURL(previewBlob);
-      if (generation !== previewObjectUrlGeneration || previewObjectUrls.get(assetId) !== nextEntry) {
-        URL.revokeObjectURL(url);
-        throw new DOMException("The asset preview URL request was retired.", "AbortError");
-      }
-      nextEntry.url = url;
-      return url;
-    });
-    entry = nextEntry;
-    previewObjectUrls.set(assetId, entry);
-  }
-  entry.references += 1;
-  try {
-    const url = await entry.promise;
-    let released = false;
-    return {
-      assetId,
-      url,
-      release: () => {
-        if (released) return;
-        released = true;
-        releaseAssetPreviewUrlEntry(assetId, entry);
-      },
-    };
-  } catch (error) {
-    releaseAssetPreviewUrlEntry(assetId, entry);
-    throw error;
-  }
+      return commitEntryUrl(previewUrlPool, generation, assetId, entry, previewBlob);
+    }));
 }
 
 /** Acquires an all-or-nothing ordered batch and releases partial success. */
@@ -473,9 +432,9 @@ async function scanRecentAssetMetadata(limit: number) {
   });
 }
 
-export async function listAssetMetadata(limit: number = MAX_BOOK_UPLOADED_ASSETS) {
+export async function listAssetMetadata(limit: number = MAX_BOOK_PUBLISHABLE_ASSETS) {
   if (!globalThis.indexedDB) return [];
-  const boundedLimit = Math.max(0, Math.min(MAX_BOOK_UPLOADED_ASSETS, limit));
+  const boundedLimit = Math.max(0, Math.min(MAX_BOOK_PUBLISHABLE_ASSETS, limit));
   if (boundedLimit === 0) return [];
   // Cursor iteration materializes at most one Blob-backed row at a time and
   // retains only bounded metadata. getAll() retained every historical Blob in
@@ -484,18 +443,13 @@ export async function listAssetMetadata(limit: number = MAX_BOOK_UPLOADED_ASSETS
 }
 
 export function releaseAssetUrls() {
-  objectUrlGeneration += 1;
-  objectUrls.forEach((entry) => {
-    if (!entry.url) return;
-    URL.revokeObjectURL(entry.url);
-    entry.url = undefined;
-  });
-  objectUrls.clear();
-  previewObjectUrlGeneration += 1;
-  previewObjectUrls.forEach((entry) => {
-    if (!entry.url) return;
-    URL.revokeObjectURL(entry.url);
-    entry.url = undefined;
-  });
-  previewObjectUrls.clear();
+  for (const pool of [assetUrlPool, previewUrlPool]) {
+    pool.generation += 1;
+    pool.entries.forEach((entry) => {
+      if (!entry.url) return;
+      URL.revokeObjectURL(entry.url);
+      entry.url = undefined;
+    });
+    pool.entries.clear();
+  }
 }

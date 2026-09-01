@@ -45,7 +45,7 @@ import {
 } from "./creationWorkshop";
 import { AnimatePresence, MotionConfig } from "motion/react";
 import { smootherstep } from "./design/curves";
-import { durationMs } from "./design/tokens.generated";
+import { durationMs } from "./design/tokens";
 import { announce, supportsWebGl2 } from "./readerShell";
 import { spreadFraction } from "./stageGeometry";
 import { Panel, Toast, WorkspaceTransition } from "./design/primitives";
@@ -83,7 +83,7 @@ import { canTurnPage, createPageTurnSession, pageTurnNavDisabled, pageTurnWaitSt
 import { PublicationPanel, commitPublicationRecordIfCurrent, publicationLauncherPresentation, publicationRecordForDocument } from "./PublicationPanel";
 import { deletePublication, getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
-import { MAX_BOOK_UPLOADED_ASSETS } from "./qualityContract";
+import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
 import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
 import { registerWebMcpTools } from "./webmcp";
@@ -196,33 +196,13 @@ export function shelfCoverAssetPlan<Book extends { id: string; coverAssetId?: st
 }
 
 async function copyPlainText(text: string): Promise<boolean> {
+  // On failure the callers reveal a visible select-and-copy textarea instead.
+  if (!navigator.clipboard?.writeText) return false;
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // The selection fallback below keeps copy usable in restricted webviews.
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.readOnly = true;
-  textarea.setAttribute("aria-hidden", "true");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  textarea.style.pointerEvents = "none";
-  const priorFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  document.body.appendChild(textarea);
-  try {
-    textarea.select();
-    textarea.setSelectionRange(0, text.length);
-    return document.execCommand?.("copy") ?? false;
+    await navigator.clipboard.writeText(text);
+    return true;
   } catch {
     return false;
-  } finally {
-    textarea.remove();
-    priorFocus?.focus();
   }
 }
 
@@ -262,10 +242,6 @@ function BookLoadingFeedback({ title, placement, stage, reducedMotion }: {
   );
 }
 
-/** Joins announcement fragments without producing the doubled `..` of naive concatenation. */
-function createRequestId() {
-  return crypto.randomUUID();
-}
 
 export function App() {
   const snapshot = useSyncExternalStore(bookEngine.subscribe, bookEngine.getSnapshot, bookEngine.getSnapshot);
@@ -724,35 +700,17 @@ export function App() {
 
   useEffect(() => {
     if (!showLibrary || libraryMotion !== "idle" || showCreateGuide || snapshot.session.preview) return undefined;
-    let idleHandle: number | null = null;
-    let usedIdleCallback = false;
     const timer = window.setTimeout(() => {
-      const warmRenderer = () => {
-        idleHandle = null;
-        void warmThreeBookRenderer()
-          .then(() => recordDiagnostic("book:renderer-idle-prewarmed", {}))
-          .catch(() => recordDiagnostic("book:prewarm-renderer-failed", {}));
-      };
-      if ("requestIdleCallback" in window) {
-        usedIdleCallback = true;
-        idleHandle = window.requestIdleCallback(warmRenderer, { timeout: 1000 });
-      } else {
-        warmRenderer();
-      }
+      void warmThreeBookRenderer()
+        .then(() => recordDiagnostic("book:renderer-idle-prewarmed", {}))
+        .catch(() => recordDiagnostic("book:prewarm-renderer-failed", {}));
     }, 2000);
-    return () => {
-      window.clearTimeout(timer);
-      if (usedIdleCallback && idleHandle !== null) window.cancelIdleCallback(idleHandle);
-    };
+    return () => window.clearTimeout(timer);
   }, [libraryMotion, showCreateGuide, showLibrary, snapshot.session.preview]);
 
   /** Stages only move forward, so a late signal can never rewind the message. */
   const advanceLoadStage = useCallback((next: LoadStage) => {
     setLoadStage((current) => (LOAD_STAGES.indexOf(next) > LOAD_STAGES.indexOf(current) ? next : current));
-  }, []);
-
-  const handleReaderRendered = useCallback((evidence: ReaderRenderEvidence) => {
-    setLastReaderRender(evidence);
   }, []);
 
   useEffect(() => {
@@ -1368,12 +1326,12 @@ export function App() {
 
   const liftSelected = () => {
     if (!selected) return;
-    void bookEngine.dispatchCoordinated({ type: "lift", requestId: createRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId: selected.id }, "human");
+    void bookEngine.dispatchCoordinated({ type: "lift", requestId: crypto.randomUUID(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId: selected.id }, "human");
   };
 
   const toggleLock = () => {
     if (!selected) return;
-    void bookEngine.dispatchCoordinated({ type: "edit", requestId: createRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId: selected.id, locked: !selected.locked }, "human");
+    void bookEngine.dispatchCoordinated({ type: "edit", requestId: crypto.randomUUID(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId: selected.id, locked: !selected.locked }, "human");
   };
 
   const applyMotion = (preset: MotionPreset | "none") => {
@@ -1476,10 +1434,10 @@ export function App() {
       setWorkshopImportError("Wait for saved photos to finish restoring before adding new images.");
       return;
     }
-    const room = isBookArt ? MAX_BOOK_UPLOADED_ASSETS : MAX_WORKSHOP_ASSETS - workshopAssetsRef.current.length;
+    const room = isBookArt ? MAX_BOOK_PUBLISHABLE_ASSETS : MAX_WORKSHOP_ASSETS - workshopAssetsRef.current.length;
     if (room <= 0) {
       setWorkshopImportError(isBookArt
-        ? `A book may reference at most ${MAX_BOOK_UPLOADED_ASSETS} uploaded images.`
+        ? `A book may reference at most ${MAX_BOOK_PUBLISHABLE_ASSETS} uploaded images.`
         : `This brief already holds ${MAX_WORKSHOP_ASSETS} photos. Remove one to add another.`);
       return;
     }
@@ -1694,7 +1652,7 @@ export function App() {
     if (!undoToken) return;
     void bookEngine.dispatchCoordinated({
       type: "undo",
-      requestId: createRequestId(),
+      requestId: crypto.randomUUID(),
       expectedDocumentId: snapshot.document.id,
       expectedRevision: snapshot.document.revision,
       undoToken,
@@ -1902,7 +1860,7 @@ export function App() {
               ))}
               onLoading={showCreateGuide ? () => undefined : handleBookLoading}
               onReady={showCreateGuide ? () => undefined : handleBookReady}
-              onRendered={showCreateGuide ? undefined : handleReaderRendered}
+              onRendered={showCreateGuide ? undefined : setLastReaderRender}
               onFailure={(failureSceneKey) => {
                 if (!sceneFailureMatches(activeSceneKey, failureSceneKey)) return;
                 setPageTurnReadiness({ navigationKey: pageTurnNavigationKey, backward: false, forward: false });
@@ -1923,7 +1881,7 @@ export function App() {
             onSelect={(elementId) => { bookEngine.setSelection(elementId); setShowMore(false); }}
             onReady={handleBookReady}
             onUnavailable={handleBookUnavailable}
-            onRendered={handleReaderRendered}
+            onRendered={setLastReaderRender}
           />
         ))}
 
@@ -2233,7 +2191,7 @@ export function App() {
                       <span>{displayedImageHandoff?.reason}</span>
                     </Toast>
                     <div className="workshop-photos-head">
-                      <span>{handoffIsBookArt ? "Book art" : "Photos"}<small>{handoffIsBookArt ? `up to ${MAX_BOOK_UPLOADED_ASSETS} files` : `${workshopAssets.length}/${MAX_WORKSHOP_ASSETS}`}</small></span>
+                      <span>{handoffIsBookArt ? "Book art" : "Photos"}<small>{handoffIsBookArt ? `up to ${MAX_BOOK_PUBLISHABLE_ASSETS} files` : `${workshopAssets.length}/${MAX_WORKSHOP_ASSETS}`}</small></span>
                       <button
                         type="button"
                         ref={addPhotoButton}

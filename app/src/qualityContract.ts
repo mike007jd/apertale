@@ -1,10 +1,10 @@
 import qualityRubricSource from "../worker/qualityRubric.json";
 import {
-  CREATION_BOOK_TYPES,
   CREATION_READINESS_VERSION,
   MAX_BOOK_PUBLISHABLE_ASSETS,
   assessCreationReadiness,
   creationBriefSourceAssetIds,
+  supportedBookType,
   type CreationBookType,
   type CreationBriefPayload,
 } from "./authoringContract";
@@ -29,7 +29,6 @@ const MIN_SPREAD_FOREGROUND_LAYERS = 2;
  * legal and can reduce the actual total.
  */
 const MINIMUM_CAPABLE_BOOK_ASSETS = 1 + MAX_BOOK_SPREADS * (2 + MIN_SPREAD_FOREGROUND_LAYERS);
-export const MAX_BOOK_UPLOADED_ASSETS = MAX_BOOK_PUBLISHABLE_ASSETS;
 
 type QualityCriterionMode = "deterministic" | "visual" | "both";
 type QualityCriterion = {
@@ -56,9 +55,9 @@ export const QUALITY_RUBRIC = Object.freeze(qualityRubricSource) as QualityRubri
 if (
   QUALITY_RUBRIC.version !== QUALITY_RUBRIC_VERSION
   || QUALITY_RUBRIC.maxReviewRounds !== QUALITY_REVIEW_MAX_ROUNDS
-  || QUALITY_RUBRIC.maxBookUploadedAssets !== MAX_BOOK_UPLOADED_ASSETS
-  || !Number.isInteger(MAX_BOOK_UPLOADED_ASSETS)
-  || MAX_BOOK_UPLOADED_ASSETS < MINIMUM_CAPABLE_BOOK_ASSETS
+  || QUALITY_RUBRIC.maxBookUploadedAssets !== MAX_BOOK_PUBLISHABLE_ASSETS
+  || !Number.isInteger(MAX_BOOK_PUBLISHABLE_ASSETS)
+  || MAX_BOOK_PUBLISHABLE_ASSETS < MINIMUM_CAPABLE_BOOK_ASSETS
 ) {
   throw new TypeError("Invalid Apertale quality rubric version.");
 }
@@ -174,16 +173,6 @@ type QualityRenderManifest = {
   }>;
 };
 
-function criterion(id: string) {
-  const found = QUALITY_RUBRIC.criteria.find((item) => item.id === id);
-  if (!found) throw new TypeError(`Unknown quality criterion ${id}.`);
-  return found;
-}
-
-function supportedBookType(value: unknown): value is CreationBookType {
-  return typeof value === "string" && (CREATION_BOOK_TYPES as readonly string[]).includes(value);
-}
-
 export function creationAssetPolicyIssues(
   documentState: DocumentState,
   creationBrief: CreationBriefPayload | null | undefined,
@@ -253,7 +242,7 @@ const evidence = (
   locations: QualityEvidenceLocation[],
   suggestedPatch?: string,
 ): QualityCheckResult => ({
-  criterionId: criterion(criterionId).id,
+  criterionId,
   outcome,
   message,
   evidence: locations,
@@ -283,13 +272,13 @@ function evaluateCreationArtifactQuality(
   ));
 
   const localAssetCount = listStoredPublishedAssetIds(documentState).length;
-  const publishableAssetCount = localAssetCount <= MAX_BOOK_UPLOADED_ASSETS;
+  const publishableAssetCount = localAssetCount <= MAX_BOOK_PUBLISHABLE_ASSETS;
   checks.push(evidence(
     "creation-asset-policy",
     publishableAssetCount ? "pass" : "blocker",
     publishableAssetCount
-      ? `The book references ${localAssetCount} of ${MAX_BOOK_UPLOADED_ASSETS} available uploaded-image slots.`
-      : `The book references ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`,
+      ? `The book references ${localAssetCount} of ${MAX_BOOK_PUBLISHABLE_ASSETS} available uploaded-image slots.`
+      : `The book references ${localAssetCount} local images, above the publishable limit of ${MAX_BOOK_PUBLISHABLE_ASSETS}.`,
     [{ scope: "book", locator: ".book-app", description: "Publishable local image capacity" }],
     publishableAssetCount ? undefined : "Reduce unique local image references before review.",
   ));
@@ -574,16 +563,7 @@ export function qualityGateState(
   documentState: DocumentState,
   lifecycle: AuthoringQualityLifecycle | null,
 ): QualityGateState {
-  if (!lifecycle) {
-    return {
-      status: "needs-review",
-      message: "Attach a readiness-passed creation brief before quality review.",
-      report: null,
-      nextRound: null,
-      remainingRounds: QUALITY_REVIEW_MAX_ROUNDS,
-    };
-  }
-  if (!supportedBookType(lifecycle.creationBrief?.bookType)) {
+  if (!lifecycle || !supportedBookType(lifecycle.creationBrief?.bookType)) {
     return {
       status: "needs-review",
       message: "Attach a readiness-passed creation brief before quality review.",

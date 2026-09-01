@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  abortImageHandoff,
   completeImageHandoff,
   currentImageHandoff,
   dismissImageHandoff,
@@ -69,7 +68,7 @@ describe("image handoff", () => {
 
   it("resolves when the agent cancels, so the drawer never outlives its request", async () => {
     const pending = ask("req-3");
-    abortImageHandoff("req-3");
+    dismissImageHandoff("req-3", "The request was cancelled before the reader chose.");
     await expect(pending).resolves.toMatchObject({ status: "dismissed" });
     expect(currentImageHandoff()).toBeNull();
   });
@@ -90,7 +89,7 @@ describe("image handoff", () => {
     const second = ask("req-7", "Second ask.");
     await expect(first).resolves.toMatchObject({ status: "dismissed" });
 
-    expect(abortImageHandoff("req-6")).toBe(false);
+    expect(dismissImageHandoff("req-6")).toBe(false);
     expect(currentImageHandoff()?.requestId).toBe("req-7");
     expect(dismissImageHandoff("req-7")).toBe(true);
     await expect(second).resolves.toMatchObject({ status: "dismissed" });

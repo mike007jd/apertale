@@ -180,13 +180,15 @@ class MemoryRepository {
       || book.asset_cleanup_pending !== 1
       || book.share_token_hash !== shareTokenHash
     ) return [];
-    return this.listAssets(id);
+    const assets = await this.listAssets(id);
+    return [...new Set(assets.map((asset) => asset.object_key).filter(Boolean))];
   }
 
   async listAssetsForDeletion({ id, manageTokenHash }) {
     const book = await this.findManagedBook(id, manageTokenHash);
     if (!book || book.status !== "deleting") return [];
-    return this.listAssets(id);
+    const assets = await this.listAssets(id);
+    return [...new Set(assets.map((asset) => asset.object_key).filter(Boolean))];
   }
 
   async deleteBook({ id, manageTokenHash }) {

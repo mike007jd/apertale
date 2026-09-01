@@ -1,4 +1,4 @@
-/* Every scale lives in design/tokens.generated.css, which main.tsx imports
+/* Every scale lives in design/tokens.css, which main.tsx imports
    first. This file may consume tokens; it must never redefine one. The only
    custom properties declared here are the two the renderer writes at runtime. */
 

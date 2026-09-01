@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { acquireAssetUrl, acquireAssetUrls, isStoredAssetId, type AssetUrlLease } from "./assetStore";
 import { smootherstep } from "./design/curves";
 import { recordDiagnostic } from "./diagnostics";
-import { coverBoardMaterials, createCoverEndpaperCanvas, negativeZEndpaperMaterials, paintCoverEndpaper } from "./endpaper";
+import { coverBoardMaterials, createCoverEndpaperCanvas, paintCoverEndpaper } from "./endpaper";
 import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
 import { spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
@@ -86,12 +86,9 @@ function clamp(value: number, min = 0, max = 1) {
  * paragraph became one unbreakable line that ran off the bottom of the page.
  * Intl.Segmenter knows where each script actually allows a break.
  */
-const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
-  ? new Intl.Segmenter(undefined, { granularity: "word" })
-  : null;
+const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
 
 function segmentsOf(text: string): string[] {
-  if (!segmenter) return text.split(" ").map((word, index) => (index === 0 ? word : ` ${word}`));
   return [...segmenter.segment(text)].map((entry) => entry.segment);
 }
 
@@ -501,7 +498,6 @@ type SceneElement = {
   frameTextures: THREE.Texture[];
   loadedFrameIndices: Set<number>;
   frameIndex: number;
-  seenFrameIndices: Set<number>;
   hoverAmount: number;
   focusAmount: number;
   spin: number;
@@ -573,7 +569,6 @@ function buildSceneElement(
       frameTextures: [],
       loadedFrameIndices: new Set([0]),
       frameIndex: 0,
-      seenFrameIndices: new Set([0]),
       hoverAmount: 0,
       focusAmount: 0,
       spin: 0,
@@ -639,7 +634,6 @@ function buildSceneElement(
     frameTextures,
     loadedFrameIndices,
     frameIndex: 0,
-    seenFrameIndices: new Set([0]),
     hoverAmount: 0,
     focusAmount: 0,
     spin: 0,
@@ -855,7 +849,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
         new THREE.BoxGeometry(BOARD_W, BOARD_H, BOARD_T, 1, 1, 1),
         printedFront
           ? coverBoardMaterials(coverMaterial, coverFaceMaterial, insideCoverMaterial)
-          : negativeZEndpaperMaterials(coverMaterial, endpaperMaterial),
+          : coverBoardMaterials(coverMaterial, coverMaterial, endpaperMaterial),
       );
       board.castShadow = false;
       board.receiveShadow = true;
@@ -1038,7 +1032,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       // in front of the real cover and reads as a missing texture. Reusing the
       // mapped cover face preserves one continuous printed case through the
       // handoff; once open, this face is underneath the left page.
-      negativeZEndpaperMaterials(pageBlockMaterial, coverFaceMaterial),
+      coverBoardMaterials(pageBlockMaterial, pageBlockMaterial, coverFaceMaterial),
     );
     const rightStack = new THREE.Mesh(pageBlockGeometry, pageBlockMaterial);
     /**
@@ -1391,7 +1385,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
      * position and lookAt directly, and a ResizeObserver fires constantly in a
      * window docked beside a chat pane.
      */
-    const framing = { aspect: 1.6, z: 12.05, y: -2.169, targetY: -0.08 };
+    const framing = { z: 12.05, y: -2.169, targetY: -0.08 };
 
     function applyCamera() {
       // u rises with how far the board has swung; s peaks at the midpoint,
@@ -1457,7 +1451,6 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       camera.aspect = width / Math.max(height, 1);
       const verticalFov = THREE.MathUtils.degToRad(camera.fov);
       const horizontalFit = 9.7 / (2 * Math.tan(verticalFov / 2) * camera.aspect);
-      framing.aspect = camera.aspect;
       framing.z = Math.max(12.05, horizontalFit);
       framing.y = framing.z * -0.18;
       // The aim used to step 1.67 world units in one frame as a window crossed
@@ -1599,7 +1592,6 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
 
     const anchorWorld = new THREE.Vector3();
     let lastFrameTime = performance.now();
-    let frame = 0;
     let lastSpreadId = "";
     let renderedEvidenceKey = "";
     let renderedEvidenceCandidate = "";
@@ -1800,14 +1792,6 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
             sceneElement.frameIndex = frameIndex;
             sceneElement.materials[0].map = sceneElement.frameTextures[frameIndex];
             sceneElement.materials[0].needsUpdate = true;
-            if (!sceneElement.seenFrameIndices.has(frameIndex)) {
-              sceneElement.seenFrameIndices.add(frameIndex);
-              recordDiagnostic("frame-sequence:advance", {
-                elementId: sceneElement.id,
-                frameIndex,
-                frameCount: sceneElement.frameTextures.length,
-              });
-            }
           }
         }
         sceneElement.materials.forEach((material) => {
@@ -1884,8 +1868,6 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       // whole-case pivot owns their pose rather than their visibility.
       leftPage.visible = rightPage.visible = true;
 
-      frame += 1;
-      if (frame % 60 === 0) renderer.info.reset();
       // The case follows the caller's progress rather than owning a timeline of
       // its own, so opening and closing are the same code path read in
       // opposite directions.

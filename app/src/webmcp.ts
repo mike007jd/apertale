@@ -13,7 +13,7 @@ import {
   sourcePhotoAssetRoleIssues,
 } from "./bookAssetContract";
 import { isStoredAssetId } from "./assetId";
-import { IMAGE_HANDOFF_ASSET_USES, abortImageHandoff, requestImageHandoff } from "./imageHandoff";
+import { IMAGE_HANDOFF_ASSET_USES, dismissImageHandoff, requestImageHandoff } from "./imageHandoff";
 import type { AuthoringSurfaceRequest } from "./authoringSurface";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
@@ -22,7 +22,6 @@ import { BOOK_ELEMENT_ID_PATTERN, BOOK_ELEMENT_ID_PATTERN_SOURCE, MOTION_PRESETS
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, PreparedBookBackground, PreparedBookLayer, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 import {
   QUALITY_CONTRACT_VERSION,
-  MAX_BOOK_UPLOADED_ASSETS,
   QUALITY_REVIEW_MAX_ROUNDS,
   QUALITY_RUBRIC,
   QUALITY_VISUAL_CRITERION_IDS,
@@ -34,6 +33,7 @@ import {
   AUTHORING_GUIDE_DETAIL,
   CREATION_BOOK_TYPES,
   CREATION_READINESS_VERSION,
+  MAX_BOOK_PUBLISHABLE_ASSETS,
   PHOTO_SOURCE_USES,
   PROJECT_CONTEXT_DETAILS,
   SITE_TOOL,
@@ -42,7 +42,6 @@ import {
   creationBriefSourceAssetIds,
   type CreationBriefPayload,
 } from "./authoringContract";
-const compact = (value: unknown) => JSON.stringify(value);
 
 type ToolInput = Record<string, unknown>;
 const uncancelledToolSignal = new AbortController().signal;
@@ -256,7 +255,7 @@ async function runTool(name: string, signal: AbortSignal, operation: () => unkno
     const result = await operation();
     canceled(signal);
     recordDiagnostic("webmcp:tool-success", { name });
-    return compact(result);
+    return JSON.stringify(result);
   } catch (error) {
     const aborted = signal.aborted || (error instanceof DOMException && error.name === "AbortError");
     recordDiagnostic(aborted ? "webmcp:tool-canceled" : "webmcp:tool-failure", {
@@ -491,6 +490,10 @@ export function registerWebMcpTools(
     registeredCount += 1;
   });
   const sessionResults = new BoundedMap<string, unknown>(128);
+  const remember = <Result>(requestId: string, result: Result): Result => {
+    sessionResults.set(requestId, result);
+    return result;
+  };
   type PendingPresentation = {
     result: unknown;
     target: {
@@ -504,8 +507,9 @@ export function registerWebMcpTools(
   };
   const pendingPresentations = new BoundedMap<string, PendingPresentation>(16);
   const activeImageHandoffs = new Map<string, ReturnType<typeof requestImageHandoff>>();
+  const CANCELLED_HANDOFF_REASON = "The request was cancelled before the reader chose.";
   const cancelActiveImageHandoffs = () => {
-    activeImageHandoffs.forEach((_, requestId) => abortImageHandoff(requestId));
+    activeImageHandoffs.forEach((_, requestId) => dismissImageHandoff(requestId, CANCELLED_HANDOFF_REASON));
     activeImageHandoffs.clear();
   };
   let authoringGuideRead = false;
@@ -702,9 +706,7 @@ export function registerWebMcpTools(
           const expectedRevision = requiredRevision(input);
           const preconditionConflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
           if (preconditionConflict) {
-            const result = preconditionConflict;
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, preconditionConflict);
           }
           if (action === "open") {
             const bookId = requiredString(input, "bookId");
@@ -714,8 +716,7 @@ export function registerWebMcpTools(
             });
             if (!openResult.ok) {
               if (openResult.code === "revision_conflict") {
-                sessionResults.set(requestId, openResult);
-                return openResult;
+                return remember(requestId, openResult);
               }
               invalid(openResult.summary);
             }
@@ -740,8 +741,7 @@ export function registerWebMcpTools(
             canceled(options?.signal ?? uncancelledToolSignal);
             const conflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
             if (conflict) {
-              sessionResults.set(requestId, conflict);
-              return conflict;
+              return remember(requestId, conflict);
             }
             const roleIssues = coverAssetRoleIssues(coverAssetId, validatedAssets);
             if (roleIssues.length > 0) {
@@ -751,8 +751,7 @@ export function registerWebMcpTools(
                 currentRevision: bookEngine.getSnapshot().document.revision,
                 summary: roleIssues[0],
               };
-              sessionResults.set(requestId, result);
-              return result;
+              return remember(requestId, result);
             }
             const result = await bookEngine.dispatchCoordinated({
               type: "set-book-cover",
@@ -762,10 +761,9 @@ export function registerWebMcpTools(
               assetId: coverAssetId,
               validatedLocalAssetIds: validatedAssets.map((asset) => asset.id),
             }, "agent", options?.signal);
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, result);
           }
-          if (action === "begin-critique") {
+          if (action === "begin-critique" || action === "record-critique") {
             const creationBrief = bookEngine.getQualityLifecycle()?.creationBrief;
             if (creationBrief) {
               const validation = await inspectCurrentDocumentAssetRoles(
@@ -774,49 +772,25 @@ export function registerWebMcpTools(
               );
               const conflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
               if (conflict) {
-                sessionResults.set(requestId, conflict);
-                return conflict;
+                return remember(requestId, conflict);
               }
               if (validation.issues.length > 0) {
-                const result = assetRoleFailure(validation.issues);
-                sessionResults.set(requestId, result);
-                return result;
+                return remember(requestId, assetRoleFailure(validation.issues));
               }
             }
-            const result = await bookEngine.beginQualityReviewCoordinated(
-              expectedDocumentId,
-              expectedRevision,
-              options?.signal,
-            );
-            sessionResults.set(requestId, result);
-            return result;
-          }
-          if (action === "record-critique") {
-            const creationBrief = bookEngine.getQualityLifecycle()?.creationBrief;
-            if (creationBrief) {
-              const validation = await inspectCurrentDocumentAssetRoles(
-                creationBrief,
-                options?.signal ?? uncancelledToolSignal,
+            const result = action === "begin-critique"
+              ? await bookEngine.beginQualityReviewCoordinated(
+                expectedDocumentId,
+                expectedRevision,
+                options?.signal,
+              )
+              : await bookEngine.recordQualityReviewCoordinated(
+                input.qualityReview as QualityVisualReviewSubmission,
+                expectedDocumentId,
+                expectedRevision,
+                options?.signal,
               );
-              const conflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
-              if (conflict) {
-                sessionResults.set(requestId, conflict);
-                return conflict;
-              }
-              if (validation.issues.length > 0) {
-                const result = assetRoleFailure(validation.issues);
-                sessionResults.set(requestId, result);
-                return result;
-              }
-            }
-            const result = await bookEngine.recordQualityReviewCoordinated(
-              input.qualityReview as QualityVisualReviewSubmission,
-              expectedDocumentId,
-              expectedRevision,
-              options?.signal,
-            );
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, result);
           }
           if (action === "adopt-creation-brief") {
             if (!authoringGuideRead) invalid("read get_project_context with detail authoring-guide before attaching a creation brief.");
@@ -827,8 +801,7 @@ export function registerWebMcpTools(
             );
             const conflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
             if (conflict) {
-              sessionResults.set(requestId, conflict);
-              return conflict;
+              return remember(requestId, conflict);
             }
             const result = await bookEngine.adoptCreationBriefCoordinated(
               creationBrief ?? {},
@@ -838,8 +811,7 @@ export function registerWebMcpTools(
               validation.issues,
               options?.signal,
             );
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, result);
           }
           if (action !== "create") invalid("action must be open, create, adopt-creation-brief, set-cover, begin-critique, or record-critique.");
           if (!authoringGuideRead) {
@@ -851,8 +823,7 @@ export function registerWebMcpTools(
           canceled(options?.signal ?? uncancelledToolSignal);
           const sourceValidationConflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
           if (sourceValidationConflict) {
-            sessionResults.set(requestId, sourceValidationConflict);
-            return sourceValidationConflict;
+            return remember(requestId, sourceValidationConflict);
           }
           const validatedSourceAssetIds = validatedSourceAssets
             .filter((asset) => asset.assetUse === "source-photo")
@@ -871,8 +842,7 @@ export function registerWebMcpTools(
               summary: "This creation brief needs a little more information before Apertale can create the book.",
               readiness,
             };
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, result);
           }
           const coverAssetId = requiredString(input, "coverAssetId");
           const spreads = input.spreads.map((raw, index) => {
@@ -927,16 +897,15 @@ export function registerWebMcpTools(
               ...spread.layers.flatMap((layer) => layer.frameAssetIds?.length ? layer.frameAssetIds : [layer.assetId]),
             ]),
           ]);
-          if (publishableAssetIds.size > MAX_BOOK_UPLOADED_ASSETS) {
+          if (publishableAssetIds.size > MAX_BOOK_PUBLISHABLE_ASSETS) {
             const result = {
               ok: false as const,
               code: "creation_artifact_incomplete" as const,
               currentRevision: bookEngine.getSnapshot().document.revision,
               summary: "Apertale did not create the book because it cannot fit the publishing asset limit.",
-              issues: [`The finished book renders ${publishableAssetIds.size} local images, above the publishable limit of ${MAX_BOOK_UPLOADED_ASSETS}.`],
+              issues: [`The finished book renders ${publishableAssetIds.size} local images, above the publishable limit of ${MAX_BOOK_PUBLISHABLE_ASSETS}.`],
             };
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, result);
           }
           const validatedLocalAssets = await getAssetMetadata(requestedAssetIds);
           if (validatedLocalAssets.length !== requestedAssetIds.length) {
@@ -949,14 +918,12 @@ export function registerWebMcpTools(
               summary: "Apertale did not create the book because its complete prepared asset set is no longer available in this browser.",
               issues: [`The complete prepared book is missing ${missingCount} browser-local image${missingCount === 1 ? "" : "s"}.`],
             };
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, result);
           }
           canceled(options?.signal ?? uncancelledToolSignal);
           const assetValidationConflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
           if (assetValidationConflict) {
-            sessionResults.set(requestId, assetValidationConflict);
-            return assetValidationConflict;
+            return remember(requestId, assetValidationConflict);
           }
           const roleIssues = preparedBookAssetIssues(
             { coverAssetId, spreads },
@@ -971,8 +938,7 @@ export function registerWebMcpTools(
               summary: "Apertale did not create the book because one or more image assets do not fit their required role.",
               issues: roleIssues,
             };
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, result);
           }
           const result = await bookEngine.dispatchCoordinated({
             type: "create-book",
@@ -1003,8 +969,7 @@ export function registerWebMcpTools(
             });
             return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
           }
-          sessionResults.set(requestId, result);
-          return result;
+          return remember(requestId, result);
         }),
       },
       { signal: controller.signal },
@@ -1199,9 +1164,7 @@ export function registerWebMcpTools(
           const expectedRevision = requiredRevision(input);
           const preconditionConflict = documentPreconditionConflict(expectedDocumentId, expectedRevision);
           if (preconditionConflict) {
-            const result = preconditionConflict;
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, preconditionConflict);
           }
           let theme = bookEngine.getSnapshot().session.sceneThemeId;
           if (typeof input.theme !== "undefined") {
@@ -1254,8 +1217,7 @@ export function registerWebMcpTools(
             return resumePresentation(requestId, options?.signal ?? uncancelledToolSignal);
           }
           const result = { ok: true, theme, preview: bookEngine.getSnapshot().session.preview, spreadId, surface: visibleSurface, summary: "Presentation updated." };
-          sessionResults.set(requestId, result);
-          return result;
+          return remember(requestId, result);
         }),
       },
       { signal: controller.signal },
@@ -1320,7 +1282,7 @@ export function registerWebMcpTools(
           }
           // Agent-side cancellation has to reach the drawer, or a cancelled
           // request would leave it open with nothing listening.
-          const onAbort = () => abortImageHandoff(requestId);
+          const onAbort = () => dismissImageHandoff(requestId, CANCELLED_HANDOFF_REASON);
           signal.addEventListener("abort", onAbort, { once: true });
           if (signal.aborted) onAbort();
           try {
@@ -1336,8 +1298,7 @@ export function registerWebMcpTools(
                     ? "Only the returned ids were accepted. The image drawer remains open for replacements; refresh get_project_context(detail: \"assets\") before referencing any ids."
                     : "Refresh get_project_context(detail: \"assets\") before referencing these ids.",
                 };
-            sessionResults.set(requestId, result);
-            return result;
+            return remember(requestId, result);
           } finally {
             signal.removeEventListener("abort", onAbort);
             if (activeImageHandoffs.get(requestId) === pendingOutcome) activeImageHandoffs.delete(requestId);

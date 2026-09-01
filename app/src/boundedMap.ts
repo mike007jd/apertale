@@ -17,11 +17,8 @@ export class BoundedMap<Key, Value> extends Map<Key, Value> {
   override set(key: Key, value: Value) {
     if (this.has(key)) this.delete(key);
     super.set(key, value);
-    while (this.size > this.capacity) {
-      const oldest = this.keys().next();
-      if (oldest.done) break;
-      this.delete(oldest.value);
-    }
+    // set() grows the map by at most one entry, so one eviction restores the bound.
+    if (this.size > this.capacity) this.delete(this.keys().next().value as Key);
     return this;
   }
 }

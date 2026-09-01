@@ -268,17 +268,14 @@ async function publishDocumentLocked(
 }
 
 export async function revokePublication(documentId: string): Promise<PublicationRecord> {
-  return withPublicationLock(documentId, () => revokePublicationLocked(documentId));
-}
-
-async function revokePublicationLocked(documentId: string): Promise<PublicationRecord> {
-  const record = requireStoredRecord(documentId);
-  const shareToken = readShareToken(record.shareToken);
-  if (!shareToken) {
-    throw new PublicationError("The saved publication has no valid share capability to revoke.", {
-      code: "missing_capability",
-      status: 409,
-      retryable: false,
+  return withPublicationLock(documentId, async () => {
+    const record = requireStoredRecord(documentId);
+    const shareToken = readShareToken(record.shareToken);
+    if (!shareToken) {
+      throw new PublicationError("The saved publication has no valid share capability to revoke.", {
+        code: "missing_capability",
+        status: 409,
+        retryable: false,
     });
   }
   await requestJson(`/api/books/${encodeURIComponent(record.bookId)}/revoke`, {
@@ -299,33 +296,32 @@ async function revokePublicationLocked(documentId: string): Promise<PublicationR
   };
   persistRecord(revoked);
   return toPublicRecord(revoked);
+  });
 }
 
 export async function deletePublication(documentId: string): Promise<void> {
-  return withPublicationLock(documentId, () => deletePublicationLocked(documentId));
-}
-
-async function deletePublicationLocked(documentId: string): Promise<void> {
-  const record: StoredPublicationRecord = {
-    ...requireStoredRecord(documentId),
-    status: "deleting",
-    shareToken: undefined,
-    shareUrl: undefined,
-    publishedRevision: undefined,
-  };
-  // Persist the terminal intent before the request. If delivery becomes
-  // uncertain, any later publish rotates to a new server generation instead
-  // of racing the delayed DELETE against a reused id.
-  const deletingRaw = persistRecord(record);
-  const remote = await ensureRemoteRecord(record);
-  if (remote.kind === "definitely-not-owned") {
+  return withPublicationLock(documentId, async () => {
+    const record: StoredPublicationRecord = {
+      ...requireStoredRecord(documentId),
+      status: "deleting",
+      shareToken: undefined,
+      shareUrl: undefined,
+      publishedRevision: undefined,
+    };
+    // Persist the terminal intent before the request. If delivery becomes
+    // uncertain, any later publish rotates to a new server generation instead
+    // of racing the delayed DELETE against a reused id.
+    const deletingRaw = persistRecord(record);
+    const remote = await ensureRemoteRecord(record);
+    if (remote.kind === "definitely-not-owned") {
+      clearStoredRecordIfRawMatches(documentId, deletingRaw);
+      return;
+    }
+    if (remote.status !== "deleted") {
+      await deleteRemoteAttempt(record);
+    }
     clearStoredRecordIfRawMatches(documentId, deletingRaw);
-    return;
-  }
-  if (remote.status !== "deleted") {
-    await deleteRemoteAttempt(record);
-  }
-  clearStoredRecordIfRawMatches(documentId, deletingRaw);
+  });
 }
 
 async function deleteRemoteAttempt(record: StoredPublicationRecord) {
@@ -440,16 +436,11 @@ function canonicalAssetIds(values: string[] | undefined) {
 }
 
 function sameAssetPlan(left: string[] | undefined, right: string[]) {
-  const normalized = canonicalAssetIds(left);
-  return Array.isArray(left)
-    && normalized.length === right.length
-    && normalized.every((assetId, index) => assetId === right[index]);
+  return Array.isArray(left) && canonicalAssetIds(left).join("\n") === right.join("\n");
 }
 
 function tokenFromBytes(bytes: Uint8Array) {
-  let binary = "";
-  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+  return btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
 function createShareToken() {
