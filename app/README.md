@@ -24,7 +24,7 @@ WebMCP is agent-neutral, not universally callable. Any Agent whose browser or ho
 
 ## WebMCP tool surface
 
-The page registers exactly seven project-level tools through `document.modelContext.registerTool()`:
+The page registers exactly eight project-level tools through `document.modelContext.registerTool()`:
 
 1. `get_project_context`
 2. `manage_book`
@@ -32,15 +32,16 @@ The page registers exactly seven project-level tools through `document.modelCont
 4. `apply_scene_patch`
 5. `set_presentation`
 6. `undo_project_change`
-7. `request_image_handoff`
+7. `sketch_storyboard`
+8. `request_image_handoff`
 
-Every mutating tool requires a `requestId`. Book and presentation mutations also require `expectedDocumentId` and `expectedRevision` from the same current context; successful document mutations include an exact `undoToken`. `request_image_handoff` requires an explicit asset role: `source-photo` adds reader references to the next creation brief, while `book-art` imports generated covers, spreads, clean plates, or cutouts into the reusable asset registry. `set_presentation` can acknowledge either a visible reader spread or a shelf cover; neither operation changes the document revision.
+Every mutating tool requires a `requestId`. Book and presentation mutations also require `expectedDocumentId` and `expectedRevision` from the same current context; successful document mutations include an exact `undoToken`. `sketch_storyboard` draws normalized pencil strokes on the blank 3D book and reads the reader's red annotations back through project context before changing only marked spreads. `request_image_handoff` requires an explicit asset role: `source-photo` adds reader references to the next creation brief, while `book-art` imports generated covers, spreads, clean plates, or cutouts into the reusable asset registry. `set_presentation` can acknowledge either a visible reader spread or a shelf cover; neither operation changes the document revision.
 
 `get_project_context` defaults to a compact response. Focused details add `authoring-guide`, structured `creation-readiness`, local `assets`, a selected reveal, or the versioned `quality-review` rubric/render manifest. Create reads the guide, checks readiness, asks every blocking question, and reuses the same brief; the command runs that gate again and fails closed. A legacy personal book can use the one-time, revision-bound `adopt-creation-brief` action with the same gate; samples and books that already own a brief cannot be reclassified. After real rendering, `manage_book` explicitly begins and records at most two critique rounds. `manage_book` also opens books and assigns a validated browser-local portrait cover. `apply_scene_patch` covers Lift, transform, structured reveal, motion, interaction, add/remove, and ordering through one bounded atomic contract. A local `asset:` ID is accepted only after the IndexedDB adapter proves that it exists. Internal fine-grained commands remain shared with the human UI but are not exposed as additional WebMCP tools.
 
 Deterministic checks prove structural facts such as cover/final-base presence, an original-composite reference, separate personal-photo provenance, 2–4 foreground layers, meaningful interaction, text bounds, and current-revision render events. WebGL waits for the exact spread asset/texture set; the 2D fallback composes the same final base and non-procedural foregrounds, and neither path records evidence after a load failure. These checks do not claim aesthetic quality. The Agent must inspect real cover/spread frames for composition, readability, consistency, photo fidelity, alpha edges, and promotional value, then submit evidence-backed blocker/warn/note results. Blockers close Share; recorded warnings may proceed only in a sample-ready report. The Worker accepts checked-in `/assets/...` references only from the generated bundled-asset catalog and revalidates the same brief/provenance policy.
 
-The seven registration promises are treated as one fail-closed set. One registration failure aborts the shared lifecycle signal and removes any partial registration. Both Vite and the deployment Worker send `Origin-Agent-Cluster: ?1` and `Permissions-Policy: tools=(self)`.
+The eight registration promises are treated as one fail-closed set. One registration failure aborts the shared lifecycle signal and removes any partial registration. Both Vite and the deployment Worker send `Origin-Agent-Cluster: ?1` and `Permissions-Policy: tools=(self)`.
 
 ## Run and verify
 

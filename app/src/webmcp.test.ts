@@ -5,6 +5,7 @@ import { completeImageHandoff, currentImageHandoff } from "./imageHandoff";
 import { QUALITY_VISUAL_CRITERION_IDS } from "./qualityContract";
 import { registerWebMcpTools } from "./webmcp";
 import { getAssetMetadata, type StoredAssetMetadata } from "./assetStore";
+import { addStoryboardAnnotation, getStoryboardSnapshot, resetStoryboard } from "./storyboard";
 
 const verifiedAssets = vi.hoisted(() => new Map<string, StoredAssetMetadata>());
 
@@ -113,6 +114,7 @@ const preparedBookInput = (drafts: DraftSpread[]) => {
 
 describe("WebMCP registration", () => {
   beforeEach(() => {
+    resetStoryboard();
     const storage = new Map<string, string>();
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -143,6 +145,40 @@ describe("WebMCP registration", () => {
     expect(onToolStart).not.toHaveBeenCalled();
     await tools[0]!.execute({}, { signal: new AbortController().signal });
     expect(onToolStart).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
+  it("shares Codex pencil sketches and reader annotations through project context", async () => {
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const revealStoryboard = vi.fn();
+    const cleanup = registerWebMcpTools(() => undefined, () => undefined, () => undefined, revealStoryboard);
+    await vi.waitFor(() => expect(tools).toHaveLength(SITE_TOOL_NAMES.length));
+    const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
+
+    const result = JSON.parse(String(await tool("sketch_storyboard").execute({
+      requestId: "storyboard-1",
+      action: "replace",
+      spreads: [{
+        index: 0,
+        caption: "The guide finds a hidden path",
+        strokes: [{ points: [{ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.5 }] }],
+      }],
+    }, { signal: new AbortController().signal })));
+    expect(result).toMatchObject({ ok: true, storyboard: { revision: 1 } });
+    expect(revealStoryboard).toHaveBeenCalledOnce();
+
+    addStoryboardAnnotation(0, { points: [{ x: 0.2, y: 0.3 }, { x: 0.25, y: 0.35 }] });
+    const context = JSON.parse(String(await tool("get_project_context").execute({}, { signal: new AbortController().signal })));
+    expect(context.storyboard.spreads[0]).toMatchObject({
+      caption: "The guide finds a hidden path",
+      annotations: [{ points: [{ x: 0.2, y: 0.3 }, { x: 0.25, y: 0.35 }] }],
+    });
+    expect(getStoryboardSnapshot().revision).toBe(2);
     cleanup();
   });
 

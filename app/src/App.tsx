@@ -16,6 +16,7 @@ import {
   Lock,
   LockOpen,
   Minus,
+  PencilSimple,
   Plus,
   ImageSquare,
   LinkSimple,
@@ -88,6 +89,7 @@ import type { PublicationRecord } from "./publishingClient";
 import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
 import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
+import { addStoryboardAnnotation, getStoryboardSnapshot, subscribeToStoryboard, undoStoryboardAnnotation } from "./storyboard";
 import { registerWebMcpTools } from "./webmcp";
 
 const runtimeParams = new URLSearchParams(window.location.search);
@@ -279,6 +281,9 @@ export function App() {
   const [elementPromptCopied, setElementPromptCopied] = useState(false);
   const [elementPromptCopyError, setElementPromptCopyError] = useState(false);
   const [creationWorkshop, dispatchCreationWorkshop] = useReducer(reduceCreationWorkshop, INITIAL_CREATION_WORKSHOP);
+  const storyboard = useSyncExternalStore(subscribeToStoryboard, getStoryboardSnapshot, getStoryboardSnapshot);
+  const [workshopSpreadIndex, setWorkshopSpreadIndex] = useState(0);
+  const [storyPencilActive, setStoryPencilActive] = useState(false);
   const [workshopHydrated, setWorkshopHydrated] = useState(false);
   const [workshopHydrationAttempt, setWorkshopHydrationAttempt] = useState(0);
   const [assetImporting, setAssetImporting] = useState(false);
@@ -307,6 +312,9 @@ export function App() {
   const creationSource = creationWorkshop.mode;
   const creationPhotoUse = creationWorkshop.photoUse;
   const workshopAssets = creationWorkshop.assets;
+  const activeWorkshopSpreadIndex = Math.min(workshopSpreadIndex, creationSpreadCount - 1);
+  const currentStoryboardSpread = storyboard.spreads.find((item) => item.index === activeWorkshopSpreadIndex);
+  const storyboardVisible = storyboard.spreads.some((item) => item.sketches.length > 0);
   const pageTurnIndexRef = useRef(snapshot.session.currentSpreadIndex);
   const pageTurnCountRef = useRef(snapshot.document.spreads.length);
   const pageTurnDocumentRef = useRef(snapshot.document.id);
@@ -375,6 +383,14 @@ export function App() {
     return () => turnController.dispose();
   }, [turnController]);
 
+  useEffect(() => {
+    setWorkshopSpreadIndex((current) => Math.min(current, creationSpreadCount - 1));
+  }, [creationSpreadCount]);
+
+  useEffect(() => {
+    if (!showCreateGuide) setStoryPencilActive(false);
+  }, [showCreateGuide]);
+
   const turnPage = turnController.turnPage;
   const onPageGesture = turnController.onPageGesture;
   const workshopSnapshot = useMemo<BookSnapshot>(() => ({
@@ -382,17 +398,23 @@ export function App() {
       id: "apertale-new-book-workshop",
       revision: 1,
       title: "Untitled Apertale",
-      spreads: [{ id: "blank-workshop-spread", order: 0, title: "", body: "", elements: [] }],
+      spreads: Array.from({ length: creationSpreadCount }, (_, index) => ({
+        id: `blank-workshop-spread-${index + 1}`,
+        order: index,
+        title: "",
+        body: "",
+        elements: [],
+      })),
     },
     session: {
-      currentSpreadIndex: 0,
+      currentSpreadIndex: activeWorkshopSpreadIndex,
       selectionId: null,
       sceneThemeId: snapshot.session.sceneThemeId,
       preview: true,
       quality: snapshot.session.quality,
     },
     lastAction: null,
-  }), [snapshot.session.quality, snapshot.session.sceneThemeId]);
+  }), [activeWorkshopSpreadIndex, creationSpreadCount, snapshot.session.quality, snapshot.session.sceneThemeId]);
   const webGlAvailable = useMemo(() => supportsWebGl2(forceFallback), []);
   const readerSceneKey = readerSceneStructureKey(snapshot, "reader");
   const activeSceneKey = showCreateGuide ? readerSceneStructureKey(workshopSnapshot, "workshop") : readerSceneKey;
@@ -1213,7 +1235,8 @@ export function App() {
     setWebMcpAvailable,
     presentAuthoringSurface,
     () => setCodexFoundPage(true),
-  ), [presentAuthoringSurface]);
+    () => beginOpenCodexGuide(null),
+  ), [beginOpenCodexGuide, presentAuthoringSurface]);
 
   useEffect(() => {
     const updateMotionPreference = () => {
@@ -1323,8 +1346,11 @@ export function App() {
 
   useEffect(() => {
     const dialog = createGuideCard.current;
-    if (showCreateGuide && dialog && !dialog.open) dialog.showModal();
-  }, [showCreateGuide]);
+    if (!showCreateGuide || !dialog) return;
+    if (dialog.open) dialog.close();
+    if (storyPencilActive) dialog.show();
+    else dialog.showModal();
+  }, [showCreateGuide, storyPencilActive]);
 
   useEffect(() => {
     const dialog = elementAgentCard.current;
@@ -1839,7 +1865,7 @@ export function App() {
 
       <section
         ref={stage}
-        className={`stage ${showCreateGuide ? "is-creation-workshop" : ""}`}
+        className={`stage ${showCreateGuide ? "is-creation-workshop" : ""} ${storyboardVisible ? "has-storyboard" : ""} ${storyPencilActive ? "is-story-pencil-active" : ""}`}
         /**
          * Hidden only while the shelf is SETTLED over it. `hidden` applies
          * display:none, so keying this on showLibrary alone meant both the
@@ -1866,6 +1892,8 @@ export function App() {
                 ? authoringSurfaceRequest.renderEvidenceToken
                 : undefined}
               mode={showCreateGuide ? "workshop" : "reader"}
+              workshopDrawing={showCreateGuide ? { revision: storyboard.revision, spread: currentStoryboardSpread } : undefined}
+              annotationEnabled={showCreateGuide && storyPencilActive}
               // Preview is a reader's view, and the workshop book is a prop.
               // Neither may be dragged, and on a phone the canvas is the only
               // surface large enough that a stray drag reaches it at all.
@@ -1876,6 +1904,9 @@ export function App() {
               onHover={showCreateGuide ? () => undefined : setHoveredId}
               onMoveElement={showCreateGuide ? () => undefined : (elementId, x, y) => { void humanEdit(elementId, { x, y }); }}
               onPageGesture={showCreateGuide ? () => undefined : onPageGesture}
+              onAnnotationStroke={showCreateGuide
+                ? (stroke) => addStoryboardAnnotation(activeWorkshopSpreadIndex, stroke)
+                : undefined}
               onPageTurnReady={showCreateGuide ? undefined : (direction, ready) => setPageTurnReadiness((current) => (
                 current.navigationKey === pageTurnNavigationKey
                   ? current[direction] === ready ? current : { ...current, [direction]: ready }
@@ -2115,6 +2146,40 @@ export function App() {
         <section className="creation-workshop">
           <div className="workshop-atmosphere" aria-hidden="true" />
           <dialog className="workshop-ui" ref={createGuideCard} aria-labelledby="codex-guide-title">
+            {storyboardVisible && !handoffIsBookArt && (
+              <div className="story-pencil-controls" aria-label="Storyboard pages and correction pencil">
+                <button
+                  type="button"
+                  onClick={() => setWorkshopSpreadIndex((index) => Math.max(0, index - 1))}
+                  disabled={activeWorkshopSpreadIndex === 0}
+                  aria-label="Previous storyboard spread"
+                ><ArrowLeft size={18} weight="bold" /></button>
+                <span className="story-pencil-beat">
+                  <small>Storyboard {activeWorkshopSpreadIndex + 1}/{creationSpreadCount}</small>
+                  <strong>{currentStoryboardSpread?.caption ?? "Waiting for Codex sketch"}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setWorkshopSpreadIndex((index) => Math.min(creationSpreadCount - 1, index + 1))}
+                  disabled={activeWorkshopSpreadIndex === creationSpreadCount - 1}
+                  aria-label="Next storyboard spread"
+                ><ArrowRight size={18} weight="bold" /></button>
+                <button
+                  type="button"
+                  className={`story-pencil-toggle ${storyPencilActive ? "is-active" : ""}`}
+                  onClick={() => setStoryPencilActive((active) => !active)}
+                  aria-pressed={storyPencilActive}
+                  aria-label={storyPencilActive ? "Stop marking changes" : "Mark changes on this spread"}
+                ><PencilSimple size={19} weight={storyPencilActive ? "fill" : "regular"} /><span>{storyPencilActive ? "Marking" : "Mark changes"}</span></button>
+                {Boolean(currentStoryboardSpread?.annotations.length) && (
+                  <button
+                    type="button"
+                    onClick={() => undoStoryboardAnnotation(activeWorkshopSpreadIndex)}
+                    aria-label="Undo last red mark"
+                  ><ArrowCounterClockwise size={18} /></button>
+                )}
+              </div>
+            )}
             <header className="workshop-topbar">
               <button
                 className="library-button"

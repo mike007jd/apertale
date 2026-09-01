@@ -404,7 +404,7 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "plan-art",
-      rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Generate illustrated compositions; preserve source-photo geometry for preserved-photo-album.",
+      rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Before final art, call sketch_storyboard action replace so the complete rough book appears on the blank 3D pages. Read red annotations from project context and update only marked spreads, clearing applied marks through resolvedAnnotations. Generate illustrated compositions after that visible plan; preserve source-photo geometry for preserved-photo-album.",
     },
     {
       id: "imagegen-before-create",

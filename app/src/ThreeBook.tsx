@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { acquireAssetUrl, acquireAssetUrls, isStoredAssetId, type AssetUrlLease } from "./assetStore";
 import { smootherstep } from "./design/curves";
+import { durationMs } from "./design/tokens";
 import { recordDiagnostic } from "./diagnostics";
 import { coverBoardMaterials, createCoverEndpaperCanvas, paintCoverEndpaper } from "./endpaper";
 import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
@@ -9,6 +10,7 @@ import { readerCameraPage, readerSinglePagePresentation, spreadFraction } from "
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
 import { readerSceneStructureKey, resourceAttemptIsCurrent, sceneAssetsReadyForEvidence, spreadResourceIndexes, type ReaderRenderEvidence } from "./renderEvidence";
+import type { StoryboardPoint, StoryboardSpread, StoryboardStroke } from "./storyboard";
 import { renderedElementAssetIds, spreadArtworkFit, spreadBaseAssetId, type BookElement, type BookSnapshot, type Spread, type TurnState } from "./types";
 
 type Props = {
@@ -16,6 +18,8 @@ type Props = {
   turn: TurnState;
   renderEvidenceToken?: string;
   mode?: "reader" | "workshop";
+  workshopDrawing?: { revision: number; spread?: StoryboardSpread };
+  annotationEnabled?: boolean;
   readOnly?: boolean;
   /**
    * 1 is fully open, 0 is closed with the cover facing the reader. The caller
@@ -39,6 +43,7 @@ type Props = {
   onHover: (elementId: string | null) => void;
   onMoveElement: (elementId: string, x: number, y: number) => void;
   onPageGesture: (direction: "forward" | "backward", phase: "start" | "move" | "end", amount: number) => void;
+  onAnnotationStroke?: (stroke: StoryboardStroke) => void;
   onPageTurnReady?: (direction: "forward" | "backward", ready: boolean) => void;
   onLoading: (documentId: string) => void;
   onReady: (documentId: string) => void;
@@ -53,6 +58,49 @@ type PagePair = {
   spread: THREE.CanvasTexture;
   overlay: THREE.CanvasTexture;
 };
+
+function paintStroke(
+  context: CanvasRenderingContext2D,
+  stroke: StoryboardStroke,
+  width: number,
+  height: number,
+  progress = 1,
+) {
+  const visiblePoints = Math.max(0, Math.min(stroke.points.length, Math.ceil(stroke.points.length * progress)));
+  if (visiblePoints < 2) return;
+  context.beginPath();
+  context.moveTo(stroke.points[0].x * width, stroke.points[0].y * height);
+  for (let index = 1; index < visiblePoints; index += 1) {
+    context.lineTo(stroke.points[index].x * width, stroke.points[index].y * height);
+  }
+  context.stroke();
+}
+
+function paintWorkshopDrawing(
+  pair: PagePair,
+  spread: StoryboardSpread | undefined,
+  draft: readonly StoryboardPoint[],
+  sketchProgress: number,
+) {
+  const canvas = pair.overlay.image as HTMLCanvasElement | undefined;
+  const context = canvas?.getContext("2d");
+  if (!canvas || !context) return;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.strokeStyle = "rgba(77, 70, 59, .62)";
+  context.lineWidth = 5.5;
+  const sketches = spread?.sketches ?? [];
+  sketches.forEach((stroke, index) => {
+    const strokeProgress = sketches.length === 0 ? 1 : Math.max(0, Math.min(1, sketchProgress * sketches.length - index));
+    paintStroke(context, stroke, canvas.width, canvas.height, strokeProgress);
+  });
+  context.strokeStyle = "rgba(230, 74, 61, .94)";
+  context.lineWidth = 8;
+  spread?.annotations.forEach((stroke) => paintStroke(context, stroke, canvas.width, canvas.height));
+  if (draft.length >= 2) paintStroke(context, { points: [...draft] }, canvas.width, canvas.height);
+  pair.overlay.needsUpdate = true;
+}
 
 /** Surfaces that never animate the case hold it fully open. */
 const STATIC_OPEN = { current: 1 } as const;
@@ -647,10 +695,10 @@ function buildSceneElement(
   };
 }
 
-export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader", readOnly = false, openProgress = STATIC_OPEN, handoffRect = NO_HANDOFF, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
+export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader", workshopDrawing, annotationEnabled = false, readOnly = false, openProgress = STATIC_OPEN, handoffRect = NO_HANDOFF, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const propsRef = useRef({ snapshot, turn, renderEvidenceToken, mode, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
-  propsRef.current = { snapshot, turn, renderEvidenceToken, mode, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
+  const propsRef = useRef({ snapshot, turn, renderEvidenceToken, mode, workshopDrawing, annotationEnabled, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
+  propsRef.current = { snapshot, turn, renderEvidenceToken, mode, workshopDrawing, annotationEnabled, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
   const sceneStructureKey = readerSceneStructureKey(snapshot, mode);
 
   useEffect(() => {
@@ -1284,6 +1332,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     const pointer = new THREE.Vector2();
     const stagePointer = new THREE.Vector2();
     const drag = { elementId: null as string | null, startX: 0, startY: 0, initialX: 0, initialY: 0, moved: false, pageDirection: null as "forward" | "backward" | null, amount: 0 };
+    let annotationDraft: StoryboardPoint[] = [];
+    let annotationPointerId: number | null = null;
     let hoveredId: string | null = null;
 
     let pagePairs = new Map<string, PagePair>();
@@ -1490,7 +1540,10 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       const pageHit = pageRaycaster.intersectObjects([leftPage, rightPage], false)[0];
       if (pageHit?.uv) stagePointer.set(pageHit.uv.x * 2 - 1, pageHit.uv.y * 2 - 1);
       else stagePointer.copy(pointer);
-      return rect;
+      return {
+        rect,
+        pagePoint: pageHit?.uv ? { x: pageHit.uv.x, y: 1 - pageHit.uv.y } : null,
+      };
     }
 
     function currentSpread() {
@@ -1514,12 +1567,20 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     function setHovered(elementId: string | null) {
       if (hoveredId === elementId) return;
       hoveredId = elementId;
-      renderer.domElement.style.cursor = elementId ? "pointer" : "";
+      renderer.domElement.style.cursor = propsRef.current.annotationEnabled ? "crosshair" : elementId ? "pointer" : "";
       propsRef.current.onHover(elementId);
     }
 
     function onPointerDown(event: PointerEvent) {
-      const rect = setPointer(event);
+      const { rect, pagePoint } = setPointer(event);
+      if (propsRef.current.annotationEnabled && pagePoint) {
+        annotationDraft = [pagePoint];
+        annotationPointerId = event.pointerId;
+        setHovered(null);
+        renderer.domElement.setPointerCapture(event.pointerId);
+        scheduleAnimation();
+        return;
+      }
       const elementId = pickElement();
       if (elementId) {
         const element = currentSpread().elements.find((item) => item.id === elementId);
@@ -1549,7 +1610,15 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     }
 
     function onPointerMove(event: PointerEvent) {
-      setPointer(event);
+      const { pagePoint } = setPointer(event);
+      if (annotationPointerId === event.pointerId) {
+        const previous = annotationDraft[annotationDraft.length - 1];
+        if (pagePoint && (!previous || Math.hypot(pagePoint.x - previous.x, pagePoint.y - previous.y) >= 0.003)) {
+          annotationDraft.push(pagePoint);
+          scheduleAnimation();
+        }
+        return;
+      }
       if (drag.elementId) {
         const rect = renderer.domElement.getBoundingClientRect();
         const element = currentSpread().elements.find((item) => item.id === drag.elementId);
@@ -1574,6 +1643,18 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     }
 
     function onPointerUp(event: PointerEvent) {
+      const { pagePoint } = setPointer(event);
+      if (annotationPointerId === event.pointerId) {
+        const previous = annotationDraft[annotationDraft.length - 1];
+        if (pagePoint && (!previous || Math.hypot(pagePoint.x - previous.x, pagePoint.y - previous.y) >= 0.003)) annotationDraft.push(pagePoint);
+        if (annotationDraft.length >= 2) propsRef.current.onAnnotationStroke?.({ points: annotationDraft });
+        annotationDraft = [];
+        annotationPointerId = null;
+        if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
+        renderer.domElement.style.cursor = propsRef.current.annotationEnabled ? "crosshair" : "";
+        scheduleAnimation();
+        return;
+      }
       if (drag.elementId) {
         const rect = renderer.domElement.getBoundingClientRect();
         const nextX = clamp(drag.initialX + (event.clientX - drag.startX) / (rect.width * 0.5));
@@ -1591,6 +1672,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     }
 
     function onPointerLeave() {
+      if (annotationPointerId !== null) return;
       setHovered(null);
     }
 
@@ -1603,6 +1685,9 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     const anchorWorld = new THREE.Vector3();
     let lastFrameTime = performance.now();
     let lastSpreadId = "";
+    let lastWorkshopPaintKey = "";
+    let revealedSketchKey = "";
+    let sketchRevealStartedAt = 0;
     let renderedEvidenceKey = "";
     let renderedEvidenceCandidate = "";
     let renderedEvidenceFrames = 0;
@@ -1701,6 +1786,24 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       // settle quickly. Keep content/interaction motion on its own cadence.
       const themeDelta = 1 - Math.exp(-deltaSeconds * 13);
       lastFrameTime = frameTime;
+
+      if (pagePair && propsRef.current.mode === "workshop") {
+        renderer.domElement.style.cursor = propsRef.current.annotationEnabled ? "crosshair" : "";
+        const drawing = propsRef.current.workshopDrawing;
+        const sketchKey = `${current.session.currentSpreadIndex}:${drawing?.spread?.sketchRevision ?? 0}`;
+        if (sketchKey !== revealedSketchKey) {
+          revealedSketchKey = sketchKey;
+          sketchRevealStartedAt = frameTime;
+        }
+        const revealProgress = reduced
+          ? 1
+          : smootherstep((frameTime - sketchRevealStartedAt) / durationMs.reveal);
+        const paintKey = `${drawing?.revision ?? 0}:${current.session.currentSpreadIndex}:${annotationDraft.length}:${Math.round(revealProgress * 60)}`;
+        if (paintKey !== lastWorkshopPaintKey) {
+          lastWorkshopPaintKey = paintKey;
+          paintWorkshopDrawing(pagePair, drawing?.spread, annotationDraft, revealProgress);
+        }
+      }
 
       const selectedPage = requestedOpen >= 0.999
         ? spread.elements.find((element) => element.id === current.session.selectionId)?.page

@@ -10,6 +10,7 @@
       "apply_scene_patch",
       "set_presentation",
       "undo_project_change",
+      "sketch_storyboard",
       "request_image_handoff"
     ]
   }

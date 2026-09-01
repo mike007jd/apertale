@@ -12,6 +12,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 
 - Use `../docs/assets/livingbook-day-theme-reference.png` as the primary editing-layout truth and `livingbook-night-theme-reference.png` as the same product in its cinematic night presentation preset.
 - The bottom `Create Your Own` action opens a full-screen blank-book workshop; it is a visible Agent/WebMCP handoff, not a form modal or second embedded AI composer.
+- Before final artwork, let Codex draw the complete rough storyboard directly on that blank 3D book with `sketch_storyboard`. Readers only add small red freehand corrections on the real page surface; Codex reads those annotations from project context, revises only affected spreads, clears applied marks, and continues without a review gate. Keep one pencil style and one annotation mode rather than a general drawing editor.
 - Enter and leave the `Create Your Own` workshop through one reversible, origin-aware paper transition: expand from the actual CTA, change the mounted scene only while the paper covers the viewport, and reveal the source back toward that CTA on exit. Lock repeated input during the handoff, preserve focus return, and use an immediate state handoff under Reduced Motion.
 - Keep day and night as presentation state outside the document revision. Document mutations use the shared command engine and remain undoable across human and WebMCP actions.
 - Render the book as a real WebGL scene with deforming page geometry, while preserving the 2D fallback and reduced-motion path.

@@ -18,6 +18,7 @@ import type { AuthoringSurfaceRequest } from "./authoringSurface";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { listProjectAssetReferences } from "./projectArtifact";
+import { applyStoryboardSketches, getStoryboardSnapshot, type StoryboardSketchInput } from "./storyboard";
 import { BOOK_ELEMENT_ID_PATTERN, BOOK_ELEMENT_ID_PATTERN_SOURCE, MOTION_PRESETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, PreparedBookBackground, PreparedBookLayer, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 import {
@@ -174,6 +175,54 @@ function parseFrames(raw: unknown): string[] | null | undefined {
     invalid("frameAssetIds must contain 2–6 asset ids.");
   }
   return raw.map((item) => String(item));
+}
+
+function parseStoryboardSpreads(raw: unknown): StoryboardSketchInput[] {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 12) invalid("spreads must contain 1–12 storyboard spreads.");
+  const seen = new Set<number>();
+  return raw.map((rawSpread, spreadPosition) => {
+    if (!rawSpread || typeof rawSpread !== "object" || Array.isArray(rawSpread)) invalid(`spreads[${spreadPosition}] must be an object.`);
+    const spread = rawSpread as ToolInput;
+    assertOnly(spread, ["index", "caption", "strokes"]);
+    const index = spread.index;
+    if (!Number.isInteger(index) || Number(index) < 0 || Number(index) > 11 || seen.has(Number(index))) {
+      invalid(`spreads[${spreadPosition}].index must be a unique integer from 0 to 11.`);
+    }
+    seen.add(Number(index));
+    if (!Array.isArray(spread.strokes) || spread.strokes.length > 36) invalid(`spreads[${spreadPosition}].strokes must contain at most 36 strokes.`);
+    const strokes = spread.strokes.map((rawStroke, strokeIndex) => {
+      if (!rawStroke || typeof rawStroke !== "object" || Array.isArray(rawStroke)) invalid(`spreads[${spreadPosition}].strokes[${strokeIndex}] must be an object.`);
+      const stroke = rawStroke as ToolInput;
+      assertOnly(stroke, ["points"]);
+      if (!Array.isArray(stroke.points) || stroke.points.length < 2 || stroke.points.length > 120) {
+        invalid(`spreads[${spreadPosition}].strokes[${strokeIndex}].points must contain 2–120 points.`);
+      }
+      return {
+        points: stroke.points.map((rawPoint, pointIndex) => {
+          if (!rawPoint || typeof rawPoint !== "object" || Array.isArray(rawPoint)) invalid(`point ${pointIndex} must be an object.`);
+          const point = rawPoint as ToolInput;
+          assertOnly(point, ["x", "y"]);
+          const x = optionalBoundedNumber(point, "x", 0, 1);
+          const y = optionalBoundedNumber(point, "y", 0, 1);
+          if (typeof x === "undefined" || typeof y === "undefined") invalid(`point ${pointIndex} requires x and y.`);
+          return { x, y };
+        }),
+      };
+    });
+    return {
+      index: Number(index),
+      caption: boundedString(spread, "caption", 160, true),
+      strokes,
+    };
+  });
+}
+
+function parseStoryboardIndexes(raw: unknown) {
+  if (typeof raw === "undefined") return [];
+  if (!Array.isArray(raw) || raw.length > 12 || raw.some((index) => !Number.isInteger(index) || Number(index) < 0 || Number(index) > 11)) {
+    invalid("resolvedAnnotations must contain spread indexes from 0 to 11.");
+  }
+  return [...new Set(raw.map(Number))];
 }
 
 function stableElementId(value: ToolInput, field: string) {
@@ -399,6 +448,38 @@ const creationBriefSchema = {
   additionalProperties: false,
 };
 
+const storyboardPointSchema = {
+  type: "object",
+  properties: {
+    x: { type: "number", minimum: 0, maximum: 1 },
+    y: { type: "number", minimum: 0, maximum: 1 },
+  },
+  required: ["x", "y"],
+  additionalProperties: false,
+};
+
+const storyboardSpreadSchema = {
+  type: "object",
+  properties: {
+    index: { type: "integer", minimum: 0, maximum: 11, description: "Zero-based spread index." },
+    caption: { type: "string", maxLength: 160, description: "Short story beat shown beside the book." },
+    strokes: {
+      type: "array",
+      maxItems: 36,
+      items: {
+        type: "object",
+        properties: {
+          points: { type: "array", minItems: 2, maxItems: 120, items: storyboardPointSchema },
+        },
+        required: ["points"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["index", "strokes"],
+  additionalProperties: false,
+};
+
 const qualityEvidenceSchema = {
   type: "object",
   properties: {
@@ -480,6 +561,7 @@ export function registerWebMcpTools(
   onStatus: (available: boolean) => void,
   presentAuthoringSurface: (request: AuthoringSurfaceRequest, signal: AbortSignal) => void | Promise<void> = () => undefined,
   onToolStart: () => void = () => undefined,
+  onStoryboardUpdate: () => void = () => undefined,
 ) {
   if (!document.modelContext?.registerTool) {
     recordDiagnostic("webmcp:unavailable");
@@ -612,6 +694,7 @@ export function registerWebMcpTools(
           const qualityLifecycle = detail === "quality-review" ? bookEngine.getQualityLifecycle() : null;
           const result = {
             ...context,
+            storyboard: getStoryboardSnapshot(),
             assets: detail === "assets"
               ? await listAssetMetadata()
               : await getAssetMetadata(currentSpread.elements.map((element) => element.assetId)),
@@ -1252,6 +1335,52 @@ export function registerWebMcpTools(
             expectedRevision: requiredRevision(input),
             undoToken: requiredString(input, "undoToken"),
           }, "agent", options?.signal);
+        }),
+      },
+      { signal: controller.signal },
+    ),
+    register(
+      {
+        name: SITE_TOOL.storyboard,
+        title: "Sketch storyboards",
+        description: "Draw rough pencil storyboards on the blank 3D book. Replace once for the whole plan; after reading red annotations from project context, update only marked spreads and clear applied marks. This never waits for review.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            requestId: { type: "string", description: "Caller-supplied idempotency id." },
+            action: { type: "string", enum: ["replace", "update"] },
+            spreads: { type: "array", minItems: 1, maxItems: 12, items: storyboardSpreadSchema },
+            resolvedAnnotations: {
+              type: "array",
+              maxItems: 12,
+              uniqueItems: true,
+              items: { type: "integer", minimum: 0, maximum: 11 },
+              description: "Marked spreads incorporated by this revision.",
+            },
+          },
+          required: ["requestId", "action", "spreads"],
+          additionalProperties: false,
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: (input, options) => runRegisteredTool(SITE_TOOL.storyboard, options?.signal ?? uncancelledToolSignal, () => {
+          assertOnly(input, ["requestId", "action", "spreads", "resolvedAnnotations"]);
+          const requestId = requiredString(input, "requestId");
+          const prior = sessionResults.get(requestId);
+          if (prior) return prior;
+          const action = pick(input.action, "action", ["replace", "update"] as const);
+          if (!action) invalid("action is required.");
+          const storyboard = applyStoryboardSketches(
+            action,
+            parseStoryboardSpreads(input.spreads),
+            parseStoryboardIndexes(input.resolvedAnnotations),
+          );
+          onStoryboardUpdate();
+          return remember(requestId, {
+            ok: true,
+            storyboard,
+            summary: action === "replace" ? "The complete rough storyboard is visible on the book." : "The marked spreads were revised in place.",
+            next: "Continue working. If the reader adds red marks, refresh get_project_context and revise only those spreads.",
+          });
         }),
       },
       { signal: controller.signal },

@@ -1375,6 +1375,8 @@ summary:focus-visible,
 }
 
 .stage.is-creation-workshop .book-scene canvas { cursor: default; }
+.stage.is-creation-workshop.is-story-pencil-active .book-scene { pointer-events: auto; }
+.stage.is-creation-workshop.is-story-pencil-active .book-scene canvas { cursor: crosshair; }
 
 .creation-workshop {
   position: absolute;
@@ -1384,6 +1386,52 @@ summary:focus-visible,
   color: var(--ink);
   pointer-events: none;
 }
+
+.story-pencil-controls {
+  position: absolute;
+  z-index: 5;
+  right: 428px;
+  bottom: 26px;
+  left: 28px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px auto auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 54px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 5px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+  box-shadow: var(--elev-2);
+  pointer-events: auto;
+  animation: workshop-in var(--motion-reveal) var(--ease-info) both;
+}
+
+.story-pencil-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 44px;
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+}
+
+.story-pencil-controls button:hover:not(:disabled) { border-color: var(--line); background: var(--surface); }
+.story-pencil-controls button:disabled { opacity: .32; cursor: default; }
+
+.story-pencil-controls .story-pencil-toggle { padding: 0 14px; color: var(--muted); }
+.story-pencil-controls .story-pencil-toggle.is-active { color: #fff; background: #e64a3d; }
+.story-pencil-controls .story-pencil-toggle.is-active:hover { background: #e64a3d; }
+
+.story-pencil-beat { display: grid; gap: 1px; min-width: 0; padding-inline: 6px; }
+.story-pencil-beat small { color: var(--accent); font-size: var(--text-caption); font-weight: var(--weight-strong); letter-spacing: var(--track-caps); text-transform: uppercase; }
+.story-pencil-beat strong { overflow: hidden; font-family: var(--font-display); font-size: var(--text-body); font-weight: var(--weight-text); text-overflow: ellipsis; white-space: nowrap; }
 
 @keyframes workshop-in { from { opacity: 0; } }
 
@@ -1460,6 +1508,14 @@ summary:focus-visible,
   background: color-mix(in srgb, var(--surface-strong) 93%, transparent);
   box-shadow: var(--elev-3);
   pointer-events: auto;
+  transition: opacity var(--motion-state) var(--ease-info), translate var(--motion-state) var(--ease-object);
+}
+
+.app-shell:has(.stage.is-story-pencil-active) .workshop-sheet {
+  opacity: 0 !important;
+  visibility: hidden;
+  translate: 12px 0;
+  pointer-events: none;
 }
 
 .workshop-sheet-scroll {
@@ -1870,6 +1926,9 @@ summary:focus-visible,
     margin-inline: auto;
   }
   .workshop-blank-fallback { inset: 16% 10% 30%; right: auto; }
+  .stage.is-creation-workshop.has-storyboard .book-scene { inset: 0 360px 0 0; opacity: 1; }
+  .app-shell:has(.stage.has-storyboard) .workshop-sheet { right: 12px; left: auto; width: 340px; margin: 0; }
+  .story-pencil-controls { right: 372px; bottom: 16px; left: 16px; }
 }
 
 @media (max-width: 880px) {
@@ -1878,6 +1937,12 @@ summary:focus-visible,
 
 @media (max-width: 560px) {
   .stage.is-creation-workshop .book-scene { opacity: .3; }
+  .stage.is-creation-workshop.has-storyboard .book-scene { inset: 56px 0 72px; opacity: 1; }
+  .app-shell:has(.stage.has-storyboard) .workshop-sheet {
+    opacity: 0 !important;
+    visibility: hidden;
+    pointer-events: none;
+  }
   .workshop-topbar {
     min-height: 60px;
     padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
@@ -1894,6 +1959,15 @@ summary:focus-visible,
   .workshop-actionbar { padding: 11px 14px max(12px, env(safe-area-inset-bottom)); }
   .workshop-segment { grid-template-columns: 1fr 1fr; }
   .workshop-segment .workshop-option:last-child { grid-column: 1 / -1; }
+  .story-pencil-controls {
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    left: max(10px, env(safe-area-inset-left));
+    grid-template-columns: 40px minmax(0, 1fr) 40px 44px auto;
+  }
+  .story-pencil-controls button { min-width: 40px; height: 40px; }
+  .story-pencil-controls .story-pencil-toggle { width: 44px; padding: 0; }
+  .story-pencil-toggle span { display: none; }
 }
 
 .is-preview .topbar { grid-template-columns: 1fr 1fr; }
