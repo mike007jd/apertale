@@ -15,7 +15,6 @@ import {
 import { deletePublication, getPublicationRecord, publishDocument, revokePublication } from "./publishingClient";
 import type { PublicationProgress, PublicationRecord } from "./publishingClient";
 import { recordDiagnostic } from "./diagnostics";
-import { useFocusTrap } from "./focusTrap";
 import { listStoredPublishedAssetIds } from "./projectArtifact";
 import { groupQualityBlockers } from "./qualityContract";
 import type { QualityGateState } from "./qualityContract";
@@ -125,7 +124,7 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const card = useRef<HTMLDivElement | null>(null);
+  const card = useRef<HTMLDialogElement | null>(null);
   const mountedDocumentId = useRef<string | null>(documentState.id);
 
   useEffect(() => {
@@ -163,17 +162,9 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
   // excluding author-only source provenance.
   const localImageCount = useMemo(() => listStoredPublishedAssetIds(documentState).length, [documentState]);
 
-  // Escape listens on the window, not the card: a completed publish, revoke, or
-  // delete can remove the button that had focus, and the dialog must still close.
   useEffect(() => {
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
-    };
-    window.addEventListener("keydown", onEscape);
-    return () => window.removeEventListener("keydown", onEscape);
-  }, [busy, onClose]);
-
-  useFocusTrap(card, true);
+    if (card.current && !card.current.open) card.current.showModal();
+  }, []);
 
   const run = useCallback(async (kind: Exclude<Busy, null>, work: () => Promise<PublicationRecord | null>, fallback: string) => {
     const operationDocumentId = documentState.id;
@@ -257,8 +248,16 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
   }, [documentState.id, shareUrl]);
 
   return (
-    <section className="publication-overlay" role="dialog" aria-modal="true" aria-labelledby="publication-title">
-      <div className="publication-card" ref={card}>
+    <section className="publication-overlay">
+      <dialog
+        className="publication-card"
+        ref={card}
+        aria-labelledby="publication-title"
+        onCancel={(event) => {
+          event.preventDefault();
+          if (!busy) onClose();
+        }}
+      >
         <header>
           <span><LinkSimple size={16} weight="bold" /> Publish &amp; share</span>
           <button autoFocus onClick={() => onClose()} aria-label="Close publishing panel" disabled={Boolean(busy)}><X size={18} /></button>
@@ -396,7 +395,7 @@ export function PublicationPanel({ document: documentState, record, qualityGate,
             </div>
           )}
         </footer>
-      </div>
+      </dialog>
     </section>
   );
 }

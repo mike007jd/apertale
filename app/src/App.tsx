@@ -58,7 +58,6 @@ import { ThemeSwitch } from "./design/ThemeSwitch";
 import { FallbackBook } from "./FallbackBook";
 import { completeImageHandoff, currentImageHandoff, describePartialImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
-import { useFocusTrap } from "./focusTrap";
 import {
   dedicatedCoverRendered,
   readerRenderMatches,
@@ -330,11 +329,11 @@ export function App() {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const addPhotoButton = useRef<HTMLButtonElement | null>(null);
   const stage = useRef<HTMLElement | null>(null);
-  const librarySheet = useRef<HTMLDivElement | null>(null);
+  const librarySheet = useRef<HTMLDialogElement | null>(null);
   const libraryOpener = useRef<HTMLElement | null>(null);
-  const createGuideCard = useRef<HTMLDivElement | null>(null);
+  const createGuideCard = useRef<HTMLDialogElement | null>(null);
   const createGuideOpener = useRef<HTMLElement | null>(null);
-  const elementAgentCard = useRef<HTMLDivElement | null>(null);
+  const elementAgentCard = useRef<HTMLDialogElement | null>(null);
   const elementAgentOpener = useRef<HTMLElement | null>(null);
   const publicationOpener = useRef<HTMLElement | null>(null);
   const activeDocumentIdRef = useRef(snapshot.document.id);
@@ -1328,13 +1327,21 @@ export function App() {
   useLayoutEffect(() => {
     if (!showLibrary) return;
     const sheet = librarySheet.current;
-    if (!sheet || sheet.contains(document.activeElement)) return;
+    if (!sheet) return;
+    if (!sheet.open) sheet.showModal();
+    if (sheet.contains(document.activeElement)) return;
     sheet.querySelector<HTMLElement>("#library-shelf")?.focus();
   }, [showLibrary]);
 
-  useFocusTrap(librarySheet, showLibrary);
-  useFocusTrap(createGuideCard, showCreateGuide);
-  useFocusTrap(elementAgentCard, showElementAgentGuide);
+  useEffect(() => {
+    const dialog = createGuideCard.current;
+    if (showCreateGuide && dialog && !dialog.open) dialog.showModal();
+  }, [showCreateGuide]);
+
+  useEffect(() => {
+    const dialog = elementAgentCard.current;
+    if (showElementAgentGuide && dialog && !dialog.open) dialog.showModal();
+  }, [showElementAgentGuide]);
 
   useEffect(() => () => {
     if (openingFrame.current) cancelAnimationFrame(openingFrame.current);
@@ -1650,14 +1657,10 @@ export function App() {
       {showLibrary && !snapshot.session.preview && !showCreateGuide && (
         <section
           className={`book-library ${libraryMotion !== "idle" ? `is-${libraryMotion}` : ""}`}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="library-title"
           aria-hidden={showCreateGuide || undefined}
-          aria-busy={libraryBusy}
         >
           <div className="library-atmosphere" />
-          <div className="library-sheet" ref={librarySheet}>
+          <dialog className="library-sheet" ref={librarySheet} aria-labelledby="library-title" aria-busy={libraryBusy}>
             <header className="library-topbar">
               <button className="library-wordmark" onClick={() => openBookFromLibrary("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={19} /> Apertale</button>
               <div className="library-topbar-actions">
@@ -1783,7 +1786,7 @@ export function App() {
             </div>
             <p className="demo-disclosure">Curated samples use OpenAI-generated illustration. Create your own in Codex.</p>
             {openingBook && <BookLoadingFeedback title={openingBook.title} placement="library" stage={loadStage} reducedMotion={reducedMotion} />}
-          </div>
+          </dialog>
         </section>
       )}
 
@@ -2054,9 +2057,9 @@ export function App() {
       </AnimatePresence>
 
       {showCreateGuide && !snapshot.session.preview && (
-        <section className="creation-workshop" role="dialog" aria-modal="true" aria-labelledby="codex-guide-title">
+        <section className="creation-workshop">
           <div className="workshop-atmosphere" aria-hidden="true" />
-          <div className="workshop-ui" ref={createGuideCard}>
+          <dialog className="workshop-ui" ref={createGuideCard} aria-labelledby="codex-guide-title">
             <header className="workshop-topbar">
               <button className="workshop-wordmark" onClick={closeCodexGuide}><BookOpenText size={19} /> Apertale</button>
               <button className="workshop-close" autoFocus onClick={closeCodexGuide} aria-label={handoffIsBookArt ? "Close image handoff" : "Close creation workshop"}><X size={20} /></button>
@@ -2228,13 +2231,13 @@ export function App() {
                 )}
               </div>}
             </Panel>
-          </div>
+          </dialog>
         </section>
       )}
 
       {showElementAgentGuide && selected && !snapshot.session.preview && (
-        <section className="element-agent-overlay" role="dialog" aria-modal="true" aria-labelledby="element-agent-title">
-          <div className="element-agent-card" ref={elementAgentCard}>
+        <section className="element-agent-overlay">
+          <dialog className="element-agent-card" ref={elementAgentCard} aria-labelledby="element-agent-title">
             <header>
               <span><Sparkle size={16} weight="fill" /> Ask Codex about this element</span>
               <button autoFocus onClick={closeElementAgentGuide} aria-label="Close Ask Codex handoff"><X size={18} /></button>
@@ -2262,7 +2265,7 @@ export function App() {
                 </div>
               )}
             </footer>
-          </div>
+          </dialog>
         </section>
       )}
 

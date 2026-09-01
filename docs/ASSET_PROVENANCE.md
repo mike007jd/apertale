@@ -5,7 +5,6 @@
 Files under `app/public/assets/generated/` were generated specifically for this Apertale prototype during its product-design sessions. They are original project outputs rather than downloaded stock art or copied third-party illustrations:
 
 - `day-background.png` — legacy-safe fallback art used only when a book has neither a dedicated cover nor a first-spread texture;
-- `night-background.png` — the cinematic Night desk environment referenced by the presentation CSS;
 - `city-spread.png` and `river-home-spread.png` — cut-paper city story spreads;
 - `moon-garden-spread.png` — night garden story spread;
 - `city-cloud-road-spread-v2.png` and `city-warm-window-spread-v2.png` — independently generated continuation and finale spreads for the city story;
@@ -14,7 +13,6 @@ Files under `app/public/assets/generated/` were generated specifically for this 
 - `wonders-*.png` — eight independently generated panoramic landmark spreads;
 - `science-*.png` — six independently generated panoramic science spreads; `science-storm-clean-v2.png` is the ImageGen-edited storm base with the original baked lightning and reflection removed;
 - `storm-lightning-rest.png` plus `storm-lightning-1.png` through `storm-lightning-3.png` — one transparent resting frame and three transparent sequential lightning frames, composited only during the short runtime burst.
-- `wonders-pyramid-caravan-cutout-v3.png` — a single caravan subject generated in its own ImageGen request; it passed the alpha and edge-padding audit. Failed pyramid and no-padding candidates are quarantined under `app/qa/rejected-assets/` and are not runtime assets.
 
 Every newly accepted foreground asset is generated as one semantic subject in one ImageGen request. Contact sheets, sprite sheets, multi-object grids, and crops taken from them are not accepted as final runtime assets.
 

@@ -20,6 +20,16 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
+dialog {
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+dialog::backdrop { background: transparent; }
+
 html, body, #root {
   width: 100%;
   height: 100%;
