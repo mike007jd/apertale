@@ -1267,7 +1267,11 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && pendingDestructiveAction) return;
+      if (event.key === "Escape" && pendingDestructiveAction) {
+        event.preventDefault();
+        closeDestructiveAction();
+        return;
+      }
       if (creationTransitionBusy) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -1324,7 +1328,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [cancelCreationTransitionToSource, closeCodexGuide, closeElementAgentGuide, creationTransitionBusy, libraryMotion, openBookFromLibrary, openingBook, pendingDestructiveAction, settleLibraryToReader, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
+  }, [cancelCreationTransitionToSource, closeCodexGuide, closeDestructiveAction, closeElementAgentGuide, creationTransitionBusy, libraryMotion, openBookFromLibrary, openingBook, pendingDestructiveAction, settleLibraryToReader, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
 
   useEffect(() => {
     if (!showLibrary || libraryMotion !== "idle") return;
@@ -1587,7 +1591,7 @@ export function App() {
     if (didCopy) window.setTimeout(() => setCopied(false), 1800);
   };
 
-  const closeDestructiveAction = () => {
+  function closeDestructiveAction() {
     if (pendingDestructiveAction?.busy) return;
     const opener = destructiveActionOpener.current;
     destructiveActionOpener.current = null;
@@ -1595,7 +1599,7 @@ export function App() {
     window.setTimeout(() => {
       if (opener?.isConnected) opener.focus();
     }, 0);
-  };
+  }
 
   const confirmReset = (opener: HTMLElement) => {
     destructiveActionOpener.current = opener;
