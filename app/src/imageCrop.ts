@@ -1,4 +1,4 @@
-export type CropRectangle = {
+type CropRectangle = {
   x: number;
   y: number;
   width: number;

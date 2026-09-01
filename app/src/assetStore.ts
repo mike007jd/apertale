@@ -168,7 +168,7 @@ async function storeLocalImage(file: File, assetUse: ImageHandoffAssetUse): Prom
   return metadata;
 }
 
-export type LocalImageImportBatch = {
+type LocalImageImportBatch = {
   assets: StoredAssetMetadata[];
   rejected: number;
   failed: number;

@@ -34,7 +34,7 @@ export type ResolvedCoverAsset = {
   url: string;
 };
 
-export type ShelfCoverTarget = Omit<ShelfCoverEvidence, "renderElement">;
+type ShelfCoverTarget = Omit<ShelfCoverEvidence, "renderElement">;
 
 type ShelfBookCover = {
   id: string;

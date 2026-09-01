@@ -15,7 +15,7 @@ import { MAX_BOOK_SPREADS, isProceduralElement, spreadBaseAssetId } from "./type
 import type { DocumentState, ThemeId } from "./types";
 
 export const QUALITY_CONTRACT_VERSION = 2 as const;
-export const QUALITY_RUBRIC_VERSION = 2 as const;
+const QUALITY_RUBRIC_VERSION = 2 as const;
 export const QUALITY_REVIEW_MAX_ROUNDS = 2 as const;
 /** Closed runtime vocabulary for persisted quality lifecycle status. */
 export const QUALITY_REVIEW_STATUSES = ["needs-review", "checking", "ready", "blocked", "needs-user-input"] as const;
@@ -83,7 +83,7 @@ export type QualityRenderEvidence = {
   renderedAt: string;
 };
 
-export type QualityCheckResult = {
+type QualityCheckResult = {
   criterionId: string;
   outcome: QualityOutcome;
   message: string;
@@ -505,7 +505,7 @@ export function buildQualityReport(
   };
 }
 
-export type QualityBlockerGroup = {
+type QualityBlockerGroup = {
   message: string;
   suggestedPatch?: string;
   count: number;

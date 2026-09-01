@@ -7,7 +7,7 @@ type ProjectAssetLocation =
   | { kind: "spread"; spreadId: string; field: "textureUrl" | "cleanPlateAssetId" | "sourceAssetId" | "personalSourceAssetId" }
   | { kind: "element"; spreadId: string; elementId: string; field: "assetId" | "frameAssetId"; frameIndex?: number };
 
-export type ProjectAssetReference = {
+type ProjectAssetReference = {
   assetId: string;
   location: ProjectAssetLocation;
 };

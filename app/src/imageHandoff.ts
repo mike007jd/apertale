@@ -33,18 +33,18 @@ export type ImageHandoffRequest = {
   reason: string;
 };
 
-export type ImageHandoffOutcome =
+type ImageHandoffOutcome =
   | { status: "provided"; assetIds: string[]; counts: ImageHandoffImportCounts }
   | { status: "partial"; assetIds: string[]; counts: ImageHandoffImportCounts; reason: string }
   | { status: "dismissed"; reason: string };
 
-export type ImageHandoffImportResult = {
+type ImageHandoffImportResult = {
   assetIds: string[];
   rejected: number;
   failed: number;
 };
 
-export type ImageHandoffImportCounts = {
+type ImageHandoffImportCounts = {
   accepted: number;
   rejected: number;
   failed: number;

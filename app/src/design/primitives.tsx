@@ -90,7 +90,7 @@ export function WorkspaceTransition({
   );
 }
 
-export type SwitchOption<T extends string> = {
+type SwitchOption<T extends string> = {
   value: T;
   label: ReactNode;
   ariaLabel: string;

@@ -250,7 +250,7 @@ type StoredLibrary = {
   authoringQuality?: Record<string, AuthoringQualityLifecycle>;
 };
 
-export type CoordinatedOpenResult =
+type CoordinatedOpenResult =
   | { ok: true }
   | {
       ok: false;

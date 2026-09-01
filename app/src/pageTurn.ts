@@ -7,7 +7,7 @@ export type TurnWaitState = Record<TurnDirection, boolean>;
 export type TurnReadiness = TurnWaitState & { navigationKey: string };
 type PageTurnSurface = "editor" | "shared";
 
-export type PageTurnSessionDeps = {
+type PageTurnSessionDeps = {
   surface: PageTurnSurface;
   now: () => number;
   requestFrame: (callback: (now: number) => void) => number;

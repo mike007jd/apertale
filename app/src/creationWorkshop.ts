@@ -19,7 +19,7 @@ export const CREATION_PHOTO_USES = [
   { id: "illustrated-keepsake", label: "Illustrated keepsake" },
   { id: "preserve-originals", label: "Keep original photos" },
 ] as const;
-export type CreationPhotoUse = (typeof CREATION_PHOTO_USES)[number]["id"];
+type CreationPhotoUse = (typeof CREATION_PHOTO_USES)[number]["id"];
 
 /** One source image per spread covers a full book without overloading the horizontal strip. */
 export const MAX_WORKSHOP_ASSETS = 12;
@@ -28,7 +28,7 @@ const WORKSHOP_ASSET_ORDER_KEY = "apertale:workshop-asset-order:v1";
 type CreationStyle = (typeof CREATION_STYLES)[number];
 export type WorkshopAsset = { id: string; name: string; url: string };
 
-export type CreationWorkshopState = {
+type CreationWorkshopState = {
   mode: AuthoringMode;
   spreadCount: number;
   visualDirection: CreationStyle;
@@ -44,7 +44,7 @@ export const INITIAL_CREATION_WORKSHOP: CreationWorkshopState = {
   assets: [],
 };
 
-export type CreationWorkshopAction =
+type CreationWorkshopAction =
   | { type: "set-mode"; mode: AuthoringMode }
   | { type: "set-spread-count"; spreadCount: number }
   | { type: "set-visual-direction"; visualDirection: CreationStyle }
@@ -164,7 +164,7 @@ export async function restoreCreationWorkshopAssets(): Promise<Omit<ResolvedWork
   return { assets: resolved.assets, leases: resolved.leases };
 }
 
-export type CreationWorkshopImport = {
+type CreationWorkshopImport = {
   imported: WorkshopAsset[];
   stored: StoredAssetMetadata[];
   leases: AssetUrlLease[];

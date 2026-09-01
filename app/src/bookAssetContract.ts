@@ -17,7 +17,7 @@ type PreparedAssetManifest = {
   }>;
 };
 
-export type BookAssetReferenceManifest = {
+type BookAssetReferenceManifest = {
   coverAssetId?: string;
   spreads: Array<{
     background?: {
@@ -29,7 +29,7 @@ export type BookAssetReferenceManifest = {
   }>;
 };
 
-export type BookAssetReferenceIssue =
+type BookAssetReferenceIssue =
   | { code: "generated-source-clean-reuse"; spreadIndex: number; sourceAssetId: string; cleanPlateAssetId: string }
   | { code: "cover-interior-reuse"; spreadIndex: number; assetId: string }
   | { code: "background-cross-spread-reuse"; spreadIndex: number; ownerSpreadIndex: number; assetId: string }
