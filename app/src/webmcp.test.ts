@@ -171,6 +171,7 @@ describe("WebMCP registration", () => {
       items?: TestSchema;
       oneOf?: TestSchema[];
       pattern?: string;
+      description?: string;
     };
     const manageBookSchema = tool("manage_book").inputSchema as TestSchema;
     const handoffSchema = tool("request_image_handoff").inputSchema as { required?: string[] };
@@ -183,8 +184,10 @@ describe("WebMCP registration", () => {
     expect(JSON.stringify(manageBookSchema)).toContain("background");
     expect(JSON.stringify(manageBookSchema)).toContain("layers");
     for (const mutationTool of ["manage_book", "compose_spread", "apply_scene_patch", "set_presentation", "undo_project_change"]) {
-      const required = (tool(mutationTool).inputSchema as TestSchema).required;
+      const mutationSchema = tool(mutationTool).inputSchema as TestSchema;
+      const required = mutationSchema.required;
       expect(required, mutationTool).toEqual(expect.arrayContaining(["expectedDocumentId", "expectedRevision"]));
+      expect(mutationSchema.properties?.requestId?.description, mutationTool).toMatch(/exact unchanged request.*ok:false correction.*fresh id/i);
     }
     expect(Object.fromEntries((manageBookSchema.oneOf ?? []).map((branch) => [
       branch.properties?.action?.const,
@@ -663,6 +666,12 @@ describe("WebMCP registration", () => {
     expect(qualityContext.qualityReview.deterministicChecks).toEqual(expect.arrayContaining([
       expect.objectContaining({ criterionId: "render-evidence-completeness", outcome: "blocker" }),
     ]));
+    expect(qualityContext.qualityReview.instructions).toContain('set_presentation(surface: "shelf")');
+    expect(qualityContext.qualityReview.instructions).toContain('set_presentation(surface: "reader", spreadId)');
+    expect(qualityContext.qualityReview.instructions).toMatch(/normal navigation and screenshots.*do not record revision-bound evidence/i);
+    expect(qualityContext.qualityReview.instructions).toContain('photo-fidelity-integration with outcome: "note"');
+    expect(qualityContext.qualityReview.instructions).toContain('scope: "book" and locator: "creationBrief.sourceAssets"');
+    expect(qualityContext.qualityReview.instructions).toMatch(/personalSourceAssetId.*per-spread evidence/i);
 
     const adoptedCoverId = bookEngine.getSnapshot().document.coverAssetId!;
     const adoptedCoverMetadata = verifiedAssets.get(adoptedCoverId)!;

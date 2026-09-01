@@ -133,6 +133,9 @@ type OpeningBook = {
 
 type LibraryMotion = "idle" | "opening-book" | "closing-book";
 type LibraryTab = "yours" | "explore";
+type PendingDestructiveAction =
+  | { kind: "delete-book"; book: { id: string; title: string }; busy: boolean; error: string | null }
+  | { kind: "reset-sample"; busy: boolean; error: string | null };
 
 function measureWorkspaceMotionOrigin(element: HTMLElement | null): WorkspaceMotionOrigin {
   return workspaceMotionOrigin(element?.getBoundingClientRect() ?? null, {
@@ -277,6 +280,7 @@ export function App() {
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("yours");
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null);
   const [libraryDeleteNotice, setLibraryDeleteNotice] = useState<string | null>(null);
+  const [pendingDestructiveAction, setPendingDestructiveAction] = useState<PendingDestructiveAction | null>(null);
   const [creationNavigation, dispatchCreationNavigation] = useReducer(
     reduceCreationNavigation,
     INITIAL_CREATION_NAVIGATION,
@@ -336,6 +340,8 @@ export function App() {
   const elementAgentCard = useRef<HTMLDialogElement | null>(null);
   const elementAgentOpener = useRef<HTMLElement | null>(null);
   const publicationOpener = useRef<HTMLElement | null>(null);
+  const destructiveActionDialog = useRef<HTMLDialogElement | null>(null);
+  const destructiveActionOpener = useRef<HTMLElement | null>(null);
   const activeDocumentIdRef = useRef(snapshot.document.id);
   activeDocumentIdRef.current = snapshot.document.id;
   const pendingAuthoringSurface = useRef<PendingAuthoringSurface | null>(null);
@@ -645,7 +651,7 @@ export function App() {
     waitingForRenderer,
   );
   const stageIsLoading = readyBookId !== snapshot.document.id || sceneLoadingBookId === snapshot.document.id;
-  const libraryBusy = Boolean(openingBook || deletingBookId || libraryMotion !== "idle");
+  const libraryBusy = Boolean(openingBook || deletingBookId || pendingDestructiveAction || libraryMotion !== "idle");
 
   const isCreatorBook = Boolean(activeLibraryBook) && activeLibraryBook?.sample === false;
   const qualityGate = bookEngine.getQualityGate();
@@ -1173,7 +1179,7 @@ export function App() {
       libraryOpen: showLibrary,
       libraryMotion,
       transitionPending: openingFrame.current !== null || libraryFrame.current !== null || openCleanup.current !== null,
-      blockingOverlayOpen: showElementAgentGuide || showPublication || showOutline || Boolean(openingBook),
+      blockingOverlayOpen: showElementAgentGuide || showPublication || showOutline || Boolean(openingBook) || Boolean(pendingDestructiveAction),
       contentRendered,
       shelfBookIds: visibleShelfIds,
     });
@@ -1225,7 +1231,7 @@ export function App() {
       pending.reject(error instanceof Error ? error : new Error("The visible authoring frame could not be recorded."));
     });
     return undefined;
-  }, [authoringSurfaceRequest, lastReaderRender, library.books, libraryMotion, openingBook, readerSceneKey, renderWebGl, renderedShelfCovers, resolvedCoverUrls, shelfBooks, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.document.revision, snapshot.document.spreads, snapshot.session.currentSpreadIndex, snapshot.session.preview, snapshot.session.sceneThemeId]);
+  }, [authoringSurfaceRequest, lastReaderRender, library.books, libraryMotion, openingBook, pendingDestructiveAction, readerSceneKey, renderWebGl, renderedShelfCovers, resolvedCoverUrls, shelfBooks, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.document.revision, snapshot.document.spreads, snapshot.session.currentSpreadIndex, snapshot.session.preview, snapshot.session.sceneThemeId]);
 
   useEffect(() => () => {
     const pending = pendingAuthoringSurface.current;
@@ -1261,6 +1267,7 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && pendingDestructiveAction) return;
       if (creationTransitionBusy) {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -1317,7 +1324,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [cancelCreationTransitionToSource, closeCodexGuide, closeElementAgentGuide, creationTransitionBusy, libraryMotion, openBookFromLibrary, openingBook, settleLibraryToReader, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
+  }, [cancelCreationTransitionToSource, closeCodexGuide, closeElementAgentGuide, creationTransitionBusy, libraryMotion, openBookFromLibrary, openingBook, pendingDestructiveAction, settleLibraryToReader, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.session.preview, turnPage]);
 
   useEffect(() => {
     if (!showLibrary || libraryMotion !== "idle") return;
@@ -1342,6 +1349,11 @@ export function App() {
     const dialog = elementAgentCard.current;
     if (showElementAgentGuide && dialog && !dialog.open) dialog.showModal();
   }, [showElementAgentGuide]);
+
+  useEffect(() => {
+    const dialog = destructiveActionDialog.current;
+    if (pendingDestructiveAction && dialog && !dialog.open) dialog.showModal();
+  }, [pendingDestructiveAction]);
 
   useEffect(() => () => {
     if (openingFrame.current) cancelAnimationFrame(openingFrame.current);
@@ -1575,35 +1587,83 @@ export function App() {
     if (didCopy) window.setTimeout(() => setCopied(false), 1800);
   };
 
-  const confirmReset = () => {
-    if (window.confirm("Restore the original Apertale sample book? Your local edits will be replaced.")) {
-      void bookEngine.resetCoordinated();
-    }
+  const closeDestructiveAction = () => {
+    if (pendingDestructiveAction?.busy) return;
+    const opener = destructiveActionOpener.current;
+    destructiveActionOpener.current = null;
+    setPendingDestructiveAction(null);
+    window.setTimeout(() => {
+      if (opener?.isConnected) opener.focus();
+    }, 0);
   };
 
-  const deleteBookFromLibrary = async (book: { id: string; title: string }) => {
+  const confirmReset = (opener: HTMLElement) => {
+    destructiveActionOpener.current = opener;
+    setPendingDestructiveAction({ kind: "reset-sample", busy: false, error: null });
+  };
+
+  const deleteBookFromLibrary = (book: { id: string; title: string }, opener: HTMLElement) => {
     if (libraryBusy) return;
     setLibraryDeleteNotice(null);
     if (getPublicationRecord(book.id)) {
       setLibraryDeleteNotice(`“${book.title}” has a publication. Open it, choose Publish & share, and delete the publication before removing the local book.`);
       return;
     }
-    if (!window.confirm(`Delete “${book.title}” from Your books? This removes the saved book from this browser and cannot be undone.`)) return;
-    setDeletingBookId(book.id);
+    destructiveActionOpener.current = opener;
+    setPendingDestructiveAction({ kind: "delete-book", book, busy: false, error: null });
+  };
+
+  const runDestructiveAction = async () => {
+    const action = pendingDestructiveAction;
+    if (!action || action.busy) return;
+    setPendingDestructiveAction({ ...action, busy: true, error: null });
+
+    if (action.kind === "reset-sample") {
+      try {
+        if (!await bookEngine.resetCoordinated()) {
+          setPendingDestructiveAction((current) => current?.kind === "reset-sample"
+            ? { ...current, busy: false, error: "Apertale could not safely restore the sample. Try again." }
+            : current);
+          return;
+        }
+        const opener = destructiveActionOpener.current;
+        destructiveActionOpener.current = null;
+        setPendingDestructiveAction(null);
+        window.setTimeout(() => {
+          if (opener?.isConnected) opener.focus();
+        }, 0);
+      } catch (error) {
+        setPendingDestructiveAction((current) => current?.kind === "reset-sample"
+          ? { ...current, busy: false, error: error instanceof Error ? error.message : "Apertale could not restore the sample." }
+          : current);
+      }
+      return;
+    }
+
+    setDeletingBookId(action.book.id);
     try {
-      const result = await bookEngine.removeBookCoordinated(book.id);
+      const result = await bookEngine.removeBookCoordinated(action.book.id);
       if (!result.ok) {
-        setLibraryDeleteNotice(result.summary);
+        setPendingDestructiveAction((current) => current?.kind === "delete-book" && current.book.id === action.book.id
+          ? { ...current, busy: false, error: result.summary }
+          : current);
         return;
       }
       setRenderedShelfCovers((current) => {
-        if (!(book.id in current)) return current;
+        if (!(action.book.id in current)) return current;
         const next = { ...current };
-        delete next[book.id];
+        delete next[action.book.id];
         return next;
       });
       setLibraryDeleteNotice(null);
-      announce(`${book.title} deleted from Your books.`);
+      destructiveActionOpener.current = null;
+      setPendingDestructiveAction(null);
+      announce(`${action.book.title} deleted from Your books.`);
+      window.setTimeout(() => librarySheet.current?.querySelector<HTMLElement>("#library-shelf")?.focus(), 0);
+    } catch (error) {
+      setPendingDestructiveAction((current) => current?.kind === "delete-book" && current.book.id === action.book.id
+        ? { ...current, busy: false, error: error instanceof Error ? error.message : "Apertale could not delete this book." }
+        : current);
     } finally {
       setDeletingBookId(null);
     }
@@ -1769,7 +1829,7 @@ export function App() {
                       <button
                         className="library-delete-button"
                         type="button"
-                        onClick={() => { void deleteBookFromLibrary(book); }}
+                        onClick={(event) => deleteBookFromLibrary(book, event.currentTarget)}
                         aria-label={`Delete ${book.title}`}
                         title="Delete book"
                         disabled={libraryBusy}
@@ -2050,7 +2110,7 @@ export function App() {
               className={webMcpAvailable ? "is-connected" : ""}
               title={webMcpAvailable ? "This browser exposed the WebMCP tool runtime." : "This WebMCP-enabled app remains fully usable while the current browser has not exposed the tool runtime."}
             ><i /> {webMcpAvailable ? "WebMCP connected" : "WebMCP ready"}</span>
-            {activeLibraryBook?.sample && <button onClick={confirmReset}><ArrowCounterClockwise size={15} /> Reset sample</button>}
+            {activeLibraryBook?.sample && <button onClick={(event) => confirmReset(event.currentTarget)}><ArrowCounterClockwise size={15} /> Reset sample</button>}
           </div>
         </Panel>
       )}
@@ -2221,7 +2281,7 @@ export function App() {
                 </p>
                 <button className="copy-starter-button" onClick={() => void copyPrompt()}>
                   {copied ? <Check size={18} weight="bold" /> : <Copy size={18} weight="bold" />}
-                  {copied ? "Copied — paste beside this page" : "Copy questions for Codex"}
+                  {copied ? "Copied — paste beside this page" : "Copy starter prompt"}
                 </button>
                 {copyError && (
                   <div className="copy-fallback" role="alert">
@@ -2278,6 +2338,61 @@ export function App() {
           onRecordChange={handlePublicationRecordChange}
           onClose={closePublication}
         />
+      )}
+
+      {pendingDestructiveAction && (
+        <dialog
+          className="publication-card destructive-action-card"
+          ref={destructiveActionDialog}
+          role="alertdialog"
+          aria-labelledby="destructive-action-title"
+          aria-describedby="destructive-action-description"
+          aria-busy={pendingDestructiveAction.busy}
+          onCancel={(event) => {
+            event.preventDefault();
+            closeDestructiveAction();
+          }}
+        >
+          <header>
+            <span><WarningCircle size={16} weight="fill" /> Confirm action</span>
+          </header>
+          <div className="publication-body">
+            <p className="publication-status is-revoked"><i aria-hidden="true" />Cannot be undone</p>
+            <h2 id="destructive-action-title">
+              {pendingDestructiveAction.kind === "delete-book"
+                ? `Delete “${pendingDestructiveAction.book.title}”?`
+                : "Restore the original sample?"}
+            </h2>
+            <span className="publication-lede" id="destructive-action-description">
+              {pendingDestructiveAction.kind === "delete-book"
+                ? "This removes the saved book from this browser."
+                : "Your local edits to this sample will be replaced."}
+            </span>
+            {pendingDestructiveAction.error && (
+              <p className="publication-notice is-error" role="alert">
+                <WarningCircle size={16} weight="fill" />
+                <span>{pendingDestructiveAction.error}</span>
+              </p>
+            )}
+          </div>
+          <footer className="publication-actions">
+            <div className="destructive-action-buttons">
+              <button className="publication-secondary" autoFocus onClick={closeDestructiveAction} disabled={pendingDestructiveAction.busy}>
+                {pendingDestructiveAction.kind === "delete-book" ? "Keep book" : "Keep my edits"}
+              </button>
+              <button className="publication-danger" onClick={() => { void runDestructiveAction(); }} disabled={pendingDestructiveAction.busy}>
+                {pendingDestructiveAction.busy
+                  ? <SpinnerGap size={17} weight="bold" className="is-spinning" />
+                  : pendingDestructiveAction.kind === "delete-book"
+                    ? <Trash size={17} weight="fill" />
+                    : <ArrowCounterClockwise size={17} weight="bold" />}
+                {pendingDestructiveAction.kind === "delete-book"
+                  ? pendingDestructiveAction.busy ? "Deleting" : "Delete forever"
+                  : pendingDestructiveAction.busy ? "Restoring" : "Restore sample"}
+              </button>
+            </div>
+          </footer>
+        </dialog>
       )}
 
       <WorkspaceTransition

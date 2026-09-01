@@ -74,6 +74,27 @@ const documentState = (): DocumentState => ({
   }],
 });
 
+const multiSpreadDocumentState = (): DocumentState => {
+  const document = documentState();
+  document.spreads.push({
+    ...structuredClone(document.spreads[0]),
+    id: "closing",
+    order: 1,
+    title: "Closing",
+    body: "The path reaches home.",
+    artwork: {
+      cleanPlateAssetId: "/assets/generated/wonders-chichen-itza-clean-v2.png",
+      sourceAssetId: "/assets/generated/wonders-chichen-itza.png",
+      separation: "inpainted-clean-plate",
+    },
+    elements: document.spreads[0].elements.map((element) => ({
+      ...structuredClone(element),
+      id: `closing-${element.id}`,
+    })),
+  });
+  return document;
+};
+
 const renderEvidence = (): QualityRenderEvidence[] => [
   {
     documentId: "creator-book",
@@ -214,6 +235,103 @@ describe("quality contract", () => {
     const forged = visualReview();
     forged.checks.find((check) => check.criterionId === "spread-composition")!.evidence[0].spreadId = "does-not-exist";
     expect(validateVisualReview(documentState(), forged, 1)).toMatch(/spread-composition/i);
+  });
+
+  it("accepts one book-level photo-fidelity note only when the book has no personal photos", () => {
+    const document = multiSpreadDocumentState();
+    const brief = { ...readyBrief, spreadCount: document.spreads.length };
+    const evidence = [
+      ...renderEvidence(),
+      { ...renderEvidence()[1], spreadId: "closing", renderedAt: "2026-08-29T00:00:02.000Z" },
+    ];
+    const submission = visualReview();
+    submission.checks.forEach((check) => {
+      if (check.criterionId !== "cover-appeal") {
+        check.evidence.push({ ...check.evidence[0], spreadId: "closing" });
+      }
+    });
+    const photoFidelity = submission.checks.find((check) => check.criterionId === "photo-fidelity-integration")!;
+    photoFidelity.outcome = "note";
+    photoFidelity.message = "No personal source photos are present, so photo fidelity is not applicable.";
+    photoFidelity.evidence = [{
+      scope: "book",
+      locator: "creationBrief.sourceAssets",
+      description: "The ready brief contains no personal source assets.",
+    }];
+
+    expect(validateVisualReview(document, submission, 1)).toBeNull();
+    const report = buildQualityReport(
+      document,
+      1,
+      evaluateDeterministicQuality(document, evidence, brief),
+      submission,
+      brief,
+    );
+    expect(() => assertPublishableQuality(document, report)).not.toThrow();
+
+    const legacy = structuredClone(submission);
+    const legacyPhotoFidelity = legacy.checks.find((check) => check.criterionId === "photo-fidelity-integration")!;
+    legacyPhotoFidelity.outcome = "pass";
+    legacyPhotoFidelity.evidence = document.spreads.map((spread) => ({
+      scope: "spread" as const,
+      spreadId: spread.id,
+      locator: ".book-scene canvas",
+      description: "Rendered spread evidence",
+    }));
+    expect(validateVisualReview(document, legacy, 1)).toBeNull();
+  });
+
+  it("requires per-spread photo-fidelity evidence when any spread has a personal photo", () => {
+    const sourceId = "asset:22345678-1234-4234-8234-123456789abc";
+    const document = multiSpreadDocumentState();
+    document.spreads.forEach((spread) => { spread.artwork!.personalSourceAssetId = sourceId; });
+    const brief = {
+      ...readyBrief,
+      spreadCount: document.spreads.length,
+      sourceAssets: [{ id: sourceId, name: "Portrait.png" }],
+      photoPolicy: { sourceUse: "reference-and-compose" as const, preserveIdentity: true, allowFaceChanges: false },
+    };
+    const evidence = [
+      ...renderEvidence(),
+      { ...renderEvidence()[1], spreadId: "closing", renderedAt: "2026-08-29T00:00:02.000Z" },
+    ];
+    const submission = visualReview();
+    submission.checks.forEach((check) => {
+      if (check.criterionId !== "cover-appeal") check.evidence.push({ ...check.evidence[0], spreadId: "closing" });
+    });
+    const photoFidelity = submission.checks.find((check) => check.criterionId === "photo-fidelity-integration")!;
+    photoFidelity.outcome = "note";
+    photoFidelity.evidence = [{ scope: "book", locator: "creationBrief.sourceAssets", description: "Personal source assets" }];
+
+    expect(validateVisualReview(document, submission, 1)).toBe(
+      "Visual criteria are incomplete: photo-fidelity-integration.",
+    );
+    const forged = buildQualityReport(
+      document,
+      1,
+      evaluateDeterministicQuality(document, evidence, brief),
+      submission,
+      brief,
+    );
+    expect(() => assertPublishableQuality(document, forged)).toThrow(/quality gate/i);
+
+    photoFidelity.outcome = "pass";
+    photoFidelity.evidence = document.spreads.map((spread) => ({
+      scope: "spread" as const,
+      spreadId: spread.id,
+      locator: ".book-scene canvas",
+      description: "Rendered personal-photo evidence",
+    }));
+    expect(validateVisualReview(document, submission, 1)).toBeNull();
+  });
+
+  it("reports every incomplete visual criterion in rubric order", () => {
+    const forged = visualReview();
+    forged.checks.find((check) => check.criterionId === "spread-composition")!.evidence = [];
+    forged.checks.find((check) => check.criterionId === "photo-fidelity-integration")!.message = "";
+    expect(validateVisualReview(documentState(), forged, 1)).toBe(
+      "Visual criteria are incomplete: spread-composition, photo-fidelity-integration.",
+    );
   });
 
   it("derives generated and preserved spread policy from the ready brief", () => {

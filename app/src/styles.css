@@ -2547,6 +2547,22 @@ summary:focus-visible,
 .publication-confirm strong { display: block; margin-bottom: 4px; color: var(--ink); font-size: var(--text-body); }
 .publication-confirm > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
+.destructive-action-card {
+  position: fixed;
+  inset: 0;
+  width: min(468px, calc(100vw - 32px));
+  height: max-content;
+  margin: auto;
+}
+
+.destructive-action-card::backdrop {
+  background: rgba(31, 25, 19, .32);
+  -webkit-backdrop-filter: blur(9px) saturate(.86);
+  backdrop-filter: blur(9px) saturate(.86);
+}
+
+.destructive-action-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
 @media (max-width: 560px) {
   .publication-overlay { padding: 16px; }
   .publication-body { padding: 18px 20px 14px; }

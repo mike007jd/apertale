@@ -356,6 +356,22 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
       }],
     }],
   };
+  manifest.spreads.push({
+    ...structuredClone(manifest.spreads[0]),
+    id: "spread-2",
+    order: 1,
+    title: "The road home",
+    body: "The warm afternoon continues.",
+    artwork: {
+      cleanPlateAssetId: "/assets/generated/wonders-chichen-itza-clean-v2.png",
+      sourceAssetId: "/assets/generated/wonders-chichen-itza.png",
+      separation: "inpainted-clean-plate",
+    },
+    elements: manifest.spreads[0].elements.map((element) => ({
+      ...structuredClone(element),
+      id: `second-${element.id}`,
+    })),
+  });
   const invalidManifest = structuredClone(manifest);
   delete invalidManifest.spreads[0].elements[0].transform;
   const invalidPublishResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
@@ -433,6 +449,34 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   }));
   assert.equal(forgedPhotoIdentityResponse.status, 409);
   assert.equal((await forgedPhotoIdentityResponse.json()).code, "quality_blocked");
+
+  const personalPhotoManifest = structuredClone(manifest);
+  personalPhotoManifest.spreads.forEach((spread) => { spread.artwork.personalSourceAssetId = personalSourceId; });
+  const bookOnlyPhotoQuality = qualityFor(personalPhotoManifest);
+  bookOnlyPhotoQuality.creationBrief.sourceAssets = [{ id: personalSourceId, name: "Portrait.png" }];
+  bookOnlyPhotoQuality.creationBrief.photoPolicy = {
+    sourceUse: "reference-and-compose",
+    preserveIdentity: true,
+    allowFaceChanges: false,
+  };
+  const bookOnlyPhotoCheck = bookOnlyPhotoQuality.checks.find((check) => check.criterionId === "photo-fidelity-integration");
+  bookOnlyPhotoCheck.outcome = "note";
+  bookOnlyPhotoCheck.message = "Personal photo fidelity was not inspected.";
+  bookOnlyPhotoCheck.evidence = [{
+    scope: "book",
+    locator: "creationBrief.sourceAssets",
+    description: "The ready brief has personal source assets.",
+  }];
+  bookOnlyPhotoQuality.noteCount = 1;
+  const bookOnlyPhotoResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ manifest: personalPhotoManifest, shareToken, quality: bookOnlyPhotoQuality }),
+  }));
+  assert.equal(bookOnlyPhotoResponse.status, 409);
+  const bookOnlyPhotoError = await bookOnlyPhotoResponse.json();
+  assert.equal(bookOnlyPhotoError.code, "quality_blocked");
+  assert.match(bookOnlyPhotoError.message, /photo-fidelity-integration critique must cover every spread/i);
 
   const forgedIncompleteBrief = qualityFor(manifest);
   delete forgedIncompleteBrief.creationBrief.premise;
@@ -646,18 +690,28 @@ function pngBytes() {
 }
 
 function qualityFor(manifest, { warning = false } = {}) {
-  const checks = qualityRubric.criteria.map((criterion, index) => ({
-    criterionId: criterion.id,
-    outcome: warning && index === 0 ? "warn" : "pass",
-    message: `${criterion.label} was checked against rendered evidence.`,
-    evidence: [{
-      scope: criterion.id === "cover-appeal" ? "cover" : "spread",
-      ...(criterion.id === "cover-appeal" ? {} : { spreadId: manifest.spreads[0].id }),
-      locator: criterion.id === "cover-appeal" ? "[data-book-id] img" : ".book-scene canvas",
-      description: "Rendered publication evidence",
-    }],
-    ...(warning && index === 0 ? { suggestedPatch: "Keep this warning recorded for publication." } : {}),
-  }));
+  const hasPersonalPhoto = manifest.spreads.some((spread) => Boolean(spread.artwork?.personalSourceAssetId));
+  const checks = qualityRubric.criteria.map((criterion, index) => {
+    const photoFidelityNotApplicable = criterion.id === "photo-fidelity-integration" && !hasPersonalPhoto;
+    return {
+      criterionId: criterion.id,
+      outcome: warning && index === 0 ? "warn" : photoFidelityNotApplicable ? "note" : "pass",
+      message: photoFidelityNotApplicable
+        ? "No personal source photos are present, so photo fidelity is not applicable."
+        : `${criterion.label} was checked against rendered evidence.`,
+      evidence: criterion.id === "cover-appeal"
+        ? [{ scope: "cover", locator: "[data-book-id] img", description: "Rendered publication evidence" }]
+        : photoFidelityNotApplicable
+          ? [{ scope: "book", locator: "creationBrief.sourceAssets", description: "The ready brief contains no personal source assets." }]
+          : manifest.spreads.map((spread) => ({
+            scope: "spread",
+            spreadId: spread.id,
+            locator: ".book-scene canvas",
+            description: "Rendered publication evidence",
+          })),
+      ...(warning && index === 0 ? { suggestedPatch: "Keep this warning recorded for publication." } : {}),
+    };
+  });
   return {
     contractVersion: 2,
     rubricVersion: qualityRubric.version,
@@ -678,7 +732,7 @@ function qualityFor(manifest, { warning = false } = {}) {
     checks,
     blockerCount: 0,
     warningCount: warning ? 1 : 0,
-    noteCount: 0,
+    noteCount: hasPersonalPhoto ? 0 : 1,
     warningsRecorded: true,
     sampleReady: true,
     publishAllowed: true,

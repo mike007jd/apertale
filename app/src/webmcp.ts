@@ -268,7 +268,7 @@ async function runTool(name: string, signal: AbortSignal, operation: () => unkno
 }
 
 const requiredMutation = {
-  requestId: { type: "string", description: "Unique idempotency key for this change." },
+  requestId: { type: "string", description: "Reuse for an exact unchanged request or successful presentation-pending resume; after ok:false correction or payload or asset changes, use a fresh id." },
   expectedDocumentId: { type: "string", description: "Document id returned by get_project_context together with expectedRevision." },
   expectedRevision: { type: "integer", minimum: 1, description: "Document revision returned by get_project_context." },
 };
@@ -621,7 +621,7 @@ export function registerWebMcpTools(
                     renderEvidence: qualityLifecycle?.renderEvidence ?? [],
                     creationBrief: qualityLifecycle?.creationBrief ?? null,
                     instructions: qualityLifecycle?.creationBrief?.bookType
-                      ? "Call manage_book action begin-critique, use set_presentation(spreadId) and the host browser screenshot capability to inspect the cover and every spread, then record every visual criterion with action record-critique. Schema evidence is not an aesthetic judgment."
+                      ? "Call manage_book action begin-critique. Use set_presentation(surface: \"shelf\") for the cover and set_presentation(surface: \"reader\", spreadId) for every spread, then inspect each frame with the host screenshot capability. Normal navigation and screenshots are observation only and do not record revision-bound evidence. Record every visual criterion with action record-critique. When no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and one evidence item with scope: \"book\" and locator: \"creationBrief.sourceAssets\", explaining that no personal source material exists; when any spread declares one, record per-spread evidence. Schema evidence is not an aesthetic judgment."
                       : "No creation brief is attached. Curated samples keep shipped provenance; for a legacy personal book, pass a complete brief through creation-readiness and call manage_book action adopt-creation-brief at this revision before critique.",
                   },
                 }

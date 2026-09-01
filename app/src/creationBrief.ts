@@ -152,6 +152,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
       ? ["- Use ImageGen for the dedicated portrait cover. Prepare one source-true original-photo layout per spread for the approximately 1.62:1 stage without reillustrating people or changing photo geometry beyond the authorised policy."]
       : ["- Use the host ImageGen/image editing capability to make a dedicated portrait cover and purpose-built full-spread artwork for every spread."]),
     "- Compose full-spread artwork for the approximately 1.62:1 stage. The 1.45–2.10 input range is compatibility tolerance, not an art-direction target.",
+    "- Before handoff or create, normalize each spread's source composite and clean plate so their original pixel width and height are identical.",
     "- Use source photos as references and story truth, not as a lazy final right-page placement unless the user explicitly chose a literal photo-album treatment.",
     ...(bookType === "preserved-photo-album"
       ? [`Required asset counts: generated cover count ${generatedCoverCount}; generated full-spread count 0; preserved original-photo layout count ${preservedPhotoSpreadCount}; provenance entries ${provenanceEntryCount}.`]
@@ -168,9 +169,10 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "- Create one new independent book with a single manage_book create call; never overwrite a curated sample. Pass the same creationBrief, coverAssetId, and every complete spread manifest.",
     "- Each spread manifest must include background.sourceAssetId, background.cleanPlateAssetId, the book-type separation, personalSourceAssetId when declared, and 2–4 native-alpha layers with a meaningful hover/focus/click interaction.",
     "- A text-only shell is not a book. If any prepared asset is missing, do not create; finish or hand off the asset set first. Use set-cover and apply_scene_patch only for later critique fixes.",
-    "- If create returns ok true with presentation status pending, the book is already saved. Retry the exact same requestId to confirm the frame; never create a duplicate with a new requestId.",
-    "- Visit the shelf cover and every spread so the current revision has real render evidence.",
+    "- Use the same requestId only for an exact unchanged request. If a successful mutation returns presentation status pending, retry the same requestId to confirm the frame. After any ok:false correction or payload or asset change, use a fresh requestId.",
+    "- Present the cover with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId). Normal navigation and screenshots are observation only and do not record revision-bound evidence.",
     "- Read get_project_context(detail: \"quality-review\"), call manage_book(action: \"begin-critique\"), inspect the actual frames, and record every visual criterion with action record-critique.",
+    "- When no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and one evidence item with scope: \"book\" and locator: \"creationBrief.sourceAssets\", explaining that no personal source material exists. When any spread declares one, record per-spread evidence.",
     "- Apply suggested patches and re-check once when needed. Stop after two rounds for missing material or a user decision; publish only when publishAllowed is true.",
     "- Verify all spreads against the completion gates.",
     "You cannot send image bytes through a tool call, and I have to click the file picker myself. Call request_image_handoff with the correct assetUse and the page will open the matching drawer with your reason printed in it. Do not pretend a media transfer succeeded.",

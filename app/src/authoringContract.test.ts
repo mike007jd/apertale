@@ -29,6 +29,7 @@ describe("site-native authoring guide contract", () => {
   it("returns a machine-readable quality contract that mirrors the two-phase skill and creation brief", () => {
     const guide = buildAuthoringGuide();
     expect(guide.id).toBe(AUTHORING_GUIDE_ID);
+    expect(AUTHORING_GUIDE_VERSION).toBe(4);
     expect(guide.version).toBe(AUTHORING_GUIDE_VERSION);
     expect(guide.skillMirror).toBe(AUTHORING_GUIDE_SKILL_MIRROR);
     expect(guide.contract).toBe("two-phase");
@@ -254,8 +255,18 @@ describe("site-native authoring guide contract", () => {
     expect(byId.cutouts).toMatch(/native transparent cutouts/i);
     expect(byId["provenance-revision"]).toMatch(/provenance/i);
     expect(byId["provenance-revision"]).toMatch(/expectedRevision/i);
+    expect(byId["provenance-revision"]).toMatch(/source composite.*clean plate.*original pixel width and height are identical/i);
+    expect(byId["provenance-revision"]).toMatch(/ok:false correction.*fresh requestId/i);
     expect(byId.verify).toMatch(/Verify content, book-type-specific asset counts, spread-specific interaction/i);
+    expect(byId.verify).toContain('set_presentation(surface: "shelf")');
+    expect(byId.verify).toContain('set_presentation(surface: "reader", spreadId)');
+    expect(byId.verify).toMatch(/normal navigation and screenshots.*do not record revision-bound evidence/i);
+    expect(byId.verify).toContain('photo-fidelity-integration with outcome: "note"');
+    expect(byId.verify).toContain('scope: "book" and locator: "creationBrief.sourceAssets"');
+    expect(byId.verify).toMatch(/personalSourceAssetId.*per-spread evidence/i);
     expect(byId.verify).toMatch(/patch and re-check at most twice/i);
+    expect(guide.revisions).toMatch(/exact unchanged request/i);
+    expect(guide.revisions).toMatch(/ok:false correction.*fresh requestId/i);
 
     expect(guide.interaction.required).toMatch(/spread-specific/i);
     expect(guide.interaction.hover).toEqual(HOVER_RESPONSES);
@@ -269,6 +280,8 @@ describe("site-native authoring guide contract", () => {
       expect.stringMatching(/asset counts/i),
       expect.stringMatching(/interaction/i),
       expect.stringMatching(/undo evidence/i),
+      expect.stringMatching(/set_presentation\(surface: "shelf"\)/i),
+      expect.stringMatching(/creationBrief\.sourceAssets/i),
     ]));
   });
 

@@ -424,9 +424,14 @@ function validEvidenceLocation(documentState: DocumentState, value: unknown): va
 
 function visualEvidenceCoversDocument(documentState: DocumentState, check: QualityCheckResult) {
   if (check.criterionId === "cover-appeal") return check.evidence.some((item) => item.scope === "cover");
-  return documentState.spreads.every((spread) => check.evidence.some((item) => (
+  const coversEverySpread = documentState.spreads.every((spread) => check.evidence.some((item) => (
     item.scope === "spread" && item.spreadId === spread.id
   )));
+  if (coversEverySpread) return true;
+  return check.criterionId === "photo-fidelity-integration"
+    && !documentState.spreads.some((spread) => Boolean(spread.artwork?.personalSourceAssetId))
+    && check.outcome === "note"
+    && check.evidence.some((item) => item.scope === "book" && item.locator === "creationBrief.sourceAssets");
 }
 
 export function validateVisualReview(
@@ -447,18 +452,19 @@ export function validateVisualReview(
   if (missing.length > 0) return `Visual critique is missing: ${missing.join(", ")}.`;
   const unknown = submission.checks.find((check) => !QUALITY_VISUAL_CRITERION_IDS.includes(check.criterionId));
   if (unknown) return `Visual critique contains unsupported criterion ${unknown.criterionId}.`;
-  const invalid = submission.checks.find((check) => (
-    !["pass", "blocker", "warn", "note"].includes(check.outcome)
-    || typeof check.message !== "string"
-    || check.message.trim().length < 1
-    || check.message.length > 800
-    || !Array.isArray(check.evidence)
-    || check.evidence.length < 1
-    || check.evidence.some((item) => !validEvidenceLocation(documentState, item))
-    || !visualEvidenceCoversDocument(documentState, check)
-    || (["blocker", "warn"].includes(check.outcome) && (!check.suggestedPatch || check.suggestedPatch.trim().length < 1))
-  ));
-  return invalid ? `Visual criterion ${invalid.criterionId} is incomplete.` : null;
+  const invalid = QUALITY_VISUAL_CRITERION_IDS.filter((criterionId) => {
+    const check = byId.get(criterionId)!;
+    return !["pass", "blocker", "warn", "note"].includes(check.outcome)
+      || typeof check.message !== "string"
+      || check.message.trim().length < 1
+      || check.message.length > 800
+      || !Array.isArray(check.evidence)
+      || check.evidence.length < 1
+      || check.evidence.some((item) => !validEvidenceLocation(documentState, item))
+      || !visualEvidenceCoversDocument(documentState, check)
+      || (["blocker", "warn"].includes(check.outcome) && (!check.suggestedPatch || check.suggestedPatch.trim().length < 1));
+  });
+  return invalid.length > 0 ? `Visual criteria are incomplete: ${invalid.join(", ")}.` : null;
 }
 
 export function buildQualityReport(
@@ -638,15 +644,16 @@ export function assertPublishableQuality(documentState: DocumentState, report: Q
     || check.evidence.some((item) => !validEvidenceLocation(documentState, item))
   ));
   const missingVisualCoverage = QUALITY_VISUAL_CRITERION_IDS.some((criterionId) => {
-    const evidence = checks
-      .filter((check) => check.criterionId === criterionId)
+    const criterionChecks = checks.filter((check) => check.criterionId === criterionId);
+    const evidence = criterionChecks
       .flatMap((check) => Array.isArray(check.evidence) ? check.evidence : []);
-    return !visualEvidenceCoversDocument(documentState, {
+    return !criterionChecks.some((check) => visualEvidenceCoversDocument(documentState, check))
+      && !visualEvidenceCoversDocument(documentState, {
       criterionId,
       outcome: "pass",
       message: "coverage",
       evidence,
-    });
+      });
   });
   if (
     !isCurrentQualityReport(report)

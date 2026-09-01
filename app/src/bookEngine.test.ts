@@ -2536,6 +2536,33 @@ describe("BookEngine document contract", () => {
     expect(engine.getQualityLifecycle()).toMatchObject({ reviewRounds: 1, reviewStatus: "ready" });
   });
 
+  it("reports every incomplete visual criterion without consuming a critique round", () => {
+    const engine = new BookEngine();
+    const created = engine.dispatch({
+      type: "create-book",
+      requestId: "create-invalid-visual-review",
+      expectedDocumentId: engine.getSnapshot().document.id, expectedRevision: 1,
+      documentId: "book-invalid-visual-review",
+      title: "Invalid Visual Review",
+      ...preparedBook([{ id: "opening", title: "Opening", body: "A rendered beginning." }]),
+      creationBrief: readyStoryBrief(1),
+      validatedSourceAssetIds: [],
+    }, "agent");
+    expect(created).toMatchObject({ ok: true });
+    expect(recordCompleteRenderEvidence(engine)).toEqual([true, true]);
+    expect(engine.beginQualityReview()).toMatchObject({ ok: true, nextRound: 1 });
+
+    const visual = blockingVisualReview(engine.getSnapshot().document.revision, 1);
+    visual.checks.find((check) => check.criterionId === "spread-composition")!.evidence = [];
+    visual.checks.find((check) => check.criterionId === "photo-fidelity-integration")!.message = "";
+    expect(engine.recordQualityReview(visual)).toMatchObject({
+      ok: false,
+      code: "invalid_quality_review",
+      summary: "Visual criteria are incomplete: spread-composition, photo-fidelity-integration.",
+    });
+    expect(engine.getQualityLifecycle()).toMatchObject({ reviewRounds: 0, reviewStatus: "checking" });
+  });
+
   it("applies a bounded scene patch atomically and undoes the whole patch", () => {
     const engine = cityEngine();
     const originalX = engine.getSnapshot().document.spreads[0].elements[0].transform.x;

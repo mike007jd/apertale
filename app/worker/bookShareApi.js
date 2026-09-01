@@ -454,8 +454,18 @@ function validateQualityAttestation(manifest, quality) {
     const evidence = evidenceByCriterion.get(criterionId) ?? [];
     if (criterionId === "cover-appeal") {
       if (!evidence.some((item) => item.scope === "cover")) blocked("The cover critique needs cover evidence.");
-    } else if ([...spreadIds].some((spreadId) => !evidence.some((item) => item.scope === "spread" && item.spreadId === spreadId))) {
-      blocked(`The ${criterionId} critique must cover every spread.`);
+    } else {
+      const coversEverySpread = [...spreadIds].every((spreadId) => (
+        evidence.some((item) => item.scope === "spread" && item.spreadId === spreadId)
+      ));
+      const photoFidelityNotApplicable = criterionId === "photo-fidelity-integration"
+        && !manifest.spreads.some((spread) => Boolean(spread.artwork?.personalSourceAssetId))
+        && quality.checks.some((check) => (
+          check.criterionId === criterionId
+          && check.outcome === "note"
+          && check.evidence.some((item) => item.scope === "book" && item.locator === "creationBrief.sourceAssets")
+        ));
+      if (!coversEverySpread && !photoFidelityNotApplicable) blocked(`The ${criterionId} critique must cover every spread.`);
     }
   });
   if (

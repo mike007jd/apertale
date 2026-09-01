@@ -57,8 +57,17 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("dedicated portrait cover");
     expect(brief.prompt).toContain("purpose-built full-spread artwork");
     expect(brief.prompt).toContain("approximately 1.62:1 stage");
+    expect(brief.prompt).toMatch(/source composite.*clean plate.*original pixel width and height are identical/i);
+    expect(brief.prompt).toMatch(/before handoff or create/i);
     expect(brief.prompt).toMatch(/at most 50/i);
     expect(brief.prompt).toMatch(/presentation status pending.*same requestId/i);
+    expect(brief.prompt).toMatch(/ok:false correction.*fresh requestId/i);
+    expect(brief.prompt).toContain('set_presentation(surface: "shelf")');
+    expect(brief.prompt).toContain('set_presentation(surface: "reader", spreadId)');
+    expect(brief.prompt).toMatch(/normal navigation and screenshots.*do not record revision-bound evidence/i);
+    expect(brief.prompt).toContain('photo-fidelity-integration with outcome: "note"');
+    expect(brief.prompt).toContain('scope: "book" and locator: "creationBrief.sourceAssets"');
+    expect(brief.prompt).toMatch(/personalSourceAssetId.*per-spread evidence/i);
     expect(brief.prompt).toContain("Never claim generation or import succeeded without evidence");
     expect(brief.prompt.indexOf('detail: "authoring-guide"')).toBeLessThan(brief.prompt.indexOf('detail: "creation-readiness"'));
     expect(brief.prompt).toContain("assetUse source-photo");

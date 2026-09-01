@@ -14,7 +14,7 @@ export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", 
 
 export const AUTHORING_GUIDE_DETAIL = "authoring-guide" as const;
 export const AUTHORING_GUIDE_ID = "apertale-authoring-guide" as const;
-export const AUTHORING_GUIDE_VERSION = 3 as const;
+export const AUTHORING_GUIDE_VERSION = 4 as const;
 export const AUTHORING_GUIDE_SKILL_MIRROR = "apertale-authoring" as const;
 
 export const CREATION_READINESS_VERSION = 2 as const;
@@ -468,11 +468,11 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "provenance-revision",
-      rule: "Preserve ordered provenance and requestId. Bind every book or presentation mutation to the expectedDocumentId and expectedRevision returned together by one get_project_context response. For every image-led spread, keep the original composite in sourceAssetId, the final base in cleanPlateAssetId, and any declared personal photo in personalSourceAssetId. Refresh context after every mutation. On conflict, refresh and re-plan.",
+      rule: "Preserve ordered provenance and requestId. Before handoff and create, normalize each spread's source composite and clean plate so their original pixel width and height are identical. Bind every book or presentation mutation to the expectedDocumentId and expectedRevision returned together by one get_project_context response. Reuse a requestId only for an exact unchanged request or to resume a successful mutation with presentation pending; after any ok:false correction or payload or asset change, use a fresh requestId. For every image-led spread, keep the original composite in sourceAssetId, the final base in cleanPlateAssetId, and any declared personal photo in personalSourceAssetId. Refresh context after every mutation. On conflict, refresh and re-plan.",
     },
     {
       id: "verify",
-      rule: "Verify content, book-type-specific asset counts, spread-specific interaction, real render evidence, deterministic checks, AI visual critique, and undo evidence before claiming completion. Patch and re-check at most twice; publish only when allowed.",
+      rule: "Verify content, book-type-specific asset counts, spread-specific interaction, real render evidence, deterministic checks, AI visual critique, and undo evidence before claiming completion. Present the cover with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId); normal navigation and screenshots are observation only and do not record revision-bound evidence. When no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and one evidence item with scope: \"book\" and locator: \"creationBrief.sourceAssets\", explaining that no personal source material exists; when any spread declares one, record per-spread evidence. Patch and re-check at most twice; publish only when allowed.",
     },
   ];
 }
@@ -536,13 +536,14 @@ export function buildAuthoringGuide(): AuthoringGuide {
       ],
     },
     provenance: "Ordered provenance for the cover and every spread, distinguishing user photo, generated art, and curated sample.",
-    revisions: "Use unique requestId values and the expectedDocumentId plus expectedRevision returned together by the current get_project_context response. If a successful mutation returns presentation pending, retry the same requestId and original precondition until the exact frame is confirmed; never recreate with a new id. Refresh get_project_context after every mutation and retain undo tokens.",
+    revisions: "Use a requestId only for one exact unchanged request and the expectedDocumentId plus expectedRevision returned together by the current get_project_context response. If a successful mutation returns presentation pending, retry that same requestId and original precondition until the exact frame is confirmed. After any ok:false correction or payload or asset change, use a fresh requestId. Refresh get_project_context after every mutation and retain undo tokens.",
     verify: [
       "content: title, agreed spread count, and complete story arc",
       "asset counts: generated cover 1 plus one generated illustration or preserved original-photo layout per spread, according to book type",
       "interaction: spread-specific hover/focus/click on every non-guide spread",
       "undo evidence: active revision plus undo tokens for the last reversible changes",
-      "quality: actual cover/spread frames inspected, no blocker, at most two critique rounds, and publishAllowed true",
+      "quality: actual cover/spread frames inspected after set_presentation(surface: \"shelf\") for the cover and set_presentation(surface: \"reader\", spreadId) for every spread; normal navigation and screenshots do not record revision-bound evidence; no blocker, at most two critique rounds, and publishAllowed true",
+      "photo fidelity: without artwork.personalSourceAssetId, record outcome: \"note\" with one evidence item whose scope is \"book\" and locator is \"creationBrief.sourceAssets\"; with any personalSourceAssetId, record per-spread evidence",
     ],
     report: creationReportRequirements(requiredCounts),
   };
