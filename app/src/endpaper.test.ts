@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCoverEndpaperCanvas, negativeZEndpaperMaterials, paintCoverEndpaper } from "./endpaper";
+import { coverBoardMaterials, createCoverEndpaperCanvas, negativeZEndpaperMaterials, paintCoverEndpaper } from "./endpaper";
 
 type RecordedContext = CanvasRenderingContext2D & {
   operations: string[];
@@ -48,6 +48,21 @@ describe("cover endpaper", () => {
       paper,
       paper,
       paper,
+      endpaper,
+    ]);
+  });
+
+  it("binds the printed cover and endpaper to the two real board faces", () => {
+    const cloth = { id: "cloth" };
+    const cover = { id: "cover" };
+    const endpaper = { id: "endpaper" };
+
+    expect(coverBoardMaterials(cloth, cover, endpaper)).toEqual([
+      cloth,
+      cloth,
+      cloth,
+      cloth,
+      cover,
       endpaper,
     ]);
   });

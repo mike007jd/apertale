@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { acquireAssetUrl, acquireAssetUrls, isStoredAssetId, type AssetUrlLease } from "./assetStore";
 import { smootherstep } from "./design/curves";
 import { recordDiagnostic } from "./diagnostics";
-import { createCoverEndpaperCanvas, negativeZEndpaperMaterials, paintCoverEndpaper } from "./endpaper";
+import { coverBoardMaterials, createCoverEndpaperCanvas, negativeZEndpaperMaterials, paintCoverEndpaper } from "./endpaper";
 import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
 import { spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
@@ -835,16 +835,27 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       roughness: 0.94,
       metalness: 0,
     });
+    const coverFaceMaterial = new THREE.MeshStandardMaterial({
+      color: 0x173f39,
+      roughness: 0.58,
+      metalness: 0.02,
+    });
+    const insideCoverMaterial = new THREE.MeshStandardMaterial({
+      color: 0x173f39,
+      roughness: 0.72,
+      metalness: 0.01,
+    });
     /**
-     * Box faces run [+x, -x, +y, -y, +z, -z]. The cover cloth wraps everything
-     * except the inner face, which is the pastedown - and that is the face the
-     * reader looks at for most of the swing. Leaving it the same solid cover
-     * colour made an opening cover read as a featureless slab.
+     * Box faces run [+x, -x, +y, -y, +z, -z]. The printed front board owns
+     * real mapped materials on both broad faces; the structural rear board
+     * keeps the quieter pastedown treatment on its inner face.
      */
-    const makeBoard = () => {
+    const makeBoard = (printedFront = false) => {
       const board = new THREE.Mesh(
         new THREE.BoxGeometry(BOARD_W, BOARD_H, BOARD_T, 1, 1, 1),
-        negativeZEndpaperMaterials(coverMaterial, endpaperMaterial),
+        printedFront
+          ? coverBoardMaterials(coverMaterial, coverFaceMaterial, insideCoverMaterial)
+          : negativeZEndpaperMaterials(coverMaterial, endpaperMaterial),
       );
       board.castShadow = false;
       board.receiveShadow = true;
@@ -867,7 +878,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
      * closure, which reads as the cover floating off its own hinge.
      */
     const frontBoardPivot = new THREE.Group();
-    const frontBoard = makeBoard();
+    const frontBoard = makeBoard(true);
     frontBoard.position.x = BOARD_W / 2;
     frontBoardPivot.add(frontBoard);
     book.add(frontBoardPivot);
@@ -879,28 +890,19 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     const frontMatterPivot = new THREE.Group();
     book.add(frontMatterPivot);
 
-    /** Cover art rides coplanar with the board so an unresolved cover never pops. */
-    const coverArtMaterial = new THREE.MeshStandardMaterial({
-      roughness: 0.58,
-      metalness: 0.02,
-      transparent: true,
-      opacity: 0,
-    });
-    const coverArt = new THREE.Mesh(new THREE.PlaneGeometry(BOARD_W, BOARD_H), coverArtMaterial);
-    coverArt.position.set(BOARD_W / 2, 0, BOARD_T / 2 + 0.0015);
-    frontBoardPivot.add(coverArt);
-
     /**
      * Covers are authored 2:3 while the board is 4.27 x 5.75, so the map is
      * cropped rather than stretched - 118px comes off the bottom of 1152 and
      * the title, which always sits in the upper half, survives intact.
      *
-     * The art fades in over its own board instead of replacing the material, so
-     * a cover that resolves late (a user book's blob comes from IndexedDB) or
-     * never resolves at all changes nothing about the board's lighting or its
-     * silhouette. There is no spinner and no swap-pop.
+     * The map is assigned to the BoxGeometry's real outer face. A separate
+     * coplanar plane disappeared at edge-on angles and exposed the plain board
+     * underneath; binding the texture to the case makes it survive the entire
+     * opening and closing arc. Readiness waits for this load, so a personal
+     * IndexedDB cover cannot pop in halfway through the swing.
      */
     const coverSource = propsRef.current.snapshot.document.coverAssetId ?? propsRef.current.snapshot.document.coverTextureUrl;
+    let coverReady = !coverSource;
     if (coverSource) {
       void acquireAssetUrl(coverSource).then(async (lease) => {
         try {
@@ -927,14 +929,23 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
             paintCoverEndpaper(endpaperCanvas, texture.image as CanvasImageSource);
             endpaperTexture.needsUpdate = true;
           }
-          coverArtMaterial.map = texture;
-          coverArtMaterial.needsUpdate = true;
-          coverArtFadeIn = true;
+          coverFaceMaterial.color.set(0xffffff);
+          coverFaceMaterial.map = texture;
+          coverFaceMaterial.needsUpdate = true;
+          insideCoverMaterial.color.set(0xffffff);
+          insideCoverMaterial.map = texture;
+          insideCoverMaterial.needsUpdate = true;
+          coverReady = true;
+          reportReadyForCurrentSpread();
         } finally {
           lease.release();
         }
       })
-        .catch(() => recordDiagnostic("asset:cover-board-failed", { documentId: propsRef.current.snapshot.document.id }));
+        .catch(() => {
+          coverReady = true;
+          reportReadyForCurrentSpread();
+          recordDiagnostic("asset:cover-board-failed", { documentId: propsRef.current.snapshot.document.id });
+        });
     }
 
     /**
@@ -947,8 +958,6 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
      * to float off its own hinge.
      */
     let coverPhi = 0;
-    let coverArtFadeIn = false;
-
     const bookRestY = book.position.y;
     const anchorPoint = new THREE.Vector3();
 
@@ -1024,7 +1033,12 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     const pageBlockGeometry = new THREE.BoxGeometry(4.32, 5.32, 1);
     const leftStack = new THREE.Mesh(
       pageBlockGeometry,
-      negativeZEndpaperMaterials(pageBlockMaterial, endpaperMaterial),
+      // This is the face that remains parallel to the outer board while the
+      // front matter follows the opening case. If it uses plain paper it sits
+      // in front of the real cover and reads as a missing texture. Reusing the
+      // mapped cover face preserves one continuous printed case through the
+      // handoff; once open, this face is underneath the left page.
+      negativeZEndpaperMaterials(pageBlockMaterial, coverFaceMaterial),
     );
     const rightStack = new THREE.Mesh(pageBlockGeometry, pageBlockMaterial);
     /**
@@ -1292,7 +1306,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       const current = propsRef.current.snapshot;
       if (current.document.id !== loadingDocumentId) return;
       const spread = current.document.spreads[current.session.currentSpreadIndex];
-      if (!spread || !pagePairs.has(spread.id) || !sceneAssetsReady(spread)) return;
+      if (!spread || !coverReady || !pagePairs.has(spread.id) || !sceneAssetsReady(spread)) return;
       readySent = true;
       propsRef.current.onReady(loadingDocumentId);
     };
@@ -1698,6 +1712,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       pageHalo.intensity = THREE.MathUtils.lerp(pageHalo.intensity, night ? 1.55 : 0, themeDelta);
       deskLamp.intensity = THREE.MathUtils.lerp(deskLamp.intensity, night ? 9.8 : 0, themeDelta);
       coverMaterial.color.lerp(night ? nightCoverColor : dayCoverColor, themeDelta);
+      if (!coverFaceMaterial.map) coverFaceMaterial.color.lerp(night ? nightCoverColor : dayCoverColor, themeDelta);
+      if (!insideCoverMaterial.map) insideCoverMaterial.color.lerp(night ? nightCoverColor : dayCoverColor, themeDelta);
       pageBlockMaterial.color.lerp(night ? nightPageBlockColor : dayPageBlockColor, themeDelta);
       turnEdgeMaterial.color.lerp(night ? nightEdgeColor : dayEdgeColor, themeDelta);
       [leftMaterial, rightMaterial, turnFrontMaterial, turnBackMaterial].forEach((material) => {
@@ -1873,11 +1889,6 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       // opposite directions.
       // The workshop shows a blank book that is never closed, so it ignores the
       // caller's progress rather than inheriting the library's closed state.
-      if (coverArtFadeIn && coverArtMaterial.opacity < 1) {
-        // Fast enough that a reader who opens a book the moment it loads never
-        // catches the board bare, slow enough that a late cover does not pop.
-        coverArtMaterial.opacity = Math.min(1, coverArtMaterial.opacity + delta * 4);
-      }
       const requestedOpen = propsRef.current.mode === "workshop" ? 1 : propsRef.current.openProgress.current;
       const requestedPhi = phiFor(requestedOpen);
       if (Math.abs(requestedPhi - coverPhi) > 1e-4) {
@@ -1979,11 +1990,11 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       rearBoard.geometry.dispose();
       frontBoard.geometry.dispose();
       coverMaterial.dispose();
+      coverFaceMaterial.map?.dispose();
+      coverFaceMaterial.dispose();
+      insideCoverMaterial.dispose();
       endpaperTexture.dispose();
       endpaperMaterial.dispose();
-      coverArt.geometry.dispose();
-      coverArtMaterial.map?.dispose();
-      coverArtMaterial.dispose();
       pageBlockGeometry.dispose();
       pageBlockMaterial.dispose();
       shadowPlaneGeometry.dispose();

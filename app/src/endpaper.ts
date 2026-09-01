@@ -8,6 +8,15 @@ export function negativeZEndpaperMaterials<T>(body: T, endpaper: T): [T, T, T, T
   return [body, body, body, body, body, endpaper];
 }
 
+/**
+ * A front board needs the printed cover on the geometry itself. A separate
+ * coplanar plane can be culled or clipped while the case swings edge-on,
+ * briefly exposing the plain cloth underneath even though the image loaded.
+ */
+export function coverBoardMaterials<T>(body: T, cover: T, endpaper: T): [T, T, T, T, T, T] {
+  return [body, body, body, body, cover, endpaper];
+}
+
 type ImageDimensions = {
   naturalWidth?: number;
   naturalHeight?: number;

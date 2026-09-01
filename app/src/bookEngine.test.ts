@@ -709,6 +709,106 @@ describe("BookEngine document contract", () => {
     expect(engine.getLibrary().books.some((book) => book.id === "book-cloud-atlas")).toBe(true);
   });
 
+  it("deletes a personal book under the coordinated library lifecycle and returns to the guide", async () => {
+    const engine = new BookEngine();
+    const created = engine.dispatch({
+      type: "create-book",
+      requestId: "create-book-to-delete",
+      expectedDocumentId: engine.getSnapshot().document.id,
+      expectedRevision: engine.getSnapshot().document.revision,
+      documentId: "book-to-delete",
+      title: "A Temporary Bear",
+      ...preparedBook([{ id: "opening", title: "Opening", body: "A book that can be removed." }]),
+      creationBrief: readyStoryBrief(1),
+      validatedSourceAssetIds: [],
+    }, "agent");
+    expect(created).toMatchObject({ ok: true });
+
+    await expect(engine.removeBookCoordinated("book-to-delete")).resolves.toMatchObject({
+      ok: true,
+      nextBookId: "apertale-field-guide",
+    });
+    expect(engine.getSnapshot().document.id).toBe("apertale-field-guide");
+    expect(engine.getLibrary().books.some((book) => book.id === "book-to-delete")).toBe(false);
+    expect(new BookEngine().getLibrary().books.some((book) => book.id === "book-to-delete")).toBe(false);
+  });
+
+  it("keeps curated and published personal books when deletion is not safe", async () => {
+    const engine = new BookEngine();
+    await expect(engine.removeBookCoordinated("apertale-field-guide")).resolves.toMatchObject({
+      ok: false,
+      code: "sample_book",
+    });
+
+    const created = engine.dispatch({
+      type: "create-book",
+      requestId: "create-published-book-to-keep",
+      expectedDocumentId: engine.getSnapshot().document.id,
+      expectedRevision: engine.getSnapshot().document.revision,
+      documentId: "published-book-to-keep",
+      title: "Shared Bear",
+      ...preparedBook([{ id: "opening", title: "Opening", body: "A shared book must not be orphaned." }]),
+      creationBrief: readyStoryBrief(1),
+      validatedSourceAssetIds: [],
+    }, "agent");
+    expect(created).toMatchObject({ ok: true });
+    localStorage.setItem("apertale.publication.v1:published-book-to-keep", JSON.stringify({
+      documentId: "published-book-to-keep",
+      bookId: "123e4567-e89b-42d3-a456-426614174099",
+      manageToken: "p".repeat(43),
+      status: "draft",
+      uploadedAssetIds: [],
+      attemptAssetIds: [],
+    }));
+
+    await expect(engine.removeBookCoordinated("published-book-to-keep")).resolves.toMatchObject({
+      ok: false,
+      code: "publication_exists",
+    });
+    expect(engine.getLibrary().books.some((book) => book.id === "published-book-to-keep")).toBe(true);
+  });
+
+  it("rolls a failed delete back to the latest durable cross-tab library", async () => {
+    const owner = new BookEngine();
+    const target = owner.dispatch({
+      type: "create-book",
+      requestId: "create-stale-delete-target",
+      expectedDocumentId: owner.getSnapshot().document.id,
+      expectedRevision: owner.getSnapshot().document.revision,
+      documentId: "stale-delete-target",
+      title: "Stale Delete Target",
+      ...preparedBook([{ id: "opening", title: "Opening", body: "The deletion target." }]),
+      creationBrief: readyStoryBrief(1),
+      validatedSourceAssetIds: [],
+    }, "agent");
+    expect(target).toMatchObject({ ok: true });
+    const deletingTab = new BookEngine();
+
+    const otherTab = new BookEngine();
+    const concurrent = otherTab.dispatch({
+      type: "create-book",
+      requestId: "create-concurrent-book-before-delete-failure",
+      expectedDocumentId: otherTab.getSnapshot().document.id,
+      expectedRevision: otherTab.getSnapshot().document.revision,
+      documentId: "concurrent-book-before-delete-failure",
+      title: "Concurrent Book",
+      ...preparedBook([{ id: "opening", title: "Opening", body: "This book must survive rollback." }]),
+      creationBrief: readyStoryBrief(1),
+      validatedSourceAssetIds: [],
+    }, "agent");
+    expect(concurrent).toMatchObject({ ok: true });
+
+    vi.spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    await expect(deletingTab.removeBookCoordinated("stale-delete-target")).resolves.toMatchObject({
+      ok: false,
+      code: "coordination_unavailable",
+    });
+    expect(deletingTab.getLibrary().books.some((book) => book.id === "stale-delete-target")).toBe(true);
+    expect(deletingTab.getLibrary().books.some((book) => book.id === "concurrent-book-before-delete-failure")).toBe(true);
+  });
+
   it("fails closed when the browser cannot coordinate saved library writes", async () => {
     vi.stubGlobal("navigator", {});
     const engine = new BookEngine();

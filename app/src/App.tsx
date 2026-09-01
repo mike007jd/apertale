@@ -21,6 +21,7 @@ import {
   LinkSimple,
   Sparkle,
   SpinnerGap,
+  Trash,
   UploadSimple,
   WarningCircle,
   X,
@@ -275,6 +276,8 @@ export function App() {
   const [showLibrary, setShowLibrary] = useState(true);
   const [libraryMotion, setLibraryMotion] = useState<LibraryMotion>("idle");
   const [libraryTab, setLibraryTab] = useState<LibraryTab>("yours");
+  const [deletingBookId, setDeletingBookId] = useState<string | null>(null);
+  const [libraryDeleteNotice, setLibraryDeleteNotice] = useState<string | null>(null);
   const [creationNavigation, dispatchCreationNavigation] = useReducer(
     reduceCreationNavigation,
     INITIAL_CREATION_NAVIGATION,
@@ -643,7 +646,7 @@ export function App() {
     waitingForRenderer,
   );
   const stageIsLoading = readyBookId !== snapshot.document.id || sceneLoadingBookId === snapshot.document.id;
-  const libraryBusy = Boolean(openingBook || libraryMotion !== "idle");
+  const libraryBusy = Boolean(openingBook || deletingBookId || libraryMotion !== "idle");
 
   const isCreatorBook = Boolean(activeLibraryBook) && activeLibraryBook?.sample === false;
   const qualityGate = bookEngine.getQualityGate();
@@ -1571,6 +1574,34 @@ export function App() {
     }
   };
 
+  const deleteBookFromLibrary = async (book: { id: string; title: string }) => {
+    if (libraryBusy) return;
+    setLibraryDeleteNotice(null);
+    if (getPublicationRecord(book.id)) {
+      setLibraryDeleteNotice(`“${book.title}” has a publication. Open it, choose Publish & share, and delete the publication before removing the local book.`);
+      return;
+    }
+    if (!window.confirm(`Delete “${book.title}” from Your books? This removes the saved book from this browser and cannot be undone.`)) return;
+    setDeletingBookId(book.id);
+    try {
+      const result = await bookEngine.removeBookCoordinated(book.id);
+      if (!result.ok) {
+        setLibraryDeleteNotice(result.summary);
+        return;
+      }
+      setRenderedShelfCovers((current) => {
+        if (!(book.id in current)) return current;
+        const next = { ...current };
+        delete next[book.id];
+        return next;
+      });
+      setLibraryDeleteNotice(null);
+      announce(`${book.title} deleted from Your books.`);
+    } finally {
+      setDeletingBookId(null);
+    }
+  };
+
   const selectLibraryTab = (tab: LibraryTab, tablist: HTMLElement | null) => {
     setLibraryTab(tab);
     tablist?.querySelector<HTMLElement>(`#library-tab-${tab}`)?.focus();
@@ -1683,53 +1714,72 @@ export function App() {
             >
               <div className="library-gallery">
                 {shelfBooks.map((book, index) => (
-                  <button
+                  <div
                     key={book.id}
                     data-book-id={book.id}
-                    className={`library-card library-card-${(index % 5) + 1} ${book.id === library.activeBookId ? "is-active" : ""} ${openingBook?.id === book.id ? "is-opening" : ""}`}
-                    onClick={() => openBookFromLibrary(book.id)}
-                    onPointerEnter={() => prewarmReader(book.id)}
-                    onFocus={() => prewarmReader(book.id)}
-                    aria-busy={openingBook?.id === book.id}
-                    disabled={libraryBusy}
+                    className={`library-card-shell library-card-${(index % 5) + 1} ${book.id === library.activeBookId ? "is-active" : ""} ${openingBook?.id === book.id ? "is-opening" : ""}`}
                   >
-                    <span className="library-cover-frame">
-                      <img
-                        key={`${book.id}:${book.revision}:${book.coverAssetId ?? book.coverTextureUrl}:${resolvedCoverAsset(book, resolvedCoverUrls)?.url ?? "unresolved"}`}
-                        src={shelfCoverTarget(book, resolvedCoverUrls)?.url ?? "/assets/generated/day-background.webp"}
-                        alt={`${book.title} cover`}
-                        loading={index < 4 ? "eager" : "lazy"}
-                        decoding="async"
-                        fetchPriority={index === 0 ? "high" : "auto"}
-                        onLoad={(event) => {
-                          const target = shelfCoverTarget(book, resolvedCoverUrls);
-                          if (!target) return;
-                          const renderElement = event.currentTarget;
-                          const expectedUrl = new URL(target.url, window.location.href).href;
-                          if ((renderElement.currentSrc || renderElement.src) !== expectedUrl) return;
-                          const renderedCover = { ...target, renderElement };
-                          setRenderedShelfCovers((current) => current[book.id]?.assetId === target.assetId
-                            && current[book.id]?.revision === target.revision
-                            && current[book.id]?.url === target.url
-                            && current[book.id]?.renderElement === renderElement
-                            ? current
-                            : { ...current, [book.id]: renderedCover });
-                        }}
-                      />
-                      {openingBook?.id === book.id && <span className="library-opening-badge" aria-hidden="true"><SpinnerGap size={15} weight="bold" /> Opening</span>}
-                    </span>
-                    <span className="library-card-copy">
-                      {/* The shelf tab already says whether these are curated
-                          samples or the reader's own books, so repeating it on
-                          every card spent the label's width on nothing. Only
-                          the Field Guide earns a prefix, because "start here"
-                          is a call to action rather than a category. */}
-                      <small>{book.id === "apertale-field-guide" ? "Start here · " : ""}{book.spreadCount} {book.spreadCount === 1 ? "spread" : "spreads"}</small>
-                      <strong>{book.title}</strong>
-                    </span>
-                  </button>
+                    <button
+                      className="library-card"
+                      onClick={() => openBookFromLibrary(book.id)}
+                      onPointerEnter={() => prewarmReader(book.id)}
+                      onFocus={() => prewarmReader(book.id)}
+                      aria-busy={openingBook?.id === book.id}
+                      disabled={libraryBusy}
+                    >
+                      <span className="library-cover-frame">
+                        <img
+                          key={`${book.id}:${book.revision}:${book.coverAssetId ?? book.coverTextureUrl}:${resolvedCoverAsset(book, resolvedCoverUrls)?.url ?? "unresolved"}`}
+                          src={shelfCoverTarget(book, resolvedCoverUrls)?.url ?? "/assets/generated/day-background.webp"}
+                          alt={`${book.title} cover`}
+                          loading={index < 4 ? "eager" : "lazy"}
+                          decoding="async"
+                          fetchPriority={index === 0 ? "high" : "auto"}
+                          onLoad={(event) => {
+                            const target = shelfCoverTarget(book, resolvedCoverUrls);
+                            if (!target) return;
+                            const renderElement = event.currentTarget;
+                            const expectedUrl = new URL(target.url, window.location.href).href;
+                            if ((renderElement.currentSrc || renderElement.src) !== expectedUrl) return;
+                            const renderedCover = { ...target, renderElement };
+                            setRenderedShelfCovers((current) => current[book.id]?.assetId === target.assetId
+                              && current[book.id]?.revision === target.revision
+                              && current[book.id]?.url === target.url
+                              && current[book.id]?.renderElement === renderElement
+                              ? current
+                              : { ...current, [book.id]: renderedCover });
+                          }}
+                        />
+                        {openingBook?.id === book.id && <span className="library-opening-badge" aria-hidden="true"><SpinnerGap size={15} weight="bold" /> Opening</span>}
+                      </span>
+                      <span className="library-card-copy">
+                        {/* The shelf tab already says whether these are curated
+                            samples or the reader's own books, so repeating it on
+                            every card spent the label's width on nothing. Only
+                            the Field Guide earns a prefix, because "start here"
+                            is a call to action rather than a category. */}
+                        <small>{book.id === "apertale-field-guide" ? "Start here · " : ""}{book.spreadCount} {book.spreadCount === 1 ? "spread" : "spreads"}</small>
+                        <strong>{book.title}</strong>
+                      </span>
+                    </button>
+                    {!book.sample && (
+                      <button
+                        className="library-delete-button"
+                        type="button"
+                        onClick={() => { void deleteBookFromLibrary(book); }}
+                        aria-label={`Delete ${book.title}`}
+                        title="Delete book"
+                        disabled={libraryBusy}
+                      >
+                        {deletingBookId === book.id
+                          ? <SpinnerGap size={17} weight="bold" className="is-spinning" />
+                          : <Trash size={17} weight="bold" />}
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
+              {libraryDeleteNotice && <p className="library-delete-notice" role="status">{libraryDeleteNotice}</p>}
             </div>
             <p className="demo-disclosure">Curated samples use OpenAI-generated illustration. Create your own in Codex.</p>
             {openingBook && <BookLoadingFeedback title={openingBook.title} placement="library" stage={loadStage} reducedMotion={reducedMotion} />}

@@ -264,6 +264,14 @@ export type CoordinatedOpenResult =
       summary: string;
     };
 
+export type CoordinatedRemoveResult =
+  | { ok: true; nextBookId: string; summary: string }
+  | {
+      ok: false;
+      code: "not_found" | "sample_book" | "publication_exists" | "coordination_unavailable";
+      summary: string;
+    };
+
 function validDocument(parsed: DocumentState) {
   return typeof parsed.id === "string"
     && typeof parsed.title === "string"
@@ -677,6 +685,97 @@ export class BookEngine {
       else this.showAction(source, "success", `${source === "agent" ? "Codex opened" : "Opened"} ${target.title}`);
       return { ok: true as const };
     });
+  }
+
+  /**
+   * Permanently removes one personal book from the browser-local library.
+   *
+   * The per-book lifecycle lock is shared with publishing, so the publication
+   * precondition cannot change between checking it and committing the library
+   * removal. The global library lock preserves creations and edits from other
+   * tabs. Curated samples and books with a saved publication capability fail
+   * closed instead of leaving an orphaned share.
+   */
+  async removeBookCoordinated(
+    documentId: string,
+    source: CommandSource = "human",
+    signal?: AbortSignal,
+  ): Promise<CoordinatedRemoveResult> {
+    const lockManager = bookLifecycleLockManager();
+    if (!lockManager) {
+      const summary = "This browser cannot safely coordinate deleting saved books across tabs.";
+      this.showAction(source, "error", summary);
+      return { ok: false, code: "coordination_unavailable", summary };
+    }
+    const options: LockOptions = { mode: "exclusive", ...(signal ? { signal } : {}) };
+    const fail = (
+      code: Exclude<CoordinatedRemoveResult, { ok: true }>["code"],
+      summary: string,
+    ): CoordinatedRemoveResult => {
+      this.showAction(source, "error", summary);
+      return { ok: false, code, summary };
+    };
+
+    return await lockManager.request(bookLifecycleLockName(documentId), options, () => (
+      lockManager.request(BOOK_LIBRARY_MUTATION_LOCK_NAME, options, () => {
+        if (signal?.aborted) throw new DOMException("Book deletion was canceled.", "AbortError");
+        const durableLibrary = readLibraryForLifecycleMutation(this.libraryState);
+        if (!durableLibrary) {
+          return fail("coordination_unavailable", "The saved library could not be read safely; reopen Your books and retry.");
+        }
+        const target = durableLibrary.documents.find((book) => book.id === documentId);
+        if (!target) return fail("not_found", "That book is no longer in Your books.");
+        if (sampleBooks.some((sample) => sample.id === documentId)) {
+          return fail("sample_book", "Curated Apertale books stay in Explore and cannot be deleted.");
+        }
+        if (getPublicationRecord(documentId)) {
+          return fail("publication_exists", "Delete this book's publication from Publish & share before removing its local copy.");
+        }
+
+        const nextDocument = durableLibrary.documents.find((book) => book.id !== documentId && book.id === this.documentState.id)
+          ?? durableLibrary.documents.find((book) => book.id === "apertale-field-guide")
+          ?? durableLibrary.documents.find((book) => book.id !== documentId);
+        if (!nextDocument) {
+          return fail("coordination_unavailable", "Apertale could not find a safe book to keep open after deletion.");
+        }
+
+        // Roll back to the durable baseline we just read, never to a possibly
+        // stale in-memory copy from before this tab acquired the library lock.
+        const beforeLibrary = clone(durableLibrary);
+        const beforeDocument = clone(
+          durableLibrary.documents.find((book) => book.id === this.documentState.id)
+            ?? this.documentState,
+        );
+        const beforeSession = clone(this.sessionState);
+        this.libraryState = durableLibrary;
+        this.libraryState.documents = this.libraryState.documents.filter((book) => book.id !== documentId);
+        delete this.qualityLifecycles()[documentId];
+        this.documentState = clone(nextDocument);
+        this.libraryState.activeBookId = nextDocument.id;
+        if (beforeDocument.id === documentId) {
+          this.sessionState = { ...this.sessionState, currentSpreadIndex: 0, selectionId: null, preview: false };
+        }
+
+        if (!this.persist(true)) {
+          this.libraryState = beforeLibrary;
+          this.documentState = beforeDocument;
+          this.sessionState = beforeSession;
+          return fail("coordination_unavailable", "Apertale did not delete this book because the browser could not save the library.");
+        }
+        const committed = readLibraryForLifecycleMutation(this.libraryState);
+        if (!committed || committed.documents.some((book) => book.id === documentId)) {
+          this.libraryState = beforeLibrary;
+          this.documentState = beforeDocument;
+          this.sessionState = beforeSession;
+          this.persist(true);
+          return fail("coordination_unavailable", "Apertale could not verify the saved book deletion, so it restored the book.");
+        }
+
+        const summary = `${source === "agent" ? "Codex deleted" : "Deleted"} ${target.title} from Your books`;
+        this.showAction(source, "success", summary);
+        return { ok: true as const, nextBookId: nextDocument.id, summary };
+      })
+    ));
   }
 
   async resetCoordinated() {
