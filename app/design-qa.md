@@ -4,13 +4,7 @@
 
 - Source visual truth, Day: `../docs/assets/livingbook-day-theme-reference.png`
 - Source visual truth, Night: `../docs/assets/livingbook-night-theme-reference.png`
-- Browser-rendered Day implementation: `qa/implementation-day-final-clean.png`
-- Browser-rendered Night implementation: `qa/implementation-night-final-clean.png`
-- Three.js page-turn evidence: `qa/implementation-page-turn-pass5.png`
-- Fresh bounded page-turn evidence: `qa/audit-2026-08-26/05-page-turn-corrected.png`
-- Fresh product-audit states: `qa/audit-2026-08-26/01-day-start.png`, `02-bird-selected.png`, `03-bird-lifted.png`, and `06-night-spread.png`
-- Mobile implementation: `qa/implementation-mobile-selected-pass2.png`
-- Forced WebGL/reduced-motion fallback: `qa/implementation-fallback-final.png`
+- Dated implementation/audit captures (`qa/implementation-*.png`, `qa/audit-*/`): pruned from the working tree 2026-09-01; recover any of them from git history at commit `abec1ea` or earlier.
 - Page-turn performance record: `qa/PERFORMANCE.md`
 - Editable Figma baseline: [Apertale — Product Design v1.1, current product states](https://www.figma.com/design/3Kq19oItsbBczMIeB739cO/Apertale-%E2%80%94-Product-Design-v1.1?node-id=7-6)
 - Current real-scene cover captures: `qa/apertale-atlas-preview-cover.png` and `qa/apertale-science-preview-cover.png`
@@ -22,9 +16,7 @@
 - CSS viewport: 1487 × 1058; browser viewport override at density 1 for equal-pixel comparison.
 - Mobile implementation pixels/CSS viewport: 390 × 844 at density 1.
 - State: Day spread 1 with Bird selected; Night spread 2 with Fox selected; editor mode.
-- Full-view Day comparison: `qa/comparison-day-final.png`
-- Full-view Night comparison: `qa/comparison-night-final.png`
-- Focused Bird/control comparison: `qa/focus-day-final.png`
+- Full-view Day/Night and focused comparisons (`qa/comparison-*.png`, `qa/focus-day-final.png`): pruned to git history (see above).
 
 The desktop comparisons use the same viewport, crop, theme, selected element, and editor state. The reference page-turn pose is separately compared against the implementation’s captured deforming-page midpoint because a transient animation frame cannot also be the stable full-view selection baseline.
 
