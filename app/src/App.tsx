@@ -1331,7 +1331,7 @@ export function App() {
     if (!sheet.open) sheet.showModal();
     if (sheet.contains(document.activeElement)) return;
     sheet.querySelector<HTMLElement>("#library-shelf")?.focus();
-  }, [showLibrary]);
+  }, [showCreateGuide, showLibrary]);
 
   useEffect(() => {
     const dialog = createGuideCard.current;
