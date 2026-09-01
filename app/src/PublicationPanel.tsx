@@ -107,7 +107,7 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
 
   const status = busy === "publishing" ? "publishing" : record?.status ?? "draft";
   const statusCopy = busy === "publishing"
-    ? { label: "Publishing", detail: "Uploading and publishing this revision." }
+    ? { label: "Sharing", detail: "Uploading this revision." }
     : STATUS_COPY[status];
   const shareUrl = record?.status === "published" ? record.shareUrl ?? "" : "";
   const stale = record?.status === "published" && record.publishedRevision !== documentState.revision;
@@ -199,12 +199,12 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
         aria-labelledby="publication-title"
         onCancel={(event) => {
           event.preventDefault();
-          if (!busy) onClose();
+          onClose();
         }}
       >
         <header>
           <span><LinkSimple size={16} weight="bold" /> Share book</span>
-          <button autoFocus onClick={() => onClose()} aria-label="Close sharing panel" disabled={Boolean(busy)}><X size={18} /></button>
+          <button autoFocus onClick={() => onClose()} aria-label="Close sharing panel"><X size={18} /></button>
         </header>
 
         <div className="publication-body">

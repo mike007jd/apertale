@@ -104,7 +104,7 @@ async function publishDocumentLocked(
       return toPublicRecord(existing);
     }
     throw new PublicationError(
-      "This book already has a live share link. Revoke it before publishing a new revision.",
+      "This book already has a live share link. Revoke it before sharing a new revision.",
       { code: "revision_changed", status: 409, retryable: false },
     );
   }
@@ -366,7 +366,7 @@ function requirePublicationLockManager() {
 function requireCurrentLibraryDocument(documentState: DocumentState) {
   if (!storedLibraryDocumentMatches(documentState)) {
     throw new PublicationError(
-      "This book is no longer the current saved library revision. Reopen it before publishing.",
+      "This book is no longer the current saved library revision. Reopen it before sharing.",
       { code: "book_unavailable", status: 409, retryable: false },
     );
   }
@@ -600,7 +600,7 @@ async function loadRequiredBlobs(documentState: DocumentState) {
   }
   if (missing.length > 0) {
     throw new PublicationError(
-      `Upload every referenced local asset before publishing (${missing.length} missing).`,
+      `Upload every referenced local asset before sharing (${missing.length} missing).`,
       { code: "missing_assets", status: 409, retryable: false },
     );
   }

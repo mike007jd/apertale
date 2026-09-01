@@ -342,7 +342,7 @@ export function creationCompletionGates(input: AuthoringCountSpec): CreationComp
     {
       id: "evidence",
       token: "[GATE:evidence]",
-      requirement: "Never claim generation or import succeeded without evidence: returned asset ids, tool results, or an explicit pending-handoff report. Render the cover and every spread, then complete an evidence-backed deterministic plus visual critique before publish.",
+      requirement: "Never claim generation or import succeeded without evidence: returned asset ids, tool results, or an explicit pending-handoff report. Render the cover and every spread; quality critique is advisory and never blocks sharing.",
     },
   ];
 }
@@ -368,7 +368,7 @@ export function creationReportRequirements(input: Pick<AuthoringCountSpec, "gene
     "interactions, illustrated layers, and short frame sequences added",
     "unsupported or pending media handoff, with no success claim",
     "active revision and undo tokens for the last reversible changes",
-    "quality-review round, blocker/warning/note counts, actual render evidence inspected, sample-readiness, and publishAllowed",
+    "optional quality-review round, blocker/warning/note counts, actual render evidence inspected, and sample-readiness",
   ];
 }
 
@@ -416,7 +416,7 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "verify",
-      rule: "Verify content, book-type-specific asset counts, spread-specific interaction, real render evidence, deterministic checks, AI visual critique, and undo evidence before claiming completion. Present the cover with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId); normal navigation and screenshots are observation only and do not record revision-bound evidence. When no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and one evidence item with scope: \"book\" and locator: \"creationBrief.sourceAssets\", explaining that no personal source material exists; when any spread declares one, record per-spread evidence. Patch and re-check at most twice; publish only when allowed.",
+      rule: "Verify content, book-type-specific asset counts, spread-specific interaction, real render evidence, deterministic checks, and undo evidence before claiming completion. Quality critique is optional: when requested, present the cover with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId); normal navigation and screenshots do not record revision-bound evidence. When no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and evidence with scope: \"book\" and locator: \"creationBrief.sourceAssets\"; otherwise record per-spread evidence. Patch and re-check at most twice. Never delay or block a user-requested share.",
     },
   ];
 }
@@ -486,7 +486,7 @@ export function buildAuthoringGuide() {
       "asset counts: generated cover 1 plus one generated illustration or preserved original-photo layout per spread, according to book type",
       "interaction: spread-specific hover/focus/click on every non-guide spread",
       "undo evidence: active revision plus undo tokens for the last reversible changes",
-      "quality: actual cover/spread frames inspected after set_presentation(surface: \"shelf\") for the cover and set_presentation(surface: \"reader\", spreadId) for every spread; normal navigation and screenshots do not record revision-bound evidence; no blocker, at most two critique rounds, and publishAllowed true",
+      "optional quality: actual cover/spread frames inspected after set_presentation(surface: \"shelf\") for the cover and set_presentation(surface: \"reader\", spreadId) for every spread; normal navigation and screenshots do not record revision-bound evidence; at most two advisory critique rounds",
       "photo fidelity: without artwork.personalSourceAssetId, record outcome: \"note\" with one evidence item whose scope is \"book\" and locator is \"creationBrief.sourceAssets\"; with any personalSourceAssetId, record per-spread evidence",
     ],
     report: creationReportRequirements(requiredCounts),

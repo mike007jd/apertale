@@ -4,7 +4,6 @@ import {
   QUALITY_REVIEW_MAX_ROUNDS,
   QUALITY_RUBRIC,
   QUALITY_VISUAL_CRITERION_IDS,
-  assertPublishableQuality,
   buildQualityReport,
   groupQualityBlockers,
   buildQualityRenderManifest,
@@ -216,19 +215,14 @@ describe("quality contract", () => {
     );
   });
 
-  it("requires every visual criterion and produces a publishable warning record", () => {
+  it("requires every visual criterion and produces an advisory warning record", () => {
     const document = documentState();
     const deterministic = evaluateDeterministicQuality(document, renderEvidence(), readyBrief);
     expect(deterministic.every((check) => check.outcome === "pass")).toBe(true);
     const submission = visualReview("warn");
     expect(validateVisualReview(document, submission, 1)).toBeNull();
     const report = buildQualityReport(document, 1, deterministic, submission, readyBrief);
-    expect(report).toMatchObject({ blockerCount: 0, warningCount: QUALITY_VISUAL_CRITERION_IDS.length, warningsRecorded: true, sampleReady: true, publishAllowed: true });
-    expect(() => assertPublishableQuality(document, report)).not.toThrow();
-
-    const forged = structuredClone(report);
-    forged.checks.find((check) => check.criterionId === "spread-composition")!.evidence[0].spreadId = "does-not-exist";
-    expect(() => assertPublishableQuality(document, forged)).toThrow(/quality gate/i);
+    expect(report).toMatchObject({ status: "ready", blockerCount: 0, warningCount: QUALITY_VISUAL_CRITERION_IDS.length, warningsRecorded: true, sampleReady: true });
   });
 
   it("rejects visual evidence for a spread outside the current document", () => {
@@ -267,7 +261,7 @@ describe("quality contract", () => {
       submission,
       brief,
     );
-    expect(() => assertPublishableQuality(document, report)).not.toThrow();
+    expect(report.status).toBe("ready");
 
     const legacy = structuredClone(submission);
     const legacyPhotoFidelity = legacy.checks.find((check) => check.criterionId === "photo-fidelity-integration")!;
@@ -285,16 +279,6 @@ describe("quality contract", () => {
     const sourceId = "asset:22345678-1234-4234-8234-123456789abc";
     const document = multiSpreadDocumentState();
     document.spreads.forEach((spread) => { spread.artwork!.personalSourceAssetId = sourceId; });
-    const brief = {
-      ...readyBrief,
-      spreadCount: document.spreads.length,
-      sourceAssets: [{ id: sourceId, name: "Portrait.png" }],
-      photoPolicy: { sourceUse: "reference-and-compose" as const, preserveIdentity: true, allowFaceChanges: false },
-    };
-    const evidence = [
-      ...renderEvidence(),
-      { ...renderEvidence()[1], spreadId: "closing", renderedAt: "2026-08-29T00:00:02.000Z" },
-    ];
     const submission = visualReview();
     submission.checks.forEach((check) => {
       if (check.criterionId !== "cover-appeal") check.evidence.push({ ...check.evidence[0], spreadId: "closing" });
@@ -306,15 +290,6 @@ describe("quality contract", () => {
     expect(validateVisualReview(document, submission, 1)).toBe(
       "Visual criteria are incomplete: photo-fidelity-integration.",
     );
-    const forged = buildQualityReport(
-      document,
-      1,
-      evaluateDeterministicQuality(document, evidence, brief),
-      submission,
-      brief,
-    );
-    expect(() => assertPublishableQuality(document, forged)).toThrow(/quality gate/i);
-
     photoFidelity.outcome = "pass";
     photoFidelity.evidence = document.spreads.map((spread) => ({
       scope: "spread" as const,

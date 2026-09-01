@@ -889,7 +889,7 @@ export class BookEngine {
     }
     if (
       isCurrentQualityReport(lifecycle.report)
-      && lifecycle.report.publishAllowed
+      && lifecycle.report.status === "ready"
       && lifecycle.report.reviewedRevision === this.documentState.revision
     ) {
       return {
@@ -908,7 +908,7 @@ export class BookEngine {
         remainingRounds: QUALITY_REVIEW_MAX_ROUNDS - lifecycle.reviewRounds,
       };
     }
-    if (lifecycle.reviewRounds >= QUALITY_REVIEW_MAX_ROUNDS && !lifecycle.report?.publishAllowed) {
+    if (lifecycle.reviewRounds >= QUALITY_REVIEW_MAX_ROUNDS && lifecycle.report?.status !== "ready") {
       return {
         ok: false as const,
         code: "quality_review_limit" as const,
@@ -917,7 +917,7 @@ export class BookEngine {
         qualityGate: this.getQualityGate(),
       };
     }
-    if (lifecycle.report && !lifecycle.report.publishAllowed && lifecycle.report.reviewedRevision === this.documentState.revision) {
+    if (lifecycle.report && lifecycle.report.status !== "ready" && lifecycle.report.reviewedRevision === this.documentState.revision) {
       return {
         ok: false as const,
         code: "quality_patch_required" as const,
@@ -963,7 +963,7 @@ export class BookEngine {
     ].slice(-RENDER_EVIDENCE_LIMIT);
     if (
       lifecycle.report?.reviewedRevision === documentState.revision
-      && !lifecycle.report.publishAllowed
+      && lifecycle.report.status !== "ready"
       && lifecycle.report.checks.some((check) => (
         check.criterionId === "render-evidence-completeness" && check.outcome === "blocker"
       ))
@@ -1008,7 +1008,7 @@ export class BookEngine {
         qualityGate: this.getQualityGate(),
       };
     }
-    if (lifecycle.report && !lifecycle.report.publishAllowed && lifecycle.report.reviewedRevision === this.documentState.revision) {
+    if (lifecycle.report && lifecycle.report.status !== "ready" && lifecycle.report.reviewedRevision === this.documentState.revision) {
       return {
         ok: false as const,
         code: "quality_patch_required" as const,
@@ -1047,12 +1047,12 @@ export class BookEngine {
     this.persist();
     this.showAction(
       "agent",
-      report.publishAllowed ? "success" : "error",
-      report.publishAllowed
-        ? "Quality check passed — this revision is ready to publish"
+      "success",
+      report.status === "ready"
+        ? "Quality review complete — this revision looks ready"
         : report.status === "needs-user-input"
-          ? "Quality blockers remain after two rounds — new material or a decision is needed"
-          : "Quality check found blockers to fix",
+          ? "Quality review complete — new material or a decision could improve it"
+          : "Quality review recorded — polish notes are available",
     );
     return {
       ok: true as const,
@@ -1078,7 +1078,7 @@ export class BookEngine {
   private persist(suppressWarning = false) {
     const quality = this.qualityLifecycle();
     if (
-      quality?.report?.publishAllowed
+      quality?.report?.status === "ready"
       && quality.report.reviewedRevision !== this.documentState.revision
     ) {
       // A post-approval edit starts a fresh bounded review cycle. Blocked

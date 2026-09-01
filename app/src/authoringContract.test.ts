@@ -58,7 +58,8 @@ describe("site-native authoring guide contract", () => {
     expect(artGate).toContain("without reillustrating people");
     expect(guide.report.join(" ")).toContain("preserved original-photo layout count");
     expect(guide.report.join(" ")).toContain("source-true layouts for preserved-photo-album");
-    expect(guide.report.join(" ")).toContain("publishAllowed");
+    expect(guide.report.join(" ")).toContain("optional quality-review");
+    expect(guide.report.join(" ")).not.toContain("publishAllowed");
     expect(guide.verify.join(" ")).toMatch(/actual cover\/spread frames inspected/i);
   });
 

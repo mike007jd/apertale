@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BookEngine } from "./bookEngine";
 import { bookLifecycleLockName, BOOK_LIBRARY_MUTATION_LOCK_NAME, BOOK_LIBRARY_STORAGE_KEY } from "./bookLifecycle";
 import { hasReveal, resolveInteraction } from "./interaction";
-import { evaluateDeterministicQuality, QUALITY_VISUAL_CRITERION_IDS, assertPublishableQuality, type QualityVisualReviewSubmission } from "./qualityContract";
+import { evaluateDeterministicQuality, QUALITY_VISUAL_CRITERION_IDS, type QualityVisualReviewSubmission } from "./qualityContract";
 import { sampleBooks } from "./sampleBook";
 import { listStoredPublishedAssetIds } from "./projectArtifact";
 import { THEME_IDS, isProceduralElement, type CreateBookCommand, type DocumentState } from "./types";
@@ -1422,7 +1422,6 @@ describe("BookEngine document contract", () => {
         contractVersion: 2,
         rubricVersion: 2,
         reviewedRevision: 5,
-        publishAllowed: true,
         status: "ready" as const,
       },
     };
@@ -1433,7 +1432,7 @@ describe("BookEngine document contract", () => {
       authoringQuality: { [previous.id]: previousQuality },
     }));
     const engine = new BookEngine();
-    expect(engine.getQualityGate()).toMatchObject({ status: "ready", report: { publishAllowed: true } });
+    expect(engine.getQualityGate()).toMatchObject({ status: "ready", report: { status: "ready" } });
 
     const created = engine.dispatch({
       type: "create-book",
@@ -1457,7 +1456,7 @@ describe("BookEngine document contract", () => {
     expect(undone.ok).toBe(true);
     expect(engine.getSnapshot().document).toMatchObject({ id: previous.id, revision: 5 });
     expect(engine.getQualityLifecycle()).toEqual(previousQuality);
-    expect(engine.getQualityGate()).toMatchObject({ status: "ready", report: { publishAllowed: true } });
+    expect(engine.getQualityGate()).toMatchObject({ status: "ready", report: { status: "ready" } });
   });
 
   it("rejects a create command that would overwrite an existing library book", () => {
@@ -2021,9 +2020,7 @@ describe("BookEngine document contract", () => {
           : [{ scope: "spread" as const, spreadId: "opening", locator: ".book-scene canvas", description: "Rendered spread" }],
       })),
     });
-    expect(reviewed).toMatchObject({ ok: true, qualityReport: { status: "ready", publishAllowed: true } });
-    if (!reviewed.ok) throw new Error("Expected a ready legacy review.");
-    expect(() => assertPublishableQuality(engine.getSnapshot().document, reviewed.qualityReport)).not.toThrow();
+    expect(reviewed).toMatchObject({ ok: true, qualityReport: { status: "ready", sampleReady: true } });
   });
 
   it("migrates a persisted v1 quality report into a fresh v2 review cycle", () => {
@@ -2057,7 +2054,7 @@ describe("BookEngine document contract", () => {
             locator: ".book-scene canvas",
             renderedAt: "2026-08-29T00:00:00.000Z",
           }],
-          report: { contractVersion: 1, rubricVersion: 1, reviewedRevision: 5, publishAllowed: true },
+          report: { contractVersion: 1, rubricVersion: 1, reviewedRevision: 5, status: "ready" },
         },
       },
     }));
@@ -2104,7 +2101,7 @@ describe("BookEngine document contract", () => {
           : [{ scope: "spread" as const, spreadId: "opening", locator: ".book-scene canvas", description: "Rendered spread" }],
       })),
     });
-    expect(reviewed).toMatchObject({ ok: true, qualityReport: { contractVersion: 2, rubricVersion: 2, publishAllowed: true } });
+    expect(reviewed).toMatchObject({ ok: true, qualityReport: { contractVersion: 2, rubricVersion: 2, status: "ready" } });
   });
 
   it("allows a legacy creation brief to be replaced before quality review", () => {
@@ -2170,7 +2167,7 @@ describe("BookEngine document contract", () => {
             locator: ".book-scene canvas",
             renderedAt: "2026-08-29T00:00:00.000Z",
           }],
-          report: { contractVersion: 2, rubricVersion: 2, reviewedRevision: 5, publishAllowed: true },
+          report: { contractVersion: 2, rubricVersion: 2, reviewedRevision: 5, status: "ready" },
         },
       },
     }));
@@ -2429,7 +2426,7 @@ describe("BookEngine document contract", () => {
     const first = engine.recordQualityReview(blockingVisualReview(revision, 1));
     expect(first).toMatchObject({
       ok: true,
-      qualityReport: { round: 1, status: "blocked", publishAllowed: false },
+      qualityReport: { round: 1, status: "blocked" },
     });
 
     expect(engine.beginQualityReview()).toMatchObject({ ok: false, code: "quality_patch_required" });
@@ -2447,7 +2444,7 @@ describe("BookEngine document contract", () => {
     const second = engine.recordQualityReview(blockingVisualReview(patchedRevision, 2));
     expect(second).toMatchObject({
       ok: true,
-      qualityReport: { round: 2, status: "needs-user-input", publishAllowed: false },
+      qualityReport: { round: 2, status: "needs-user-input" },
     });
     expect(engine.beginQualityReview()).toMatchObject({
       ok: false,
@@ -2531,7 +2528,7 @@ describe("BookEngine document contract", () => {
     })).toBe(true);
     expect(engine.recordQualityReview(visual)).toMatchObject({
       ok: true,
-      qualityReport: { round: 1, status: "ready", publishAllowed: true },
+      qualityReport: { round: 1, status: "ready", sampleReady: true },
     });
     expect(engine.getQualityLifecycle()).toMatchObject({ reviewRounds: 1, reviewStatus: "ready" });
   });

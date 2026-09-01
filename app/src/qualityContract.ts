@@ -116,7 +116,6 @@ export type QualityReport = {
   noteCount: number;
   warningsRecorded: boolean;
   sampleReady: boolean;
-  publishAllowed: boolean;
   summary: string;
 };
 
@@ -468,8 +467,7 @@ export function buildQualityReport(
   const warningCount = checks.filter((check) => check.outcome === "warn").length;
   const noteCount = checks.filter((check) => check.outcome === "note").length;
   const sampleReady = submission.sampleReady && blockerCount === 0;
-  const publishAllowed = sampleReady;
-  const status: QualityReportStatus = publishAllowed
+  const status: QualityReportStatus = sampleReady
     ? "ready"
     : round >= QUALITY_REVIEW_MAX_ROUNDS
       ? "needs-user-input"
@@ -489,7 +487,6 @@ export function buildQualityReport(
     noteCount,
     warningsRecorded: true,
     sampleReady,
-    publishAllowed,
     summary: submission.summary.trim(),
   };
 }
@@ -594,65 +591,20 @@ export function qualityGateState(
       remainingRounds,
     };
   }
-  if (report?.publishAllowed) {
-    return { status: "ready", message: "Quality check passed. This revision is ready to publish.", report, nextRound: null, remainingRounds };
+  if (report?.status === "ready") {
+    return { status: "ready", message: "Quality review complete. This revision looks ready.", report, nextRound: null, remainingRounds };
   }
   if (lifecycle.reviewRounds >= QUALITY_REVIEW_MAX_ROUNDS) {
     return { status: "needs-user-input", message: "Two review rounds are complete. New source material or a user decision is required.", report, nextRound: null, remainingRounds: 0 };
   }
   if (report) {
-    return { status: "blocked", message: "Quality blockers must be fixed before publishing.", report, nextRound: lifecycle.reviewRounds + 1, remainingRounds };
+    return { status: "blocked", message: "Quality review found optional polish items.", report, nextRound: lifecycle.reviewRounds + 1, remainingRounds };
   }
   return {
     status: "needs-review",
-    message: "Run the quality check before publishing this revision.",
+    message: "Run the optional quality review for polish notes.",
     report: null,
     nextRound: lifecycle.reviewRounds + 1,
     remainingRounds,
   };
-}
-
-export function assertPublishableQuality(documentState: DocumentState, report: QualityReport | null | undefined) {
-  const checks = Array.isArray(report?.checks) ? report.checks : [];
-  const blockerCount = checks.filter((check) => check.outcome === "blocker").length;
-  const warningCount = checks.filter((check) => check.outcome === "warn").length;
-  const noteCount = checks.filter((check) => check.outcome === "note").length;
-  const missingCriteria = QUALITY_RUBRIC.criteria.some((criterion) => !checks.some((check) => check.criterionId === criterion.id));
-  const invalidEvidence = checks.some((check) => (
-    !Array.isArray(check.evidence)
-    || check.evidence.length < 1
-    || check.evidence.some((item) => !validEvidenceLocation(documentState, item))
-  ));
-  const missingVisualCoverage = QUALITY_VISUAL_CRITERION_IDS.some((criterionId) => {
-    const criterionChecks = checks.filter((check) => check.criterionId === criterionId);
-    const evidence = criterionChecks
-      .flatMap((check) => Array.isArray(check.evidence) ? check.evidence : []);
-    return !criterionChecks.some((check) => visualEvidenceCoversDocument(documentState, check))
-      && !visualEvidenceCoversDocument(documentState, {
-      criterionId,
-      outcome: "pass",
-      message: "coverage",
-      evidence,
-      });
-  });
-  if (
-    !isCurrentQualityReport(report)
-    || report.documentId !== documentState.id
-    || report.reviewedRevision !== documentState.revision
-    || report.round < 1
-    || report.round > QUALITY_REVIEW_MAX_ROUNDS
-    || missingCriteria
-    || invalidEvidence
-    || missingVisualCoverage
-    || creationAssetPolicyIssues(documentState, report.creationBrief).length > 0
-    || report.blockerCount !== blockerCount
-    || report.warningCount !== warningCount
-    || report.noteCount !== noteCount
-    || blockerCount !== 0
-    || !report.warningsRecorded
-    || !report.sampleReady
-    || !report.publishAllowed
-  ) {
-    throw new Error("This revision has not passed the Apertale quality gate.");
-  }
 }

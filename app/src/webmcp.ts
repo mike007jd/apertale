@@ -584,7 +584,7 @@ export function registerWebMcpTools(
             detail: {
               type: "string",
               enum: [...PROJECT_CONTEXT_DETAILS],
-              description: "Use creation-readiness before create and quality-review after real rendering; assets lists imports.",
+              description: "Use creation-readiness before create; quality-review is optional polish after real rendering; assets lists imports.",
             },
             creationBrief: creationBriefSchema,
           },
@@ -646,7 +646,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.manageBook,
         title: "Manage book",
-        description: "Open, atomically create a complete prepared book from the exact brief, adopt-creation-brief for one legacy book, set a cover, begin critique, or record critique. Create requires a verified cover and every spread's final base plus 2–4 layers, including preserved-photo-album layouts. If assets are incomplete, do not mutate or enter the shelf or reader. Render and inspect every frame; never publish with blockers.",
+        description: "Open, atomically create a complete prepared book from the exact brief, adopt-creation-brief for one legacy book, set a cover, begin critique, or record critique. Create requires a verified cover and every spread's final base plus 2–4 layers, including preserved-photo-album layouts. If assets are incomplete, do not mutate or enter the shelf or reader. Critique is optional and never blocks sharing.",
         inputSchema: {
           type: "object",
           properties: {

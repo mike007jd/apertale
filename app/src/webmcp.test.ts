@@ -806,7 +806,7 @@ describe("WebMCP registration", () => {
     }, { signal: new AbortController().signal })));
     expect(renderedCritique).toMatchObject({
       ok: true,
-      qualityReport: { round: 1, status: "blocked", publishAllowed: false },
+      qualityReport: { round: 1, status: "blocked" },
       qualityGate: { status: "blocked", remainingRounds: 1 },
     });
 
