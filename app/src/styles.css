@@ -2536,50 +2536,6 @@ summary:focus-visible,
 
 .publication-lede { display: block; max-width: 44ch; margin-top: 10px; color: var(--muted); font-size: var(--text-body); line-height: 1.5; }
 
-.publication-quality {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  margin-top: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-m);
-  padding: 11px 12px;
-  background: var(--surface-strong);
-}
-
-.publication-quality > svg { margin-top: 1px; }
-.publication-quality > div { display: grid; gap: 3px; }
-.publication-quality strong { font-size: var(--text-caption); }
-.publication-quality span { color: var(--muted); font-size: var(--text-caption); line-height: 1.45; }
-.publication-quality.is-ready { color: #2f7553; border-color: rgba(47, 117, 83, .3); }
-.publication-quality.is-checking { color: #386f94; border-color: rgba(56, 111, 148, .3); }
-.publication-quality.is-blocked,
-.publication-quality.is-needs-user-input { color: #9b6122; border-color: rgba(155, 97, 34, .32); }
-
-.publication-quality-findings {
-  display: grid;
-  gap: 7px;
-  margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.publication-quality-findings li {
-  display: grid;
-  gap: 2px;
-  border-left: 2px solid rgba(155, 97, 34, .45);
-  padding-left: 9px;
-}
-
-/* The overflow line counts what is not shown; it is not itself a finding, so
-   it drops the blocker rule and the emphasis that goes with one. */
-.publication-quality-findings .publication-quality-more { border-left-color: transparent; }
-.publication-quality-findings .publication-quality-more strong { color: var(--muted); font-weight: 400; }
-
-.publication-quality-findings strong { font-size: var(--text-caption); line-height: 1.35; }
-.publication-quality-findings span { color: var(--muted); font-size: var(--text-caption); line-height: 1.4; }
-
 .publication-link {
   margin-top: 18px;
   border: 1px solid var(--line);

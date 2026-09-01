@@ -633,11 +633,9 @@ export function App() {
   const libraryBusy = Boolean(openingBook || deletingBookId || pendingDestructiveAction || libraryMotion !== "idle");
 
   const isCreatorBook = Boolean(activeLibraryBook) && activeLibraryBook?.sample === false;
-  const qualityGate = bookEngine.getQualityGate();
   const visiblePublicationRecord = publicationRecordForDocument(snapshot.document.id, publicationRecord);
   const publicationLauncher = publicationLauncherPresentation(
     visiblePublicationRecord,
-    qualityGate.status,
     snapshot.document.revision,
   );
 
@@ -1693,9 +1691,9 @@ export function App() {
         <button className="wordmark" onClick={() => { bookEngine.setPreview(false); openLibrary(); }} aria-label="Open book library">Apertale</button>
         <div className="topbar-actions">
           <ThemeSwitch theme={snapshot.session.sceneThemeId} onChange={setTheme} groupLabel="Scene theme" />
-          <button className="preview-button" onClick={() => bookEngine.setPreview(!snapshot.session.preview)} aria-label={snapshot.session.preview ? "Exit preview" : "Preview book"}>
+          <button className="preview-button" onClick={() => bookEngine.setPreview(!snapshot.session.preview)} aria-label={snapshot.session.preview ? "Edit book" : "Preview book"}>
             {snapshot.session.preview ? <EyeSlash size={18} /> : <Eye size={18} />}
-            <span>{snapshot.session.preview ? "Exit preview" : "Preview"}</span>
+            <span>{snapshot.session.preview ? "Edit" : "Preview"}</span>
           </button>
         </div>
       </header>
@@ -2065,11 +2063,9 @@ export function App() {
                 >
                   {publicationLauncher.state === "shared"
                     ? <LinkSimple size={17} weight="bold" />
-                    : publicationLauncher.state === "checking"
+                    : publicationLauncher.state === "publishing"
                       ? <SpinnerGap size={17} weight="bold" className="is-spinning" />
-                      : publicationLauncher.state === "attention"
-                        ? <WarningCircle size={17} weight="fill" />
-                        : <UploadSimple size={17} weight="bold" />}
+                      : <UploadSimple size={17} weight="bold" />}
                   <span>{publicationLauncher.label}</span>
                 </button>
                 <button
@@ -2351,7 +2347,6 @@ export function App() {
           key={snapshot.document.id}
           document={snapshot.document}
           record={visiblePublicationRecord}
-          qualityGate={qualityGate}
           onRecordChange={handlePublicationRecordChange}
           onClose={closePublication}
         />

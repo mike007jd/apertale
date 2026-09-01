@@ -5,7 +5,6 @@ import {
   storedLibraryDocumentMatches,
 } from "./bookLifecycle";
 import { listStoredPublishedAssetIds } from "./projectArtifact";
-import { assertPublishableQuality, type QualityReport } from "./qualityContract";
 import type { DocumentState } from "./types";
 
 type PublicationStatus = "draft" | "publishing" | "published" | "revoked" | "deleting";
@@ -77,12 +76,11 @@ export function getPublicationRecord(documentId: string): PublicationRecord | nu
 
 export async function publishDocument(
   documentState: DocumentState,
-  qualityReport: QualityReport | null | undefined,
   onProgress?: (progress: PublicationProgress) => void,
 ): Promise<PublicationRecord> {
   const lockManager = requirePublicationLockManager();
   try {
-    ensureSynchronousPublicationIntent(documentState, qualityReport);
+    ensureSynchronousPublicationIntent(documentState);
   } catch (error) {
     if (!(error instanceof PublicationIntentCleanupError)) throw error;
     await lockManager.request(bookLifecycleLockName(error.documentId), { mode: "exclusive" }, () => {
@@ -90,18 +88,17 @@ export async function publishDocument(
     });
     throw error.originalError;
   }
-  return withPublicationLock(documentState.id, () => publishDocumentLocked(documentState, qualityReport, onProgress));
+  return withPublicationLock(documentState.id, () => publishDocumentLocked(documentState, onProgress));
 }
 
 async function publishDocumentLocked(
   documentState: DocumentState,
-  qualityReport: QualityReport | null | undefined,
   onProgress?: (progress: PublicationProgress) => void,
 ): Promise<PublicationRecord> {
   // The record may have been deleted while this call waited for the Web Lock.
   // Re-establish it synchronously before any blob or network await so creation
   // undo always sees publication intent throughout the locked workflow.
-  const existing = ensureSynchronousPublicationIntent(documentState, qualityReport, true);
+  const existing = ensureSynchronousPublicationIntent(documentState, true);
   if (existing?.status === "published") {
     if (existing.publishedRevision === documentState.revision && existing.shareUrl) {
       return toPublicRecord(existing);
@@ -187,8 +184,6 @@ async function publishDocumentLocked(
     }
   }
 
-  requirePublishableQuality(documentState, qualityReport);
-
   const blobs = await loadRequiredBlobs(documentState);
   const localAssetIds = [...blobs.keys()];
   const attemptAssetIds = canonicalAssetIds(localAssetIds);
@@ -241,7 +236,7 @@ async function publishDocumentLocked(
         authorization: bearer(record.manageToken),
         "content-type": "application/json",
       },
-      body: JSON.stringify({ manifest: documentState, shareToken, quality: qualityReport }),
+      body: JSON.stringify({ manifest: documentState, shareToken }),
     },
   );
   const shareUrl = readSameOriginShareUrl(published.shareUrl, shareToken);
@@ -368,20 +363,6 @@ function requirePublicationLockManager() {
   return lockManager;
 }
 
-function requirePublishableQuality(
-  documentState: DocumentState,
-  qualityReport: QualityReport | null | undefined,
-) {
-  try {
-    assertPublishableQuality(documentState, qualityReport);
-  } catch {
-    throw new PublicationError(
-      "This revision must pass the Apertale quality check before it can be published.",
-      { code: "quality_blocked", status: 409, retryable: false },
-    );
-  }
-}
-
 function requireCurrentLibraryDocument(documentState: DocumentState) {
   if (!storedLibraryDocumentMatches(documentState)) {
     throw new PublicationError(
@@ -393,13 +374,11 @@ function requireCurrentLibraryDocument(documentState: DocumentState) {
 
 function ensureSynchronousPublicationIntent(
   documentState: DocumentState,
-  qualityReport: QualityReport | null | undefined,
   ownsLifecycleLock = false,
 ) {
   requireCurrentLibraryDocument(documentState);
   const existing = readStoredRecord(documentState.id);
   if (existing) return existing;
-  requirePublishableQuality(documentState, qualityReport);
   const created = createDraftRecord(
     documentState.id,
     canonicalAssetIds(listStoredPublishedAssetIds(documentState)),

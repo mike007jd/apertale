@@ -728,7 +728,7 @@ export class BookEngine {
           return fail("sample_book", "Curated Apertale books stay in Explore and cannot be deleted.");
         }
         if (getPublicationRecord(documentId)) {
-          return fail("publication_exists", "Delete this book's publication from Publish & share before removing its local copy.");
+          return fail("publication_exists", "Revoke this book's link from Share book before removing its local copy.");
         }
 
         const nextDocument = durableLibrary.documents.find((book) => book.id !== documentId && book.id === this.documentState.id)

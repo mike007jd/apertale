@@ -577,7 +577,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.context,
         title: "Get project context",
-        description: "Inspect Apertale. Create flow: authoring-guide → creation-readiness → ask every returned blocking question → create with the same brief. After rendering, read quality-review, inspect real frames, record critique, patch at most twice, then publish only when allowed.",
+        description: "Inspect Apertale. Create flow: authoring-guide → creation-readiness → ask every returned blocking question → create with the same brief. After rendering, quality-review can guide up to two polish rounds; it never blocks sharing.",
         inputSchema: {
           type: "object",
           properties: {

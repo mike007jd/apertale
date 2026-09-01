@@ -9,35 +9,27 @@ function deferred<T>() {
 }
 
 describe("publication action availability", () => {
-  it("allows an interrupted publish to reconcile before the current revision passes quality", () => {
-    expect(publicationActionDisabled("publishing", false, "needs-review")).toBe(false);
-    expect(publicationActionDisabled("publishing", false, "blocked")).toBe(false);
-  });
-
-  it("keeps first-time and revoked publication behind the current quality gate", () => {
-    expect(publicationActionDisabled("draft", false, "needs-review")).toBe(true);
-    expect(publicationActionDisabled("revoked", false, "blocked")).toBe(true);
-    expect(publicationActionDisabled("draft", false, "ready")).toBe(false);
-    expect(publicationActionDisabled("publishing", true, "ready")).toBe(true);
-    expect(publicationActionDisabled("deleting", false, "ready")).toBe(true);
+  it("only disables sharing during another action or deletion recovery", () => {
+    expect(publicationActionDisabled("draft", false)).toBe(false);
+    expect(publicationActionDisabled("revoked", false)).toBe(false);
+    expect(publicationActionDisabled("publishing", false)).toBe(false);
+    expect(publicationActionDisabled("publishing", true)).toBe(true);
+    expect(publicationActionDisabled("deleting", false)).toBe(true);
   });
 });
 
 describe("publication launcher presentation", () => {
   it.each([
-    [null, "needs-review", 4, "Review needed", "attention"],
-    [{ status: "draft" }, "checking", 4, "Reviewing", "checking"],
-    [{ status: "draft" }, "blocked", 4, "Fix blockers", "attention"],
-    [{ status: "draft" }, "needs-user-input", 4, "Needs input", "attention"],
-    [{ status: "draft" }, "ready", 4, "Publish", "ready"],
-    [{ status: "revoked" }, "ready", 4, "Publish again", "ready"],
-    [{ status: "publishing" }, "needs-review", 4, "Resume publishing", "publishing"],
-    [{ status: "deleting" }, "ready", 4, "Finish deleting", "attention"],
-    [{ status: "published", publishedRevision: 4 }, "needs-review", 4, "Shared", "shared"],
-    [{ status: "published", publishedRevision: 3 }, "ready", 4, "Share outdated", "attention"],
-    [{ status: "published" }, "ready", 4, "Share outdated", "attention"],
-  ] as const)("maps publication and quality state to %s", (record, qualityStatus, revision, label, state) => {
-    expect(publicationLauncherPresentation(record, qualityStatus, revision)).toEqual({ label, state });
+    [null, 4, "Share", "ready"],
+    [{ status: "draft" }, 4, "Share", "ready"],
+    [{ status: "revoked" }, 4, "Share", "ready"],
+    [{ status: "publishing" }, 4, "Sharing", "publishing"],
+    [{ status: "deleting" }, 4, "Share", "ready"],
+    [{ status: "published", publishedRevision: 4 }, 4, "Share", "shared"],
+    [{ status: "published", publishedRevision: 3 }, 4, "Share", "ready"],
+    [{ status: "published" }, 4, "Share", "ready"],
+  ] as const)("maps publication state to %s", (record, revision, label, state) => {
+    expect(publicationLauncherPresentation(record, revision)).toEqual({ label, state });
   });
 });
 

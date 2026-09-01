@@ -75,7 +75,7 @@ The production build is emitted as a host-portable bundle:
 - `src/pageTurn.ts` — shared editor/reader page-turn session lifecycle and physical-page geometry helpers.
 - `src/creationWorkshop.ts` — creation setup state, ordered local-asset restoration, and brief materialization.
 - `src/authoringContract.ts` and `src/creationBrief.ts` — versioned readiness ownership, direct questions, and site-native Agent instructions.
-- `src/qualityContract.ts` and `worker/qualityRubric.json` — shared rubric, deterministic/visual boundary, render manifest, report validation, and publish gate.
+- `src/qualityContract.ts` and `worker/qualityRubric.json` — advisory quality rubric, deterministic/visual boundary, render manifest, and report validation.
 - `src/projectArtifact.ts` — location-aware traversal of every asset-bearing project field.
 - `src/webmcp.ts` — WebMCP registrations backed by the shared command engine.
 - `src/App.tsx` — accessible React editor, knowledge cards, themes, selection tools, outline, and responsive controls.
@@ -83,7 +83,7 @@ The production build is emitted as a host-portable bundle:
 
 Three.js is loaded as a lazy production chunk so the editor shell can render before the WebGL engine finishes loading.
 
-The repository-level [Apertale Authoring skill](../.codex/skills/apertale-authoring/SKILL.md) teaches Agents the text-led, photo-led, and illustration-led workflows, the seven-tool sequence, host-first media transfer with an explicit handoff fallback, revision discipline, and final quality gate.
+The repository-level [Apertale Authoring skill](../.codex/skills/apertale-authoring/SKILL.md) teaches Agents the text-led, photo-led, and illustration-led workflows, the seven-tool sequence, host-first media transfer with an explicit handoff fallback, revision discipline, and optional quality review.
 
 ## Current technical baseline
 

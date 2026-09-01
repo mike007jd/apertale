@@ -384,129 +384,22 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   assert.equal(invalidPublishResponse.status, 400);
   assert.equal((await invalidPublishResponse.json()).code, "invalid_manifest");
 
-  const missingQualityResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest, shareToken }),
-  }));
-  assert.equal(missingQualityResponse.status, 409);
-  assert.equal((await missingQualityResponse.json()).code, "quality_blocked");
-
-  const structuralBlocker = structuredClone(manifest);
-  delete structuralBlocker.spreads[0].artwork;
-  const structuralBlockerResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: structuralBlocker, shareToken, quality: qualityFor(structuralBlocker) }),
-  }));
-  assert.equal(structuralBlockerResponse.status, 409);
-  assert.equal((await structuralBlockerResponse.json()).code, "quality_blocked");
-
   const missingBundledAsset = structuredClone(manifest);
   missingBundledAsset.spreads[0].elements[1].assetId = "/assets/generated/does-not-exist.png";
   const missingBundledResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: missingBundledAsset, shareToken, quality: qualityFor(missingBundledAsset) }),
+    body: JSON.stringify({ manifest: missingBundledAsset, shareToken }),
   }));
   assert.equal(missingBundledResponse.status, 400);
   assert.equal((await missingBundledResponse.json()).code, "invalid_manifest");
-
-  const forgedEvidence = qualityFor(manifest);
-  forgedEvidence.checks.find((check) => check.criterionId === "spread-composition").evidence[0].spreadId = "does-not-exist";
-  const forgedEvidenceResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest, shareToken, quality: forgedEvidence }),
-  }));
-  assert.equal(forgedEvidenceResponse.status, 409);
-  assert.equal((await forgedEvidenceResponse.json()).code, "quality_blocked");
-
-  const wrongAssetPolicy = qualityFor(manifest);
-  wrongAssetPolicy.creationBrief.bookType = "preserved-photo-album";
-  wrongAssetPolicy.creationBrief.photoPolicy = {
-    sourceUse: "preserve-original-layout",
-    preserveIdentity: true,
-    allowFaceChanges: false,
-    allowCrop: false,
-    allowColorCorrection: true,
-  };
-  const wrongAssetPolicyResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest, shareToken, quality: wrongAssetPolicy }),
-  }));
-  assert.equal(wrongAssetPolicyResponse.status, 409);
-  assert.equal((await wrongAssetPolicyResponse.json()).code, "quality_blocked");
-
-  const forgedPhotoIdentity = qualityFor(manifest);
-  forgedPhotoIdentity.creationBrief.sourceAssets = [{ id: personalSourceId, name: "Portrait.png" }];
-  forgedPhotoIdentity.creationBrief.photoPolicy = { sourceUse: "reference-and-compose" };
-  const forgedPhotoManifest = structuredClone(manifest);
-  forgedPhotoManifest.spreads[0].artwork.personalSourceAssetId = personalSourceId;
-  const forgedPhotoIdentityResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: forgedPhotoManifest, shareToken, quality: forgedPhotoIdentity }),
-  }));
-  assert.equal(forgedPhotoIdentityResponse.status, 409);
-  assert.equal((await forgedPhotoIdentityResponse.json()).code, "quality_blocked");
-
-  const personalPhotoManifest = structuredClone(manifest);
-  personalPhotoManifest.spreads.forEach((spread) => { spread.artwork.personalSourceAssetId = personalSourceId; });
-  const bookOnlyPhotoQuality = qualityFor(personalPhotoManifest);
-  bookOnlyPhotoQuality.creationBrief.sourceAssets = [{ id: personalSourceId, name: "Portrait.png" }];
-  bookOnlyPhotoQuality.creationBrief.photoPolicy = {
-    sourceUse: "reference-and-compose",
-    preserveIdentity: true,
-    allowFaceChanges: false,
-  };
-  const bookOnlyPhotoCheck = bookOnlyPhotoQuality.checks.find((check) => check.criterionId === "photo-fidelity-integration");
-  bookOnlyPhotoCheck.outcome = "note";
-  bookOnlyPhotoCheck.message = "Personal photo fidelity was not inspected.";
-  bookOnlyPhotoCheck.evidence = [{
-    scope: "book",
-    locator: "creationBrief.sourceAssets",
-    description: "The ready brief has personal source assets.",
-  }];
-  bookOnlyPhotoQuality.noteCount = 1;
-  const bookOnlyPhotoResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: personalPhotoManifest, shareToken, quality: bookOnlyPhotoQuality }),
-  }));
-  assert.equal(bookOnlyPhotoResponse.status, 409);
-  const bookOnlyPhotoError = await bookOnlyPhotoResponse.json();
-  assert.equal(bookOnlyPhotoError.code, "quality_blocked");
-  assert.match(bookOnlyPhotoError.message, /photo-fidelity-integration critique must cover every spread/i);
-
-  const forgedIncompleteBrief = qualityFor(manifest);
-  delete forgedIncompleteBrief.creationBrief.premise;
-  const forgedIncompleteBriefResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest, shareToken, quality: forgedIncompleteBrief }),
-  }));
-  assert.equal(forgedIncompleteBriefResponse.status, 409);
-  assert.equal((await forgedIncompleteBriefResponse.json()).code, "quality_blocked");
-
-  const motionOnly = structuredClone(manifest);
-  motionOnly.spreads[0].elements.forEach((element) => { delete element.interaction; });
-  motionOnly.spreads[0].elements[0].motion = { preset: "gentle-float", durationMs: 4200, loop: true };
-  const motionOnlyResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: motionOnly, shareToken, quality: qualityFor(motionOnly) }),
-  }));
-  assert.equal(motionOnlyResponse.status, 409);
-  assert.equal((await motionOnlyResponse.json()).code, "quality_blocked");
 
   const reusedCover = structuredClone(manifest);
   reusedCover.coverAssetId = assetId;
   const reusedCoverResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: reusedCover, shareToken, quality: qualityFor(reusedCover) }),
+    body: JSON.stringify({ manifest: reusedCover, shareToken }),
   }));
   assert.equal(reusedCoverResponse.status, 400);
   assert.equal((await reusedCoverResponse.json()).code, "invalid_manifest");
@@ -519,7 +412,7 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   const mismatchedFramesResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: mismatchedFrames, shareToken, quality: qualityFor(mismatchedFrames) }),
+    body: JSON.stringify({ manifest: mismatchedFrames, shareToken }),
   }));
   assert.equal(mismatchedFramesResponse.status, 400);
   assert.equal((await mismatchedFramesResponse.json()).code, "invalid_manifest");
@@ -532,7 +425,7 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   const proceduralFramesResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: proceduralFrames, shareToken, quality: qualityFor(proceduralFrames) }),
+    body: JSON.stringify({ manifest: proceduralFrames, shareToken }),
   }));
   assert.equal(proceduralFramesResponse.status, 400);
   assert.equal((await proceduralFramesResponse.json()).code, "invalid_manifest");
@@ -545,7 +438,7 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   const proceduralSequenceFrameResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: proceduralSequenceFrame, shareToken, quality: qualityFor(proceduralSequenceFrame) }),
+    body: JSON.stringify({ manifest: proceduralSequenceFrame, shareToken }),
   }));
   assert.equal(proceduralSequenceFrameResponse.status, 400);
   assert.equal((await proceduralSequenceFrameResponse.json()).code, "invalid_manifest");
@@ -555,7 +448,7 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   const duplicateForegroundResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: duplicateForeground, shareToken, quality: qualityFor(duplicateForeground) }),
+    body: JSON.stringify({ manifest: duplicateForeground, shareToken }),
   }));
   assert.equal(duplicateForegroundResponse.status, 400);
   assert.equal((await duplicateForegroundResponse.json()).code, "invalid_manifest");
@@ -570,32 +463,15 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   const reusedBackgroundResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: reusedBackground, shareToken, quality: qualityFor(reusedBackground) }),
+    body: JSON.stringify({ manifest: reusedBackground, shareToken }),
   }));
   assert.equal(reusedBackgroundResponse.status, 400);
   assert.equal((await reusedBackgroundResponse.json()).code, "invalid_manifest");
 
-  const sourceCoverManifest = structuredClone(forgedPhotoManifest);
-  delete sourceCoverManifest.coverAssetId;
-  sourceCoverManifest.coverTextureUrl = personalSourceId;
-  const sourceCoverQuality = qualityFor(sourceCoverManifest);
-  sourceCoverQuality.creationBrief = {
-    ...sourceCoverQuality.creationBrief,
-    sourceAssets: [{ id: personalSourceId, name: "Portrait.png" }],
-    photoPolicy: { sourceUse: "reference-and-compose", preserveIdentity: true, allowFaceChanges: false },
-  };
-  const sourceCoverResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: sourceCoverManifest, shareToken, quality: sourceCoverQuality }),
-  }));
-  assert.equal(sourceCoverResponse.status, 409);
-  assert.equal((await sourceCoverResponse.json()).code, "quality_blocked");
-
   const publishResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest, shareToken, quality: qualityFor(manifest, { warning: true }) }),
+    body: JSON.stringify({ manifest, shareToken }),
   }));
   assert.equal(publishResponse.status, 200);
   assert.equal((await publishResponse.json()).shareUrl, `https://example.test/share/${shareToken}`);
@@ -691,58 +567,7 @@ function pngBytes() {
   return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 }
 
-function qualityFor(manifest, { warning = false } = {}) {
-  const hasPersonalPhoto = manifest.spreads.some((spread) => Boolean(spread.artwork?.personalSourceAssetId));
-  const checks = qualityRubric.criteria.map((criterion, index) => {
-    const photoFidelityNotApplicable = criterion.id === "photo-fidelity-integration" && !hasPersonalPhoto;
-    return {
-      criterionId: criterion.id,
-      outcome: warning && index === 0 ? "warn" : photoFidelityNotApplicable ? "note" : "pass",
-      message: photoFidelityNotApplicable
-        ? "No personal source photos are present, so photo fidelity is not applicable."
-        : `${criterion.label} was checked against rendered evidence.`,
-      evidence: criterion.id === "cover-appeal"
-        ? [{ scope: "cover", locator: "[data-book-id] img", description: "Rendered publication evidence" }]
-        : photoFidelityNotApplicable
-          ? [{ scope: "book", locator: "creationBrief.sourceAssets", description: "The ready brief contains no personal source assets." }]
-          : manifest.spreads.map((spread) => ({
-            scope: "spread",
-            spreadId: spread.id,
-            locator: ".book-scene canvas",
-            description: "Rendered publication evidence",
-          })),
-      ...(warning && index === 0 ? { suggestedPatch: "Keep this warning recorded for publication." } : {}),
-    };
-  });
-  return {
-    contractVersion: 2,
-    rubricVersion: qualityRubric.version,
-    documentId: manifest.id,
-    reviewedRevision: manifest.revision,
-    round: 1,
-    maxRounds: qualityRubric.maxReviewRounds,
-    creationBrief: {
-      contractVersion: 2,
-      bookType: "illustrated-storybook",
-      premise: "A warm afternoon becomes a short illustrated story.",
-      audience: "Families",
-      spreadCount: manifest.spreads.length,
-      visualDirection: "Warm paper collage",
-      sourceAssets: [],
-    },
-    status: "ready",
-    checks,
-    blockerCount: 0,
-    warningCount: warning ? 1 : 0,
-    noteCount: hasPersonalPhoto ? 0 : 1,
-    warningsRecorded: true,
-    sampleReady: true,
-    publishAllowed: true,
-    summary: warning ? "Ready with one recorded warning." : "Ready to publish.",
-  };
-}
-
-test("publishes a preserved-photo album only with its declared original source", async () => {
+test("keeps a preserved-photo source private after sharing", async () => {
   const manageToken = "n".repeat(43);
   const shareToken = "o".repeat(43);
   const repository = new MemoryRepository();
@@ -795,27 +620,10 @@ test("publishes a preserved-photo album only with its declared original source",
       }],
     }],
   };
-  const quality = qualityFor(manifest);
-  quality.creationBrief = {
-    contractVersion: 2,
-    bookType: "preserved-photo-album",
-    premise: "Keep the original family photograph in its original layout.",
-    audience: "The family",
-    spreadCount: 1,
-    visualDirection: "Quiet archival album",
-    sourceAssets: [{ id: sourceId, name: "Original.png" }],
-    photoPolicy: {
-      sourceUse: "preserve-original-layout",
-      preserveIdentity: true,
-      allowFaceChanges: false,
-      allowCrop: false,
-      allowColorCorrection: true,
-    },
-  };
   const response = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest, shareToken, quality }),
+    body: JSON.stringify({ manifest, shareToken }),
   }));
   assert.equal(response.status, 200);
   const shared = await (await api.handle(new Request(`https://example.test/api/shared/${shareToken}`))).json();
@@ -896,21 +704,10 @@ test("keeps transformed-book source-photo provenance private after sharing", asy
       }],
     }],
   };
-  const quality = qualityFor(manifest);
-  quality.creationBrief = {
-    contractVersion: 2,
-    bookType: "photo-led-keepsake",
-    premise: "Transform a family photo into a painted keepsake.",
-    audience: "The family",
-    spreadCount: 1,
-    visualDirection: "Warm painted paper collage",
-    sourceAssets: [{ id: personalSourceId, name: "Family.png" }],
-    photoPolicy: { sourceUse: "reference-and-compose", preserveIdentity: true, allowFaceChanges: false },
-  };
   const published = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest, shareToken, quality }),
+    body: JSON.stringify({ manifest, shareToken }),
   }));
   assert.equal(published.status, 200);
 
@@ -1007,7 +804,7 @@ async function publishFixture(options = {}) {
   const publishRequest = {
     method: "POST",
     headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest, shareToken, quality: qualityFor(manifest) }),
+    body: JSON.stringify({ manifest, shareToken }),
   };
   const publishResponse = await api.handle(new Request(
     `https://example.test/api/books/${draft.bookId}/publish`,
@@ -1100,7 +897,7 @@ test("keeps assets from an older revision private after republish", async () => 
   const republishResponse = await api.handle(new Request(`https://example.test/api/books/${nextDraft.bookId}/publish`, {
     method: "POST",
     headers: { authorization: `Bearer ${nextManageToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ manifest: nextManifest, shareToken: nextShareToken, quality: qualityFor(nextManifest) }),
+    body: JSON.stringify({ manifest: nextManifest, shareToken: nextShareToken }),
   }));
   assert.equal(republishResponse.status, 200);
   assert.equal(await api.isPublishedShare(shareToken), false);
@@ -1527,7 +1324,7 @@ test("reconcile claims one resumable token and never resurrects the revoked link
   const resumed = await api.handle(new Request(`https://example.test/api/books/${nextDraft.bookId}/publish`, {
     ...publishRequest,
     headers: nextHeaders,
-    body: JSON.stringify({ manifest: nextManifest, shareToken: nextShareToken, quality: qualityFor(nextManifest) }),
+    body: JSON.stringify({ manifest: nextManifest, shareToken: nextShareToken }),
   }));
   assert.equal(resumed.status, 200);
   assert.equal((await resumed.json()).shareUrl, `https://example.test/share/${nextShareToken}`);
