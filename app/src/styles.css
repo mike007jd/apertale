@@ -26,6 +26,8 @@ dialog {
   margin: 0;
   border: 0;
   padding: 0;
+  color: inherit;
+  background: transparent;
 }
 
 dialog::backdrop { background: transparent; }
@@ -206,11 +208,11 @@ summary:focus-visible,
   background: #e8dece;
 }
 
-/* The shelf clears early so the cover swing behind it is what the reader
-   watches; on the way back it arrives late, after the case has shut. */
+/* Opening is two readable beats: the library falls dark, then clears for the
+   real desk lamp rising with the case. Closing keeps the inverse continuity. */
 @keyframes library-to-open-book {
-  0% { opacity: 1; }
-  12%, 100% { opacity: 0; }
+  0%, 38% { opacity: 1; }
+  68%, 100% { opacity: 0; }
 }
 
 @keyframes library-from-open-book {
@@ -218,14 +220,36 @@ summary:focus-visible,
   100% { opacity: 1; }
 }
 
+@keyframes library-room-dim {
+  0% { opacity: 0; }
+  38%, 100% { opacity: .72; }
+}
+
+.library-sheet::after {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  content: "";
+  pointer-events: none;
+  background: #070503;
+  opacity: 0;
+}
+
 .book-library.is-opening-book .library-sheet,
 .book-library.is-closing-book .library-sheet { pointer-events: none; }
 
-.book-library.is-opening-book {
+/* Modal dialogs paint in the top layer, outside the room's opacity stack. */
+.book-library.is-opening-book,
+.book-library.is-opening-book .library-sheet {
   animation: library-to-open-book var(--motion-book) var(--ease-navigation) both;
 }
 
-.book-library.is-closing-book {
+:root[data-theme="night"] .book-library.is-opening-book .library-sheet::after {
+  animation: library-room-dim var(--motion-book) var(--ease-navigation) both;
+}
+
+.book-library.is-closing-book,
+.book-library.is-closing-book .library-sheet {
   animation: library-from-open-book var(--motion-book) var(--ease-navigation) both;
 }
 

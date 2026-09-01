@@ -1690,6 +1690,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
 
       const night = current.session.sceneThemeId === "midnight-desk";
       const reduced = current.session.quality === "reduced";
+      const requestedOpen = propsRef.current.mode === "workshop" ? 1 : propsRef.current.openProgress.current;
+      const lampReveal = smootherstep(clamp((requestedOpen - 0.42) / 0.58));
       const frameTime = performance.now();
       const deltaSeconds = Math.min(0.05, (frameTime - lastFrameTime) / 1000);
       const delta = clamp(deltaSeconds * 4, 0, 1);
@@ -1709,8 +1711,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       stageKey.intensity = THREE.MathUtils.lerp(stageKey.intensity, night ? 3.1 : 4.2, themeDelta);
       stageKey.color.lerp(night ? nightKeyColor : dayKeyColor, themeDelta);
       stageRim.intensity = THREE.MathUtils.lerp(stageRim.intensity, night ? 2.2 : 0.8, themeDelta);
-      pageHalo.intensity = THREE.MathUtils.lerp(pageHalo.intensity, night ? 1.55 : 0, themeDelta);
-      deskLamp.intensity = THREE.MathUtils.lerp(deskLamp.intensity, night ? 9.8 : 0, themeDelta);
+      pageHalo.intensity = THREE.MathUtils.lerp(pageHalo.intensity, night ? 1.55 * lampReveal : 0, themeDelta);
+      deskLamp.intensity = THREE.MathUtils.lerp(deskLamp.intensity, night ? 9.8 * lampReveal : 0, themeDelta);
       coverMaterial.color.lerp(night ? nightCoverColor : dayCoverColor, themeDelta);
       if (!coverFaceMaterial.map) coverFaceMaterial.color.lerp(night ? nightCoverColor : dayCoverColor, themeDelta);
       if (!insideCoverMaterial.map) insideCoverMaterial.color.lerp(night ? nightCoverColor : dayCoverColor, themeDelta);
@@ -1889,7 +1891,6 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       // opposite directions.
       // The workshop shows a blank book that is never closed, so it ignores the
       // caller's progress rather than inheriting the library's closed state.
-      const requestedOpen = propsRef.current.mode === "workshop" ? 1 : propsRef.current.openProgress.current;
       const requestedPhi = phiFor(requestedOpen);
       if (Math.abs(requestedPhi - coverPhi) > 1e-4) {
         coverPhi = requestedPhi;
