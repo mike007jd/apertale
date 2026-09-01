@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, X } from "@phosphor-icons/react";
 import { MotionConfig } from "motion/react";
 import { ThemeSwitch } from "./design/ThemeSwitch";
 import { FallbackBook } from "./FallbackBook";
+import { PortraitOrientationGate } from "./PortraitOrientationGate";
 import { hasReveal, resolveInteraction } from "./interaction";
 import { announce, supportsWebGl2 } from "./readerShell";
 import { readerSceneStructureKey, sceneFailureMatches } from "./renderEvidence";
@@ -170,6 +171,7 @@ export function SharedBookApp() {
   return (
     <MotionConfig reducedMotion={reducedMotion ? "always" : "never"}>
       <main className="app-shell is-preview is-shared-reader">
+      <PortraitOrientationGate />
       <header className="topbar">
         <span className="wordmark" aria-label="Apertale shared book">Apertale</span>
         <div className="topbar-actions">

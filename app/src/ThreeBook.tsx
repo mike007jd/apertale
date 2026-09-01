@@ -5,9 +5,9 @@ import { smootherstep } from "./design/curves";
 import { recordDiagnostic } from "./diagnostics";
 import { coverBoardMaterials, createCoverEndpaperCanvas, paintCoverEndpaper } from "./endpaper";
 import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
-import { spreadFraction } from "./stageGeometry";
+import { readerCameraPage, readerSinglePagePresentation, spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
-import { bookCaseMatterPose, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
+import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
 import { readerSceneStructureKey, resourceAttemptIsCurrent, sceneAssetsReadyForEvidence, spreadResourceIndexes, type ReaderRenderEvidence } from "./renderEvidence";
 import { renderedElementAssetIds, spreadArtworkFit, spreadBaseAssetId, type BookElement, type BookSnapshot, type Spread, type TurnState } from "./types";
 
@@ -793,8 +793,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
 
     // The case was one rigid slab spanning both boards and the spine, so
     // nothing could rotate and the book had no closed state at all. It is now
-    // three parts: a spine shell that never moves, a rear board that never
-    // rotates, and a front board on a real joint.
+    // three parts: a spine shell that flexes between both hinges, a rear board
+    // that never rotates, and a front board on a real joint.
     //
     // BOARD_W x 2 + spine reproduces the old 9.05 silhouette exactly for a
     // five-spread book, so the open pose - and everything framed against it -
@@ -1007,16 +1007,21 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
 
     function applyCover() {
       const phi = coverPhi;
-      const closure = (1 - Math.cos(phi)) / 2;
       const openness = 1 - THREE.MathUtils.clamp((phi - FLAT_PHI) / (Math.PI - FLAT_PHI), 0, 1);
       const matterPose = bookCaseMatterPose(openness, FLAT_PHI);
+      const closure = matterPose.closure;
       frontBoardPivot.rotation.y = matterPose.coverY;
       frontBoardPivot.position.set(
         -(spineGap / 2) * Math.cos(phi),
         0,
         THREE.MathUtils.lerp(openBoardZ, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2 + BOARD_T / 2, closure),
       );
+      const spinePose = bookSpinePose(rearBoardPivot.position, frontBoardPivot.position, spineGap);
+      spineShell.position.set(spinePose.x, 0, spinePose.z);
+      spineShell.rotation.y = spinePose.rotationY;
+      spineShell.scale.set(spinePose.scale, 1, spinePose.scale);
       frontMatterPivot.rotation.y = matterPose.foldY;
+      frontMatterPivot.position.x = (spineGap / 2) * closure;
       leftPage.scale.z = rightPage.scale.z = matterPose.reliefZ;
     }
 
@@ -1024,7 +1029,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     // Unit depth, so the two stacks can be driven by scale as the reader moves
     // through the book. They used to be fixed at 0.34 each, which meant spread
     // one and spread twelve had identical thickness on both sides.
-    const pageBlockGeometry = new THREE.BoxGeometry(4.32, 5.32, 1);
+    const pageBlockGeometry = new THREE.BoxGeometry(PAGE_W, 5.32, 1);
     const leftStack = new THREE.Mesh(
       pageBlockGeometry,
       // This is the face that remains parallel to the outer board while the
@@ -1046,8 +1051,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       stack.scale.z = Math.max(depth, 0.02);
       stack.position.set(x, 0, BLOCK_FRONT - stack.scale.z / 2);
     };
-    seatStack(leftStack, -2.16, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2);
-    seatStack(rightStack, 2.16, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2);
+    seatStack(leftStack, -PAGE_W / 2, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2);
+    seatStack(rightStack, PAGE_W / 2, textBlockDepth(propsRef.current.snapshot.document.spreads.length) / 2);
     leftStack.castShadow = rightStack.castShadow = true;
     leftStack.receiveShadow = rightStack.receiveShadow = true;
     frontMatterPivot.add(leftStack);
@@ -1385,7 +1390,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
      * position and lookAt directly, and a ResizeObserver fires constantly in a
      * window docked beside a chat pane.
      */
-    const framing = { z: 12.05, y: -2.169, targetY: -0.08 };
+    const framing = { x: 0, z: 12.05, y: -2.169, targetY: -0.08, singlePage: false };
 
     function applyCamera() {
       // u rises with how far the board has swung; s peaks at the midpoint,
@@ -1407,8 +1412,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
        * needed: the book arrives from a shelf card, so it is small for most of
        * the swing and full size only once the cover is nearly flat.
        */
-      camera.position.set(0, framing.y, framing.z);
-      camera.lookAt(0, framing.targetY, 0);
+      camera.position.set(framing.x, framing.y, framing.z);
+      camera.lookAt(framing.x, framing.targetY, 0);
       camera.updateProjectionMatrix();
     }
 
@@ -1450,13 +1455,18 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       renderer.setSize(width, height, false);
       camera.aspect = width / Math.max(height, 1);
       const verticalFov = THREE.MathUtils.degToRad(camera.fov);
-      const horizontalFit = 9.7 / (2 * Math.tan(verticalFov / 2) * camera.aspect);
-      framing.z = Math.max(12.05, horizontalFit);
+      const halfFov = Math.tan(verticalFov / 2);
+      framing.singlePage = propsRef.current.mode === "reader"
+        && getComputedStyle(host).getPropertyValue("--reader-single-page").trim() === "1";
+      const horizontalFit = (framing.singlePage ? BOARD_W + 0.45 : 9.7) / (2 * halfFov * camera.aspect);
+      const verticalFit = framing.singlePage ? (BOARD_H + 0.3) / (2 * halfFov) : 0;
+      framing.z = framing.singlePage ? Math.max(horizontalFit, verticalFit) : Math.max(12.05, horizontalFit);
       framing.y = framing.z * -0.18;
       // The aim used to step 1.67 world units in one frame as a window crossed
       // aspect 0.65. Smoothstep makes the same decision continuously.
       const t = THREE.MathUtils.smoothstep(camera.aspect, 0.58, 0.72);
       framing.targetY = THREE.MathUtils.lerp(-1.75, -0.08, t);
+      framing.x = readerCameraPage(propsRef.current.mode, framing.singlePage) === "right" ? PAGE_W / 2 : 0;
       applyCamera();
       scheduleAnimation();
     }
@@ -1691,6 +1701,29 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       // settle quickly. Keep content/interaction motion on its own cadence.
       const themeDelta = 1 - Math.exp(-deltaSeconds * 13);
       lastFrameTime = frameTime;
+
+      const selectedPage = requestedOpen >= 0.999
+        ? spread.elements.find((element) => element.id === current.session.selectionId)?.page
+        : undefined;
+      const cameraPage = readerCameraPage(propsRef.current.mode, framing.singlePage, selectedPage);
+      const singlePagePresentation = readerSinglePagePresentation(
+        propsRef.current.mode,
+        framing.singlePage,
+        requestedOpen,
+        selectedPage,
+        currentTurn?.direction === "forward",
+      );
+      // Portrait is a real one-page binding, not a camera crop across an open
+      // spread. The shell stays put while either authored page is placed into
+      // it, so selecting a left-page element never exposes the missing half.
+      const cameraTargetX = singlePagePresentation
+        ? PAGE_W / 2
+        : cameraPage === "left" ? -PAGE_W / 2 : cameraPage === "right" ? PAGE_W / 2 : 0;
+      const cameraX = reduced ? cameraTargetX : THREE.MathUtils.lerp(framing.x, cameraTargetX, themeDelta);
+      if (Math.abs(cameraX - framing.x) > 1e-4) {
+        framing.x = cameraX;
+        applyCamera();
+      }
       ambient.intensity = THREE.MathUtils.lerp(ambient.intensity, night ? 1.0 : 1.7, themeDelta);
       ambient.color.lerp(night ? nightAmbientSky : dayAmbientSky, themeDelta);
       ambient.groundColor.lerp(night ? nightAmbientGround : dayAmbientGround, themeDelta);
@@ -1804,6 +1837,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
           focusTarget.position.copy(anchorWorld);
           focusLight.position.set(anchorWorld.x - 0.6, anchorWorld.y + 3.1, anchorWorld.z + 4.6);
           anchorWorld.set(anchorWorld.x, anchorWorld.y, 0.42);
+          if (singlePagePresentation && element.page === "left") anchorWorld.x += PAGE_W;
           book.localToWorld(anchorWorld);
           anchorWorld.project(camera);
           const screenX = sceneOffset.x + (anchorWorld.x * 0.5 + 0.5) * host.clientWidth;
@@ -1831,10 +1865,16 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
               const frontPair = currentTurn.direction === "forward" ? pagePair : destinationPair;
               const backSpread = currentTurn.direction === "forward" ? destinationSpread : spread;
               const backPair = currentTurn.direction === "forward" ? destinationPair : pagePair;
+              const frontView = framing.singlePage && currentTurn.direction === "forward"
+                ? selectedPage ?? "right"
+                : "right";
+              const backView = framing.singlePage
+                ? currentTurn.direction === "backward" ? selectedPage ?? "right" : "right"
+                : "left";
               configureStaticStage(frontSpread);
-              renderStageView(frontPair, turnCaptureTarget, "right", night);
+              renderStageView(frontPair, turnCaptureTarget, frontView, night);
               configureStaticStage(backSpread);
-              renderStageView(backPair, backwardBaseCaptureTarget, "left", night);
+              renderStageView(backPair, backwardBaseCaptureTarget, backView, night);
               lastTurnCaptureKey = captureKey;
               recordDiagnostic("page-turn:capture", {
                 spreadId: frontSpread.id,
@@ -1843,7 +1883,9 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
                 role: "shared-spread-rt",
               });
             }
-            leftMaterial.map = currentTurn.direction === "forward" ? liveSpreadTarget.texture : destinationSpreadTarget.texture;
+            leftMaterial.map = currentTurn.direction === "backward" && !framing.singlePage
+              ? destinationSpreadTarget.texture
+              : liveSpreadTarget.texture;
             rightMaterial.map = currentTurn.direction === "forward" ? destinationSpreadTarget.texture : liveSpreadTarget.texture;
             turnFrontMaterial.map = turnCaptureTarget.texture;
             turnBackMaterial.map = backwardBaseCaptureTarget.texture;
@@ -1864,9 +1906,16 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
           lastTurnCaptureKey = "";
         }
       }
-      // The turn machinery hides these mid-turn and has to put them back. The
-      // whole-case pivot owns their pose rather than their visibility.
-      leftPage.visible = rightPage.visible = true;
+      // In portrait the right-hand binding becomes a complete single-page
+      // object. Reuse the existing left page when its element is selected, but
+      // keep the opposite board and paper block out of the frame entirely.
+      const singlePageBook = singlePagePresentation !== null;
+      const showLeftPage = singlePagePresentation === "left";
+      frontBoardPivot.visible = !singlePageBook;
+      leftStack.visible = !singlePageBook;
+      leftPage.visible = !singlePageBook || showLeftPage;
+      leftPage.position.x = showLeftPage ? PAGE_W / 2 : -PAGE_W / 2;
+      rightPage.visible = !singlePageBook || !showLeftPage;
 
       // The case follows the caller's progress rather than owning a timeline of
       // its own, so opening and closing are the same code path read in
@@ -1890,9 +1939,17 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
         // clamped: min(1, t/0.82) cut the book's velocity from 1.53/s to zero
         // in one frame at 421ms, while the cover was still turning at 226 deg/s.
         const travel = smootherstep(t / 0.85);
-        book.position.x = THREE.MathUtils.lerp(anchor.x, 0, travel);
+        const scale = THREE.MathUtils.lerp(anchor.scale, 1, travel);
+        const coverHalfWidth = (spineGap + BOARD_W) / 2;
+        book.position.x = caseHandoffGroupX(
+          anchor.x,
+          scale,
+          coverHalfWidth * Math.cos(frontBoardPivot.rotation.y),
+          coverHalfWidth * Math.cos(-(Math.PI - FLAT_PHI)),
+          travel,
+        );
         book.position.y = THREE.MathUtils.lerp(anchor.y, bookRestY, travel);
-        book.scale.setScalar(THREE.MathUtils.lerp(anchor.scale, 1, travel));
+        book.scale.setScalar(scale);
       } else if (book.scale.x !== 1 || book.position.x !== 0) {
         book.position.set(0, bookRestY, 0);
         book.scale.setScalar(1);
@@ -1903,8 +1960,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       const spreadTotal = current.document.spreads.length;
       const blockDepth = textBlockDepth(spreadTotal);
       const leftShare = (current.session.currentSpreadIndex + 1) / (spreadTotal + 1);
-      seatStack(leftStack, -2.16, THREE.MathUtils.lerp(leftStack.scale.z, blockDepth * leftShare, delta));
-      seatStack(rightStack, 2.16, THREE.MathUtils.lerp(rightStack.scale.z, blockDepth * (1 - leftShare), delta));
+      seatStack(leftStack, -PAGE_W / 2, THREE.MathUtils.lerp(leftStack.scale.z, blockDepth * leftShare, delta));
+      seatStack(rightStack, PAGE_W / 2, THREE.MathUtils.lerp(rightStack.scale.z, blockDepth * (1 - leftShare), delta));
 
       renderer.render(scene, camera);
       const currentSceneAssetsReady = sceneAssetsReady(spread);

@@ -57,6 +57,7 @@ import {
 } from "./design/creationNavigation";
 import { ThemeSwitch } from "./design/ThemeSwitch";
 import { FallbackBook } from "./FallbackBook";
+import { PortraitOrientationGate } from "./PortraitOrientationGate";
 import { completeImageHandoff, currentImageHandoff, describePartialImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
 import {
@@ -149,9 +150,11 @@ export function readerSceneShouldMount(state: {
   showLibrary: boolean;
   showCreateGuide: boolean;
   openingBookMatchesDocument: boolean;
+  readerReady: boolean;
   libraryMotion: LibraryMotion;
 }) {
-  return state.showCreateGuide
+  return state.readerReady
+    || state.showCreateGuide
     || !state.showLibrary
     || state.openingBookMatchesDocument
     || state.libraryMotion !== "idle";
@@ -224,6 +227,7 @@ function BookLoadingFeedback({ title, placement, stage, reducedMotion }: {
   const activeIndex = LOAD_STAGES.indexOf(stage);
   return (
     <div className={`book-loading-feedback is-${placement}`} role="status" aria-live="polite" aria-atomic="true">
+      {placement === "stage" && <div className="fallback-book book-loading-skeleton is-loading" aria-hidden="true" />}
       <div className="book-loading-card">
         <span className="book-loading-icon" aria-hidden="true">
           {reducedMotion ? <BookOpenText size={22} weight="bold" /> : <SpinnerGap size={22} weight="bold" />}
@@ -248,7 +252,8 @@ export function App() {
   const pageTurnNavigationKey = `${snapshot.document.id}:${snapshot.document.revision}:${snapshot.session.currentSpreadIndex}`;
   const [turn, setTurn] = useState<TurnState>(null);
   const [webMcpAvailable, setWebMcpAvailable] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [codexFoundPage, setCodexFoundPage] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null);
   const [copyError, setCopyError] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [showOutline, setShowOutline] = useState(false);
@@ -394,6 +399,7 @@ export function App() {
     showLibrary,
     showCreateGuide,
     openingBookMatchesDocument: openingBook?.id === snapshot.document.id,
+    readerReady: readyBookId === snapshot.document.id,
     libraryMotion,
   });
   const readerRendererAvailable = shouldMountReaderScene && renderWebGl;
@@ -802,12 +808,19 @@ export function App() {
     return { x: c.left, y: c.top, width: c.width, height: c.height };
   }, []);
 
+  useEffect(() => {
+    if (libraryMotion === "idle") return undefined;
+    const remeasure = () => { handoffRect.current = measureShelfCard(snapshot.document.id); };
+    window.addEventListener("resize", remeasure);
+    return () => window.removeEventListener("resize", remeasure);
+  }, [libraryMotion, measureShelfCard, snapshot.document.id]);
+
   const openLibrary = useCallback(() => {
     if (showLibrary || openingBookRef.current) return;
     libraryOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    // A human opening Books should land on their own work. Site Tools may
-    // choose Explore instead when presenting a sample cover.
-    setLibraryTab("yours");
+    // Return to the section that owns this book so the measured destination
+    // exists when the case travels back into its slot.
+    setLibraryTab(activeLibraryBook?.sample === true ? "explore" : "yours");
     setLibraryMotion("closing-book");
     setShowLibrary(true);
     if (reducedMotion) {
@@ -835,7 +848,7 @@ export function App() {
         });
       });
     });
-  }, [animateCase, measureShelfCard, reducedMotion, showLibrary, snapshot.document.id]);
+  }, [activeLibraryBook?.sample, animateCase, measureShelfCard, reducedMotion, showLibrary, snapshot.document.id]);
 
   const handleBookLoading = useCallback((documentId: string) => {
     setSceneLoadingBookId(documentId);
@@ -913,7 +926,7 @@ export function App() {
     const current = creationNavigationRef.current;
     if (current.phase !== "idle" || current.workspaceOpen) return;
     createGuideOpener.current = opener;
-    setCopied(false);
+    setCopiedPrompt(null);
     setCopyError(false);
     if (reducedMotionRef.current) {
       dispatchCreationNavigation({ type: "show-immediately" });
@@ -1196,7 +1209,11 @@ export function App() {
     pendingAuthoringSurface.current = null;
   }, []);
 
-  useEffect(() => registerWebMcpTools(setWebMcpAvailable, presentAuthoringSurface), [presentAuthoringSurface]);
+  useEffect(() => registerWebMcpTools(
+    setWebMcpAvailable,
+    presentAuthoringSurface,
+    () => setCodexFoundPage(true),
+  ), [presentAuthoringSurface]);
 
   useEffect(() => {
     const updateMotionPreference = () => {
@@ -1294,10 +1311,15 @@ export function App() {
     if (!showLibrary) return;
     const sheet = librarySheet.current;
     if (!sheet) return;
-    if (!sheet.open) sheet.showModal();
+    // The interactive shelf is modal. During the locked physical handoff it
+    // briefly becomes modeless so the WebGL stage can paint above it without
+    // replacing the shelf with an empty room.
+    if (sheet.open) sheet.close();
+    if (libraryMotion === "idle") sheet.showModal();
+    else sheet.show();
     if (sheet.contains(document.activeElement)) return;
     sheet.querySelector<HTMLElement>("#library-shelf")?.focus();
-  }, [showCreateGuide, showLibrary]);
+  }, [libraryMotion, showCreateGuide, showLibrary]);
 
   useEffect(() => {
     const dialog = createGuideCard.current;
@@ -1537,13 +1559,13 @@ export function App() {
   const creationBrief = useMemo(() => buildCreationWorkshopBrief(creationWorkshop), [creationWorkshop]);
   const briefAssets = creationBrief.sourceAssets;
   const createPrompt = creationBrief.prompt;
+  const copied = copiedPrompt === createPrompt;
 
   const copyPrompt = async () => {
     const didCopy = await copyPlainText(createPrompt);
-    setCopied(didCopy);
+    setCopiedPrompt(didCopy ? createPrompt : null);
     setCopyError(!didCopy);
     recordDiagnostic(didCopy ? "workbench:starter-copied" : "workbench:copy-blocked", { spreads: creationSpreadCount, style: creationStyle, source: creationSource, assets: briefAssets.length });
-    if (didCopy) window.setTimeout(() => setCopied(false), 1800);
   };
 
   function closeDestructiveAction() {
@@ -1665,6 +1687,7 @@ export function App() {
         className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""} ${creationTransitionBusy ? "is-workspace-transitioning" : ""}`}
         aria-busy={creationTransitionBusy || undefined}
       >
+      <PortraitOrientationGate />
       <header className="topbar" hidden={showLibrary || showCreateGuide} aria-hidden={showElementAgentGuide || undefined}>
         {!snapshot.session.preview && <button className="library-button" onClick={openLibrary} aria-label="Open book library"><Books size={18} /> <span>Books</span></button>}
         <button className="wordmark" onClick={() => { bookEngine.setPreview(false); openLibrary(); }} aria-label="Open book library">Apertale</button>
@@ -1683,7 +1706,7 @@ export function App() {
           aria-hidden={showCreateGuide || undefined}
         >
           <div className="library-atmosphere" />
-          <dialog className="library-sheet" ref={librarySheet} aria-labelledby="library-title" aria-busy={libraryBusy}>
+          <dialog className="library-sheet" ref={librarySheet} aria-labelledby="library-title" aria-busy={libraryBusy} inert={libraryMotion !== "idle" ? true : undefined}>
             <header className="library-topbar">
               <button className="library-wordmark" onClick={() => openBookFromLibrary("apertale-field-guide")} disabled={libraryBusy}><BookOpenText size={19} /> Apertale</button>
               <div className="library-topbar-actions">
@@ -1743,7 +1766,7 @@ export function App() {
                   <div
                     key={book.id}
                     data-book-id={book.id}
-                    className={`library-card-shell library-card-${(index % 5) + 1} ${book.id === library.activeBookId ? "is-active" : ""} ${openingBook?.id === book.id ? "is-opening" : ""}`}
+                    className={`library-card-shell library-card-${(index % 5) + 1} ${book.id === library.activeBookId ? "is-active" : ""} ${openingBook?.id === book.id ? "is-opening" : ""} ${libraryMotion !== "idle" && book.id === snapshot.document.id ? "is-handoff" : ""}`}
                   >
                     <button
                       className="library-card"
@@ -1887,14 +1910,14 @@ export function App() {
 
         {stageIsLoading && !showLibrary && !showCreateGuide && <BookLoadingFeedback title={openingBook?.title ?? snapshot.document.title} placement="stage" stage={loadStage} reducedMotion={reducedMotion} />}
 
-        {!snapshot.session.preview && !showCreateGuide && (
+        {!stageIsLoading && !snapshot.session.preview && !showCreateGuide && (
           <>
             <button className="page-arrow page-arrow-left" onClick={() => turnPage("backward")} disabled={pageTurnNav.previous} aria-label="Previous spread"><ArrowLeft size={22} /></button>
             <button className="page-arrow page-arrow-right" onClick={() => turnPage("forward")} disabled={pageTurnNav.next} aria-label="Next spread"><ArrowRight size={22} /></button>
           </>
         )}
 
-        {!showCreateGuide && (
+        {!stageIsLoading && !showCreateGuide && (
           <aside className="reader-sheet" aria-label="Reading panel">
             <div className="reader-sheet-copy" ref={readerCopy}>
               {spread.kicker && <p className="reader-sheet-kicker">{spread.kicker}</p>}
@@ -1909,7 +1932,7 @@ export function App() {
           </aside>
         )}
 
-        {selected && !snapshot.session.preview && !turn && !showCreateGuide && (
+        {!stageIsLoading && selected && !snapshot.session.preview && !turn && !showCreateGuide && (
           <div className="selection-ui" aria-label={`${selected.label} selected`}>
             <div className="selection-ring" />
             <div className={`context-menu ${selected.page === "right" ? "clears-right" : "clears-left"}`}>
@@ -1958,7 +1981,7 @@ export function App() {
           </div>
         )}
 
-        {!snapshot.session.preview && !showCreateGuide && spread.elements.length > 0 && (
+        {!stageIsLoading && !snapshot.session.preview && !showCreateGuide && spread.elements.length > 0 && (
           <nav className="element-rail" aria-label={`Interactive elements on ${spread.title}`}>
             {spread.elements.map((element) => {
               const interaction = resolveInteraction(element);
@@ -1985,11 +2008,11 @@ export function App() {
           </nav>
         )}
 
-        {hovered && hovered.id !== snapshot.session.selectionId && !snapshot.session.preview && !turn && !snapshot.lastAction && !showCreateGuide && (
+        {!stageIsLoading && hovered && hovered.id !== snapshot.session.selectionId && !snapshot.session.preview && !turn && !snapshot.lastAction && !showCreateGuide && (
           <p className="hover-hint" role="presentation">{resolveInteraction(hovered).hint}</p>
         )}
 
-        {selected && selectedInteraction && hasReveal(selectedInteraction) && !turn && !showCreateGuide && (
+        {!stageIsLoading && selected && selectedInteraction && hasReveal(selectedInteraction) && !turn && !showCreateGuide && (
           <aside
             className={`reveal-card reveal-${selectedInteraction.reveal.kind} ${selected.page === "right" ? "is-right" : "is-left"}`}
             aria-label={`${selectedInteraction.reveal.title} details`}
@@ -2020,7 +2043,7 @@ export function App() {
             looked away never learned that anything had happened. Presence
             animation is the whole point of routing it through Toast. */}
         <Toast
-          open={Boolean(snapshot.lastAction) && !showCreateGuide}
+          open={Boolean(snapshot.lastAction) && !showCreateGuide && !stageIsLoading}
           className={`agent-action agent-action-${snapshot.lastAction?.phase ?? "success"}`}
         >
           {snapshot.lastAction?.phase === "success" ? <Check size={16} weight="bold" /> : <Sparkle size={16} />}
@@ -2029,7 +2052,7 @@ export function App() {
         </Toast>
       </section>
 
-      {!snapshot.session.preview && !showCreateGuide && (
+      {!stageIsLoading && !snapshot.session.preview && !showCreateGuide && (
         <footer className="bottom-controls" hidden={showLibrary}>
           <div className="bottom-left-actions">
             <button className="outline-button" onClick={() => setShowOutline(!showOutline)} aria-expanded={showOutline}>Story</button>
@@ -2083,7 +2106,7 @@ export function App() {
             <span
               className={webMcpAvailable ? "is-connected" : ""}
               title={webMcpAvailable ? "This browser exposed the WebMCP tool runtime." : "This WebMCP-enabled app remains fully usable while the current browser has not exposed the tool runtime."}
-            ><i /> {webMcpAvailable ? "WebMCP connected" : "WebMCP ready"}</span>
+            ><i /> {webMcpAvailable ? "Site tools ready" : "WebMCP ready"}</span>
             {activeLibraryBook?.sample && <button onClick={(event) => confirmReset(event.currentTarget)}><ArrowCounterClockwise size={15} /> Reset sample</button>}
           </div>
         </Panel>
@@ -2108,7 +2131,7 @@ export function App() {
 
                 {!handoffIsBookArt && <p className={`workshop-signal ${webMcpAvailable ? "is-connected" : ""}`}>
                   <i aria-hidden="true" />
-                  <span>{webMcpAvailable ? "Ready beside Codex" : "Read here. Open in Codex (ChatGPT desktop) to create."}</span>
+                  <span>{webMcpAvailable ? "Site tools ready for Codex" : "Read here. Open in Codex (ChatGPT desktop) to create."}</span>
                 </p>}
 
                 {!handoffIsBookArt && <fieldset className="workshop-field">
@@ -2253,10 +2276,30 @@ export function App() {
                 <p className="workshop-summary">
                   {creationSpreadCount} spreads · {creationStyle}{briefAssets.length > 0 ? ` · ${briefAssets.length} photo${briefAssets.length === 1 ? "" : "s"}` : ""}
                 </p>
-                <button className="copy-starter-button" onClick={() => void copyPrompt()}>
-                  {copied ? <Check size={18} weight="bold" /> : <Copy size={18} weight="bold" />}
-                  {copied ? "Copied — paste beside this page" : "Copy starter prompt"}
-                </button>
+                <div className={`workshop-starter-actions ${copied ? "is-followup" : ""}`}>
+                  <button
+                    className="copy-starter-button"
+                    onClick={() => void copyPrompt()}
+                    aria-label={copied ? "Copy starter prompt again" : "Copy starter prompt"}
+                  >
+                    <Copy size={18} weight="bold" />
+                    {copied ? "Copy again" : "Copy starter prompt"}
+                  </button>
+                  <span
+                    className={`workshop-codex-status ${codexFoundPage ? "is-active" : ""}`}
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    aria-hidden={!copied}
+                  >
+                    {codexFoundPage
+                      ? <Check size={18} weight="bold" aria-hidden="true" />
+                      : webMcpAvailable
+                        ? <SpinnerGap size={18} weight="bold" className={copied ? "is-spinning" : undefined} aria-hidden="true" />
+                        : <Sparkle size={18} weight="fill" aria-hidden="true" />}
+                    {codexFoundPage ? "Codex found this page" : webMcpAvailable ? "Waiting for Codex" : "Paste in Codex"}
+                  </span>
+                </div>
                 {copyError && (
                   <div className="copy-fallback" role="alert">
                     <span>Copy was blocked. Select the brief below.</span>

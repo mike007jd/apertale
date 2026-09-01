@@ -128,6 +128,24 @@ describe("WebMCP registration", () => {
     vi.unstubAllGlobals();
   });
 
+  it("reports agent use separately from tool availability", async () => {
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const status = vi.fn();
+    const onToolStart = vi.fn();
+    const cleanup = registerWebMcpTools(status, () => undefined, onToolStart);
+
+    await vi.waitFor(() => expect(status).toHaveBeenCalledWith(true));
+    expect(onToolStart).not.toHaveBeenCalled();
+    await tools[0]!.execute({}, { signal: new AbortController().signal });
+    expect(onToolStart).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
   it("registers the compact project tools and runs the shared-state acceptance path", async () => {
     bookEngine.openBook("apertale-your-story");
     bookEngine.reset();

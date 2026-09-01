@@ -39,7 +39,7 @@ Accepted P3 differences:
 
 - The generated city layout and title wrap are not pixel-identical to the concept image, but they preserve the same subject, collage treatment, hierarchy, crop quality, and control anatomy.
 - The Night palette is more amber/dark than the reference’s blue moonlight. This is an intentional `Midnight Desk` presentation choice and keeps text/selection contrast usable.
-- Mobile shows the entire two-page spread rather than inventing a separate single-page composition; small printed story copy is a deliberate desktop-editor trade-off, while core targets and controls remain operable.
+- Phone portrait recommends landscape, but **Stay portrait** now shows one complete physical-page binding; phone landscape keeps the original two-page composition and compact reading controls.
 
 ## Comparison history
 
@@ -183,6 +183,15 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - Ten defects catalogued during the same investigation are fixed with this pass: the selection ring's frame mismatch on phone portrait and its absence entirely on the 2D fallback; Preview accepting canvas drags into the document; the missing `readOnly` on the reader's book; **Ask Codex** deleted by a media query with no replacement entry point; the outline button hidden while its panel kept an authored layout; a short desktop window matching the phone score; a focus trap installed twice on the shelf; the publish panel printing one fault three times; the case, text blocks, page materials and contact shadow leaking on every scene teardown; and this document.
 - Evidence for this pass is `npm run tokens:check` (4/4), `tsc --noEmit`, and the unit and site-tool suites. There is no fresh browser capture, for the reason recorded above.
 
+### Pass 22 — true single-page mobile binding, current
+
+- P1 found and fixed from the user's live portrait review: the old camera framing left the opposite page, cover, and paper block visible, so the result still read as half of a cropped spread.
+- Portrait now keeps one complete right-hand binding in place. Selecting a left-page element reuses its existing half-UV mesh inside the same shell; no new asset, content schema, renderer, or dependency was added.
+- The existing page-turn leaf settles back into the single binding, while landscape still renders the untouched full spread.
+- The 2D fallback uses the physical 4.2:5.18 page ratio and translates an exact half of the 200%-wide spread plane. At 407 × 709 it measured 320 × 395 with zero overflow.
+- Browser checks passed the right and left authored pages, selection-ring alignment, page-turn midpoint and settle, Reduced Motion, forced 2D fallback, 360 × 650, 390 × 844, 407 × 709, 844 × 390, and the 560/561 px breakpoint with zero viewport overflow.
+- Final verification passed: `npm run typecheck`; focused 27-test run including the settled/turning page-presentation policy; `npm run build`. The existing Rollup large-chunk advisory remains non-blocking.
+
 ## Primary interactions tested
 
 - Select Bird/Fox through the WebGL raycaster.
@@ -193,6 +202,7 @@ Fixes: added a two-pixel drag threshold, visible Undo/redo actions, usable inver
 - Enter/exit Preview without changing the current spread.
 - Navigate with keyboard arrows and dismiss selection/Preview with Escape.
 - Verify responsive selection and controls at 390 × 844.
+- Verify the phone portrait gate, its keyboard/fallback dismissal, automatic landscape dismissal, and compact 844 × 390 reader controls.
 - Verify all seven project-level WebMCP definitions, registration signals, compact JSON output, input validation, idempotency, abort cleanup, and field-aware atomic patch undo in automated tests.
 
 ## Implementation checklist

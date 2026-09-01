@@ -98,6 +98,7 @@ export function FallbackBook({
   }, [evidenceKey, onUnavailable, snapshot.document.id, snapshot.document.revision, spread]);
 
   const activeResolved = resolved?.key === evidenceKey ? resolved : null;
+  const focusedPage = spread.elements.find((element) => element.id === snapshot.session.selectionId)?.page ?? "right";
   const loadKeys = activeResolved
     ? fallbackImageLoadKeys(activeResolved.key, activeResolved.layers.map((layer) => layer.id))
     : [];
@@ -162,7 +163,7 @@ export function FallbackBook({
   if (!activeResolved) return <div className="fallback-book is-loading" aria-label={`Loading two-dimensional fallback for ${spread.title}`} />;
 
   return (
-    <div className="fallback-book is-composited" aria-label={`Two-dimensional fallback for ${spread.title}`}>
+    <div className="fallback-book is-composited" data-page={focusedPage} aria-label={`Two-dimensional fallback for ${spread.title}`}>
       <img
         className="fallback-composite-base"
         src={activeResolved.baseUrl}
@@ -178,16 +179,18 @@ export function FallbackBook({
         const procedural = isProceduralElement(element);
         if (!layer && !procedural) return null;
         const style = {
-          left: `${spreadFraction(element) * 100}%`,
+          "--spread-x": `${spreadFraction(element) * 100}%`,
+          "--page-x": `${element.transform.x * 100}%`,
           top: `${element.transform.y * 100}%`,
           zIndex: Math.max(1, Math.round(element.depth * 100)),
           transform: `translate(-50%, -50%) rotate(${element.transform.rotationDeg}deg) scale(${element.transform.scaleX}, ${element.transform.scaleY})`,
-        } satisfies CSSProperties;
+        } as CSSProperties;
         return (
           <button
             key={element.id}
             type="button"
             className={`fallback-interaction-target ${procedural ? "is-procedural" : "is-image"}`}
+            data-page={element.page}
             style={style}
             aria-label={element.label}
             aria-pressed={snapshot.session.selectionId === element.id}

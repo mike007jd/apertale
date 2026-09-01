@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bookCaseMatterPose, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
+import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
 
 const PAGE_WIDTH = 4.2;
 const PAGE_HEIGHT = 5.18;
@@ -7,23 +7,62 @@ const PAGE_HEIGHT = 5.18;
 describe("page-turn deformation", () => {
   it("binds the front matter to the case while preserving the settled spread", () => {
     const flatPhi = 0.055;
-    expect(bookCaseMatterPose(0, flatPhi)).toEqual({ coverY: 0, foldY: Math.PI, reliefZ: 0.08 });
-    expect(bookCaseMatterPose(0.5, flatPhi)).toEqual({
+    expect(bookCaseMatterPose(0, flatPhi)).toMatchObject({ coverY: 0, foldY: Math.PI, reliefZ: 0.08 });
+    expect(bookCaseMatterPose(0.5, flatPhi)).toMatchObject({
       coverY: -(Math.PI - flatPhi) / 2,
       foldY: Math.PI / 2,
       reliefZ: 0.54,
     });
-    expect(bookCaseMatterPose(1, flatPhi)).toEqual({
+    expect(bookCaseMatterPose(1, flatPhi)).toMatchObject({
       coverY: -(Math.PI - flatPhi),
       foldY: 0,
       reliefZ: 1,
     });
+
+    expect(bookCaseMatterPose(0, flatPhi).closure).toBe(1);
+    expect(bookCaseMatterPose(1, flatPhi).closure).toBeLessThan(0.001);
 
     const midpoint = bookCaseMatterPose(0.5, flatPhi);
     const coverOuterEdgeWorldZ = -Math.sin(midpoint.coverY);
     const matterOuterEdgeWorldZ = Math.sin(midpoint.foldY);
     expect(coverOuterEdgeWorldZ).toBeGreaterThan(0);
     expect(matterOuterEdgeWorldZ).toBeGreaterThan(0);
+  });
+
+  it("keeps the moving cover centered on its shelf-to-reader path", () => {
+    const anchorCenter = 3.4;
+    const shelfScale = 0.42;
+    const closedCoverCenter = 2.43;
+    const openCoverCenter = -2.42;
+
+    const closedGroupX = caseHandoffGroupX(anchorCenter, shelfScale, closedCoverCenter, openCoverCenter, 0);
+    expect(closedGroupX + shelfScale * closedCoverCenter).toBeCloseTo(anchorCenter, 8);
+
+    const travel = 0.46;
+    const currentScale = 0.68;
+    const currentCoverCenter = 0.73;
+    const movingGroupX = caseHandoffGroupX(anchorCenter, currentScale, currentCoverCenter, openCoverCenter, travel);
+    expect(movingGroupX + currentScale * currentCoverCenter).toBeCloseTo(
+      anchorCenter + (openCoverCenter - anchorCenter) * travel,
+      8,
+    );
+
+    const openGroupX = caseHandoffGroupX(anchorCenter, 1, openCoverCenter, openCoverCenter, 1);
+    expect(openGroupX).toBeCloseTo(0, 8);
+  });
+
+  it("keeps the spine wrapped between the rear case and moving front cover", () => {
+    const width = 0.51;
+    const rear = { x: width / 2, z: -0.1375 };
+    const open = bookSpinePose(rear, { x: -width / 2, z: rear.z }, width);
+    expect(open).toEqual({ x: 0, z: rear.z, rotationY: -0, scale: 1 });
+
+    const front = { x: width / 2, z: 0.2 };
+    const closed = bookSpinePose(rear, front, width);
+    expect(closed.x).toBeCloseTo(width / 2, 8);
+    expect(closed.z).toBeCloseTo((rear.z + front.z) / 2, 8);
+    expect(closed.rotationY).toBeCloseTo(Math.PI / 2, 8);
+    expect(closed.scale).toBeCloseTo((front.z - rear.z) / width, 8);
   });
 
   it("keeps the correct illustrated spread on the moving leaf and underlay", () => {

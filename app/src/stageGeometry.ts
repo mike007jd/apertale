@@ -11,3 +11,24 @@
 export function spreadFraction(element: { page: "left" | "right"; transform: { x: number } }) {
   return (element.page === "right" ? 0.5 : 0) + element.transform.x * 0.5;
 }
+
+/** A portrait reader frames one physical page; every other scene keeps the spread. */
+export function readerCameraPage(
+  mode: "reader" | "workshop",
+  singlePage: boolean,
+  selectedPage?: "left" | "right",
+) {
+  return mode === "reader" && singlePage ? selectedPage ?? "right" : null;
+}
+
+/** Which authored page occupies the portrait book shell; null keeps the spread. */
+export function readerSinglePagePresentation(
+  mode: "reader" | "workshop",
+  singlePage: boolean,
+  openProgress: number,
+  selectedPage?: "left" | "right",
+  turningForward = false,
+) {
+  if (mode !== "reader" || !singlePage || openProgress < 0.999) return null;
+  return !turningForward && selectedPage === "left" ? "left" : "right";
+}

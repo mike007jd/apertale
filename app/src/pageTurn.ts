@@ -44,11 +44,41 @@ const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
  */
 export function bookCaseMatterPose(openProgress: number, flatPhi: number) {
   const openness = clamp01(openProgress);
+  const phi = flatPhi + (1 - openness) * (Math.PI - flatPhi);
   return {
     coverY: openness === 0 ? 0 : -(Math.PI - flatPhi) * openness,
     foldY: openness === 1 ? 0 : Math.PI * (1 - openness),
     reliefZ: 0.08 + 0.92 * openness,
+    closure: (1 - Math.cos(phi)) / 2,
   };
+}
+
+/** Keeps the flexible spine between the fixed rear hinge and moving front hinge. */
+export function bookSpinePose(
+  rear: { x: number; z: number },
+  front: { x: number; z: number },
+  openWidth: number,
+) {
+  const dx = rear.x - front.x;
+  const dz = rear.z - front.z;
+  return {
+    x: (rear.x + front.x) / 2,
+    z: (rear.z + front.z) / 2,
+    rotationY: -Math.atan2(dz, dx),
+    scale: Math.hypot(dx, dz) / openWidth,
+  };
+}
+
+/** Places the book group while its front-cover center travels between shelf and reader. */
+export function caseHandoffGroupX(
+  anchorCenterX: number,
+  scale: number,
+  coverCenterX: number,
+  settledCoverCenterX: number,
+  travel: number,
+) {
+  const desiredCoverCenterX = anchorCenterX + (settledCoverCenterX - anchorCenterX) * travel;
+  return desiredCoverCenterX - scale * coverCenterX;
 }
 
 /** A turn is available only when its destination exists and its rendering boundary is ready. */

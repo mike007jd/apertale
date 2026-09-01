@@ -476,6 +476,7 @@ function assetRoleFailure(issues: readonly string[]) {
 export function registerWebMcpTools(
   onStatus: (available: boolean) => void,
   presentAuthoringSurface: (request: AuthoringSurfaceRequest, signal: AbortSignal) => void | Promise<void> = () => undefined,
+  onToolStart: () => void = () => undefined,
 ) {
   if (!document.modelContext?.registerTool) {
     recordDiagnostic("webmcp:unavailable");
@@ -489,6 +490,10 @@ export function registerWebMcpTools(
   const register: typeof registerTool = (tool, options) => registerTool(tool, options).then(() => {
     registeredCount += 1;
   });
+  const runRegisteredTool = (name: string, signal: AbortSignal, operation: () => unknown) => {
+    onToolStart();
+    return runTool(name, signal, operation);
+  };
   const sessionResults = new BoundedMap<string, unknown>(128);
   const remember = <Result>(requestId: string, result: Result): Result => {
     sessionResults.set(requestId, result);
@@ -586,7 +591,7 @@ export function registerWebMcpTools(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: (input, options) => runTool(SITE_TOOL.context, options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runRegisteredTool(SITE_TOOL.context, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["detail", "creationBrief"]);
           const detail = typeof input.detail === "undefined" ? "compact" : requiredString(input, "detail");
           if (!(PROJECT_CONTEXT_DETAILS as readonly string[]).includes(detail)) invalid("detail is not supported.");
@@ -693,7 +698,7 @@ export function registerWebMcpTools(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool(SITE_TOOL.manageBook, options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runRegisteredTool(SITE_TOOL.manageBook, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, [...requiredMutationFields, "action", "bookId", "coverAssetId", "title", "spreads", "creationBrief", "qualityReview"]);
           const requestId = requiredString(input, "requestId");
           if (pendingPresentations.has(requestId)) {
@@ -992,7 +997,7 @@ export function registerWebMcpTools(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool(SITE_TOOL.composeSpread, options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runRegisteredTool(SITE_TOOL.composeSpread, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, [...requiredMutationFields, "spreadId", "title", "body", "kicker"]);
           return bookEngine.dispatchCoordinated({
             type: "compose-spread",
@@ -1042,7 +1047,7 @@ export function registerWebMcpTools(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool(SITE_TOOL.applyScenePatch, options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runRegisteredTool(SITE_TOOL.applyScenePatch, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, [...requiredMutationFields, "spreadId", "operations"]);
           const requestId = requiredString(input, "requestId");
           const expectedDocumentId = requiredDocumentId(input);
@@ -1152,7 +1157,7 @@ export function registerWebMcpTools(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: false },
-        execute: (input, options) => runTool(SITE_TOOL.setPresentation, options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runRegisteredTool(SITE_TOOL.setPresentation, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, [...requiredMutationFields, "theme", "preview", "spreadId", "surface"]);
           const requestId = requiredString(input, "requestId");
           if (pendingPresentations.has(requestId)) {
@@ -1234,7 +1239,7 @@ export function registerWebMcpTools(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool(SITE_TOOL.undoProjectChange, options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runRegisteredTool(SITE_TOOL.undoProjectChange, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, [...requiredMutationFields, "undoToken"]);
           return bookEngine.dispatchCoordinated({
             type: "undo",
@@ -1266,7 +1271,7 @@ export function registerWebMcpTools(
         // Mutating, and its result carries ids derived from a file the reader
         // chose, so it takes the same hint every other mutating tool carries.
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runTool(SITE_TOOL.requestImageHandoff, options?.signal ?? uncancelledToolSignal, async () => {
+        execute: (input, options) => runRegisteredTool(SITE_TOOL.requestImageHandoff, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["requestId", "assetUse", "reason"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);

@@ -44,35 +44,47 @@ describe("library shelf sections", () => {
     expect([...shelfCoverAssetPlan(false, yours)]).toEqual([]);
   });
 
-  it("keeps the reader scene out of the settled shelf but mounts it for every transition target", () => {
+  it("keeps a cold reader out of the shelf but retains the current ready scene", () => {
     expect(readerSceneShouldMount({
       showLibrary: true,
       showCreateGuide: false,
       openingBookMatchesDocument: false,
+      readerReady: false,
       libraryMotion: "idle",
     })).toBe(false);
     expect(readerSceneShouldMount({
       showLibrary: true,
       showCreateGuide: false,
+      openingBookMatchesDocument: false,
+      readerReady: true,
+      libraryMotion: "idle",
+    })).toBe(true);
+    expect(readerSceneShouldMount({
+      showLibrary: true,
+      showCreateGuide: false,
       openingBookMatchesDocument: true,
+      readerReady: false,
       libraryMotion: "idle",
     })).toBe(true);
     expect(readerSceneShouldMount({
       showLibrary: true,
       showCreateGuide: false,
       openingBookMatchesDocument: false,
+      readerReady: false,
       libraryMotion: "closing-book",
     })).toBe(true);
     expect(readerSceneShouldMount({
       showLibrary: true,
       showCreateGuide: true,
       openingBookMatchesDocument: false,
+      readerReady: false,
       libraryMotion: "idle",
     })).toBe(true);
     expect(readerSceneShouldMount({
       showLibrary: false,
       showCreateGuide: false,
       openingBookMatchesDocument: false,
+      readerReady: false,
       libraryMotion: "idle",
     })).toBe(true);
   });
