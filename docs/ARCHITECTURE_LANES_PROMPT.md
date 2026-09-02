@@ -1,7 +1,7 @@
-# Apertale 架构加深 · 多 lane 执行 prompt（第二轮）
+# Apertale 架构加深 · 多 lane 执行 prompt（第三轮）
 
 > 用法：新 session 中 `@docs/ARCHITECTURE_LANES_PROMPT.md`。
-> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。本文件是第二轮的 handoff，已内含全部结论，不依赖外部报告。
+> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。第二轮（Lane F–I）与第三轮（Lane J、K）也已合入。本文件是第四轮的 handoff，已内含全部结论，不依赖外部报告。
 
 ## 你的角色
 
@@ -20,7 +20,7 @@
 
 ## 全局规则（每个 lane 的 prompt 都要原样包含）
 
-- 第 0 步：在 worktree 里 `git merge main`，然后 `npm test` 记录起始用例数（当前 main：33 文件 / 359 用例）。
+- 第 0 步：在 worktree 里 `git merge main`，然后 `npm test` 记录起始用例数（当前 main：33 文件 / 361 用例；`test:sites` 46）。
 - 工作目录 `app/`。改任何函数、类、方法前先运行 GitNexus `impact({target, direction: "upstream"})`；提交前运行 `detect_changes()`。这是根目录 `AGENTS.md` 的硬要求。索引落后于重构时以 grep 为准并在报告里注明；`detect_changes` 会因行位移报出没碰过的符号，列出真实改动的符号即可。
 - 验证命令固定为 `npm run typecheck && npm test`。改到 worker 或 scripts 时追加 `npm run test:sites`。`npm run audit:cutouts` 有 41 个已知样本资产失败，不作为门槛。
 - 行为不变：所有 lane 都是纯重构。结束时必须能说「测试数量 ≥ 开始时」或明确列出删掉了哪些测试以及为什么它们是重复的。
@@ -138,7 +138,18 @@
 
 ---
 
-## 第三轮候选（按推荐顺序；每个都小，可以一波并行）
+## 第三轮已完成（2026-09-02 合入 main，不要重做）
+
+| Lane | 结果 | 关键产物 / 偏差 |
+|---|---|---|
+| J · engine / webmcp 内联词汇接 grammar | 合并（`ae96136`） | `bookEngine.ts` 与 `webmcp.ts` 里的 `["left","right"]`、`["embedded","lifted","decoration"]`、`24` / `23` 全部改读已 import 的 `BOOK_ELEMENT_GRAMMAR.pages / .elementKinds / .elementsPerSpread.max`，消息文本与 tool description 用模板插值；`pick(...)` 类型推断未退化。**刻意未动**：`webmcp.ts` 的 `creationBriefSchema.sourceAssets.maxItems: 24`（Creation brief readiness 的素材条数上限，与 spread 元素数同为 24 是巧合；真源是 `creationBrief.ts` 的 `CREATION_SOURCE_ASSET_LIMIT`，可作第四轮小项）和 `evidence.maxItems: 24`（quality evidence 上限） |
+| K · sourceAssets 三层校验 | 合并（`1517a2e`，merge `6eb3692`） | 结论：brief 层（抛错）与 contract 层（软阻塞）语义不同，控制流不合并。只有「单条目形状合法」三条规则（是对象 / id 非空 / name 非空）是同一规则两种写法，收成 `authoringContract.ts` 导出的纯谓词 `checkSourceAsset(value)`，返回 `{ok, asset}` 或 `{ok:false, reason}`；`normalizeSourceAssets` 把 reason 映射回原文案，`briefAssets` 照旧丢弃并收 blocker。远程 URL、唯一性、数量上限只在 brief 层；`isStoredAssetId`、已验证 id、≥1 张照片只在 contract 层。`CONTEXT.md` 加了一句。`assessCreationReadiness` upstream impact CRITICAL，签名与 blocker 语义未动 |
+
+第三轮总计 5 文件 +49/−27；测试 361 → 361；`verify:release` 退出码 0。无行为差异。
+
+---
+
+## 第三轮（已完成，保留作记录）
 
 ### Lane J · `bookEngine.ts` / `webmcp.ts` 的内联词汇接 grammar
 
@@ -159,6 +170,11 @@ src/webmcp.ts:333       pick(value.kind, "kind", ["embedded", "lifted", "decorat
 
 证据：workshop `uniqueAssets`（UI 容量规则，`creationWorkshop.ts`）→ brief `normalizeSourceAssets`（抛错，`creationBrief.ts:57`）→ contract `briefAssets` + `isStoredAssetId`（软阻塞，`authoringContract.ts:103`、`:171-180`）。第一层语义不同不动；看二、三层是否同一规则两种表达。若 `assessCreationReadiness` 的软阻塞语义（收集 blocker 而非抛错）必须保留，只共享「合法 source asset」谓词，不合并控制流。拥有：`src/creationBrief.ts`、`src/authoringContract.ts`、两者测试。只读：`src/webmcp.ts`、`src/App.tsx`。先用 `impact({target:"assessCreationReadiness"})`，它在 WebMCP 信任边界上。
 
+## 第四轮候选
+
+- **J 遗留**：`webmcp.ts` `creationBriefSchema.sourceAssets.maxItems: 24` 与 `creationBrief.ts` 的 `CREATION_SOURCE_ASSET_LIMIT`、`webmcp.ts:1214` 附近若有 sourceAssets 条数校验，三处同一上限；`CREATION_SOURCE_ASSET_LIMIT` 是真源，schema 改读它。半小时量级，可并入下一个碰 `webmcp.ts` 的 lane。
+- **contract 簇依赖方向图**：G、H、I、K 已合入，现在方向是 types → bookElementGrammar → bookAssetContract，creationBrief → authoringContract。画一次图，决定 `creationBrief.ts` 是否应吸收 `checkSourceAsset` 所在的那段（或反向），再决定要不要开 lane。
+
 ### 仍待定（无新证据，默认不启动）
 
 - **候选 4(b)** ThreeBook 命令式 scene controller：拥有 `src/ThreeBook.tsx` 与 `src/readerShell.ts`，只读 `bookEngine.ts`。先 `impact` 看 `ThreeBook` props 上游。
@@ -168,4 +184,4 @@ src/webmcp.ts:333       pick(value.kind, "kind", ["embedded", "lifted", "decorat
 
 ## 最终汇报
 
-按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第三轮起点 33 / 361）；任何刻意的行为差异单列。
+按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第四轮起点 33 / 361，`test:sites` 46）；任何刻意的行为差异单列。
