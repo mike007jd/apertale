@@ -6,9 +6,9 @@
  */
 import { ArrowCounterClockwise, ArrowLeft, ArrowRight, Eraser, PencilSimple } from "@phosphor-icons/react";
 import type { ComponentProps } from "react";
+import { INTERACTION_DENSITIES } from "./authoringContract";
 import { Switch } from "./design/primitives";
 import {
-  CREATION_INTERACTION_DENSITIES,
   CREATION_LENGTHS,
   CREATION_PHOTO_USES,
   CREATION_SOURCES,
@@ -63,7 +63,7 @@ export function WorkshopPickers({ workshop, dispatch }: { workshop: CreationWork
         className="workshop-segment"
         value={workshop.interactionDensity}
         onChange={(interactionDensity) => dispatch({ type: "set-interaction-density", interactionDensity })}
-        options={CREATION_INTERACTION_DENSITIES.map((choice) => ({
+        options={INTERACTION_DENSITIES.map((choice) => ({
           value: choice.id,
           label: `${choice.label}${choice.id === "low" || choice.id === "balanced" ? ` · ${choice.count}` : ""}`,
           ariaLabel: `${choice.label}: ${choice.count} per spread`,

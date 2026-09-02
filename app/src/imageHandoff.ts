@@ -52,18 +52,17 @@ type Pending = {
 };
 
 let pending: Pending | null = null;
-const listeners = new Set<(request: ImageHandoffRequest | null) => void>();
+let listener: ((request: ImageHandoffRequest | null) => void) | null = null;
 
 function announce() {
-  const request = pending?.request ?? null;
-  listeners.forEach((listener) => listener(request));
+  listener?.(pending?.request ?? null);
 }
 
 /** Subscribed by the reader surface so the drawer can open on request. */
-export function subscribeToImageHandoff(listener: (request: ImageHandoffRequest | null) => void) {
-  listeners.add(listener);
-  listener(pending?.request ?? null);
-  return () => { listeners.delete(listener); };
+export function subscribeToImageHandoff(next: (request: ImageHandoffRequest | null) => void) {
+  listener = next;
+  next(pending?.request ?? null);
+  return () => { if (listener === next) listener = null; };
 }
 
 export function currentImageHandoff() {

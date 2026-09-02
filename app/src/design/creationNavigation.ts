@@ -5,12 +5,12 @@ export type CreationNavigationPhase =
   | "covering-workspace"
   | "revealing-source";
 
-export type CreationNavigationState = {
+type CreationNavigationState = {
   phase: CreationNavigationPhase;
   workspaceOpen: boolean;
 };
 
-export type CreationNavigationAction =
+type CreationNavigationAction =
   | { type: "request-open" }
   | { type: "request-close" }
   | { type: "animation-complete" }

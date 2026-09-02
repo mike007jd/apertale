@@ -16,7 +16,6 @@ import { MAX_BOOK_SPREADS, isProceduralElement, spreadBaseAssetId } from "./type
 import type { DocumentState, ThemeId } from "./types";
 
 export const QUALITY_CONTRACT_VERSION = 2 as const;
-const QUALITY_RUBRIC_VERSION = 2 as const;
 export const QUALITY_REVIEW_MAX_ROUNDS = 2 as const;
 /** Closed runtime vocabulary for persisted quality lifecycle status. */
 export const QUALITY_REVIEW_STATUSES = ["needs-review", "checking", "ready", "blocked", "needs-user-input"] as const;
@@ -29,7 +28,7 @@ const MIN_SPREAD_FOREGROUND_LAYERS = 2;
  * personal source or animation frame. Cross-spread foreground reuse remains
  * legal and can reduce the actual total.
  */
-const MINIMUM_CAPABLE_BOOK_ASSETS = 1 + MAX_BOOK_SPREADS * (2 + MIN_SPREAD_FOREGROUND_LAYERS);
+export const MINIMUM_CAPABLE_BOOK_ASSETS = 1 + MAX_BOOK_SPREADS * (2 + MIN_SPREAD_FOREGROUND_LAYERS);
 
 type QualityCriterionMode = "deterministic" | "visual" | "both";
 type QualityCriterion = {
@@ -41,7 +40,7 @@ type QualityCriterion = {
 
 type QualityRubric = {
   id: string;
-  version: typeof QUALITY_RUBRIC_VERSION;
+  version: typeof QUALITY_CONTRACT_VERSION;
   maxReviewRounds: typeof QUALITY_REVIEW_MAX_ROUNDS;
   maxBookUploadedAssets: number;
   spreadAssetPolicies: Record<CreationBookType, {
@@ -53,15 +52,6 @@ type QualityRubric = {
 };
 
 export const QUALITY_RUBRIC = Object.freeze(qualityRubricSource) as QualityRubric;
-if (
-  QUALITY_RUBRIC.version !== QUALITY_RUBRIC_VERSION
-  || QUALITY_RUBRIC.maxReviewRounds !== QUALITY_REVIEW_MAX_ROUNDS
-  || QUALITY_RUBRIC.maxBookUploadedAssets !== MAX_BOOK_PUBLISHABLE_ASSETS
-  || !Number.isInteger(MAX_BOOK_PUBLISHABLE_ASSETS)
-  || MAX_BOOK_PUBLISHABLE_ASSETS < MINIMUM_CAPABLE_BOOK_ASSETS
-) {
-  throw new TypeError("Invalid Apertale quality rubric version.");
-}
 
 type QualityOutcome = "pass" | "blocker" | "warn" | "note";
 
@@ -102,9 +92,9 @@ export type QualityVisualReviewSubmission = {
 
 type QualityReportStatus = "ready" | "blocked" | "needs-user-input";
 
-export type QualityReport = {
+type QualityReport = {
   contractVersion: typeof QUALITY_CONTRACT_VERSION;
-  rubricVersion: typeof QUALITY_RUBRIC_VERSION;
+  rubricVersion: typeof QUALITY_CONTRACT_VERSION;
   documentId: string;
   reviewedRevision: number;
   round: number;
@@ -125,7 +115,7 @@ export function isCurrentQualityReport(report: unknown): report is QualityReport
   if (!report || typeof report !== "object") return false;
   const candidate = report as Partial<QualityReport>;
   return candidate.contractVersion === QUALITY_CONTRACT_VERSION
-    && candidate.rubricVersion === QUALITY_RUBRIC_VERSION;
+    && candidate.rubricVersion === QUALITY_CONTRACT_VERSION;
 }
 
 export type AuthoringQualityLifecycle = {
@@ -482,7 +472,7 @@ export function buildQualityReport(
       : "blocked";
   return {
     contractVersion: QUALITY_CONTRACT_VERSION,
-    rubricVersion: QUALITY_RUBRIC_VERSION,
+    rubricVersion: QUALITY_CONTRACT_VERSION,
     documentId: documentState.id,
     reviewedRevision: documentState.revision,
     round,

@@ -7,7 +7,7 @@ import {
   type StoredAssetMetadata,
 } from "./assetStore";
 import { buildCreationBrief, type AuthoringMode, type CreationBrief } from "./creationBrief";
-import { INTERACTION_DENSITIES, type InteractionDensity } from "./authoringContract";
+import { type InteractionDensity } from "./authoringContract";
 
 export const CREATION_STYLES = ["Paper collage", "Watercolor", "Cinematic", "Surprise me"] as const;
 export const CREATION_LENGTHS = [4, 6, 8, 10, 12] as const;
@@ -20,7 +20,6 @@ export const CREATION_PHOTO_USES = [
   { id: "illustrated-keepsake", label: "Illustrated keepsake" },
   { id: "preserve-originals", label: "Keep original photos" },
 ] as const;
-export const CREATION_INTERACTION_DENSITIES = INTERACTION_DENSITIES;
 export type CreationPhotoUse = (typeof CREATION_PHOTO_USES)[number]["id"];
 
 /** One source image per spread covers a full book without overloading the horizontal strip. */
