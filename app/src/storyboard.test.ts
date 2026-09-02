@@ -102,6 +102,22 @@ describe("Codex marks", () => {
     expect(marks[3]).toMatchObject({ text: "harbour", size: "l" });
   });
 
+  it("keeps a rect's source-photo assetId through normalisation and the summary, dropping empty ones", () => {
+    applyStoryboardSketches("replace", [{
+      index: 0,
+      marks: [
+        { kind: "rect", x: 0.1, y: 0.1, w: 0.3, h: 0.3, label: "grandma", assetId: " asset:photo-1 " },
+        { kind: "rect", x: 0.6, y: 0.1, w: 0.3, h: 0.3, label: "empty", assetId: "" },
+      ],
+    }]);
+    const marks = getStoryboardSnapshot().spreads[0].marks;
+    expect(marks[0]).toMatchObject({ kind: "rect", assetId: "asset:photo-1" });
+    expect(marks[1]).not.toHaveProperty("assetId");
+    const summary = summarizeStoryboard().spreads[0].marks;
+    expect(summary[0]).toMatchObject({ kind: "rect", label: "grandma", assetId: "asset:photo-1" });
+    expect(JSON.stringify(summary[1])).not.toContain("assetId");
+  });
+
   it("summarizes marks as labelled boxes without freehand geometry", () => {
     applyStoryboardSketches("replace", [{ index: 0, marks: [{ kind: "line", points: [{ x: 0.1, y: 0.1 }, { x: 0.3, y: 0.4 }], label: "path" }, { kind: "label", x: 0.6, y: 0.2, text: "moon" }] }]);
     const summary = summarizeStoryboard().spreads[0];

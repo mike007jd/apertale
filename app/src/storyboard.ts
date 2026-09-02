@@ -60,7 +60,7 @@ type StoryboardSummary = {
     index: number;
     caption: string;
     sketchRevision: number;
-    marks: { kind: StoryboardMark["kind"]; label?: string; box: StoryboardBox }[];
+    marks: { kind: StoryboardMark["kind"]; label?: string; assetId?: string; box: StoryboardBox }[];
     annotations: AnnotationSummary[];
   }[];
 };
@@ -129,8 +129,9 @@ function normalizedMark(mark: StoryboardMark): StoryboardMark | null {
       return points.length >= 2 ? { kind: "line", points, label: text(mark.label) } : null;
     }
     case "rect":
+      return { kind: "rect", ...box(mark), label: text(mark.label), assetId: mark.assetId?.trim() || undefined };
     case "ellipse":
-      return { kind: mark.kind, ...box(mark), label: text(mark.label) };
+      return { kind: "ellipse", ...box(mark), label: text(mark.label) };
     case "arrow":
       return { kind: "arrow", from: point(mark.from), to: point(mark.to), label: text(mark.label) };
     case "label": {
@@ -213,7 +214,7 @@ export function summarizeStoryboard(source: StoryboardSnapshot = snapshot): Stor
       index: spread.index,
       caption: spread.caption,
       sketchRevision: spread.sketchRevision,
-      marks: spread.marks.map((mark) => stripUndefined({ kind: mark.kind, label: markLabel(mark), box: markBox(mark) })),
+      marks: spread.marks.map((mark) => stripUndefined({ kind: mark.kind, label: markLabel(mark), assetId: mark.kind === "rect" ? mark.assetId : undefined, box: markBox(mark) })),
       annotations: spread.annotations.map((stroke) => describeAnnotation(stroke, spread.marks)),
     })),
   };
