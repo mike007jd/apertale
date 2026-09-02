@@ -207,7 +207,11 @@ function parseStoryboardMark(raw: unknown, name: string): StoryboardMark {
     }
     return { kind, points: mark.points.map((point, index) => parseStoryboardPoint(point, `${name}.points[${index}]`)), label };
   }
-  if (kind === "rect" || kind === "ellipse") {
+  if (kind === "rect") {
+    assertOnly(mark, ["kind", "x", "y", "w", "h", "label", "assetId"]);
+    return { kind, x: unitField("x"), y: unitField("y"), w: unitField("w"), h: unitField("h"), label, assetId: boundedString(mark, "assetId", 128, true) };
+  }
+  if (kind === "ellipse") {
     assertOnly(mark, ["kind", "x", "y", "w", "h", "label"]);
     return { kind, x: unitField("x"), y: unitField("y"), w: unitField("w"), h: unitField("h"), label };
   }
@@ -487,7 +491,15 @@ const storyboardMarkSchema = {
   description: "One pencil mark. Spread coordinates: x 0 = left page outer edge, 0.5 = gutter, 1 = right page outer edge; y 0 = top, 1 = bottom.",
   oneOf: [
     {
-      properties: { kind: { const: "rect" }, x: unitNumber, y: unitNumber, w: unitNumber, h: unitNumber, label: markLabel },
+      properties: {
+        kind: { const: "rect" },
+        x: unitNumber,
+        y: unitNumber,
+        w: unitNumber,
+        h: unitNumber,
+        label: markLabel,
+        assetId: { type: "string", maxLength: 128, description: "Local source-photo asset id from the reader (see assets). The page ghosts the photo inside this box." },
+      },
       required: ["kind", "x", "y", "w", "h"],
       additionalProperties: false,
     },
@@ -1454,7 +1466,7 @@ export function registerWebMcpTools(
           additionalProperties: false,
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: (input, options) => runRegisteredTool(SITE_TOOL.storyboard, options?.signal ?? uncancelledToolSignal, () => {
+        execute: (input, options) => runRegisteredTool(SITE_TOOL.storyboard, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, ["requestId", "action", "spreads", "expectedStoryboardRevision", "resolvedAnnotations"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
@@ -1469,7 +1481,19 @@ export function registerWebMcpTools(
           if (resolvedAnnotations.length > 0 && typeof expectedStoryboardRevision === "undefined") {
             invalid("expectedStoryboardRevision is required when clearing annotations.");
           }
-          const applied = applyStoryboardSketches(action, parseStoryboardSpreads(input.spreads), resolvedAnnotations, expectedStoryboardRevision as number | undefined);
+          const spreads = parseStoryboardSpreads(input.spreads);
+          // Verified local source photos only: a rect may ghost a reader photo, never a bundled or generated asset.
+          const photoRects = spreads.flatMap((spread, spreadIndex) => spread.marks.flatMap((mark, markIndex) => (
+            mark.kind === "rect" && mark.assetId ? [{ assetId: mark.assetId, name: `spreads[${spreadIndex}].marks[${markIndex}].assetId` }] : []
+          )));
+          if (photoRects.length > 0) {
+            const sourcePhotos = new Set((await getAssetMetadata(photoRects.map((rect) => rect.assetId)))
+              .filter((asset) => asset.assetUse === "source-photo")
+              .map((asset) => asset.id));
+            const missing = photoRects.find((rect) => !sourcePhotos.has(rect.assetId));
+            if (missing) invalid(`${missing.name} must name a verified local source-photo asset.`);
+          }
+          const applied = applyStoryboardSketches(action, spreads, resolvedAnnotations, expectedStoryboardRevision as number | undefined);
           if (!applied.ok) {
             return remember(requestId, {
               ...applied,

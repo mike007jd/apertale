@@ -153,6 +153,36 @@ describe("WebMCP registration", () => {
     cleanup();
   });
 
+  it("lets a storyboard rect ghost only a verified local source photo", async () => {
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const cleanup = registerWebMcpTools(() => undefined);
+    await vi.waitFor(() => expect(tools).toHaveLength(SITE_TOOL_NAMES.length));
+    const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
+    const signal = { signal: new AbortController().signal };
+    const photoAssetId = verifyAsset(localAssetId(700), "source-photo");
+    const artAssetId = verifyAsset(localAssetId(701), "cover");
+    const sketch = (requestId: string, mark: Record<string, unknown>) => tool("sketch_storyboard").execute({
+      requestId,
+      action: "replace",
+      spreads: [{ index: 0, caption: "Grandma at the shore", marks: [{ x: 0.55, y: 0.2, w: 0.3, h: 0.4, label: "grandma", ...mark }] }],
+    }, signal);
+
+    const accepted = JSON.parse(String(await sketch("photo-rect", { kind: "rect", assetId: photoAssetId })));
+    expect(accepted).toMatchObject({ ok: true, storyboard: { spreads: [{ marks: [{ kind: "rect", label: "grandma", assetId: photoAssetId }] }] } });
+    const context = JSON.parse(String(await tool("get_project_context").execute({}, signal)));
+    expect(context.storyboard.spreads[0].marks[0]).toMatchObject({ kind: "rect", assetId: photoAssetId });
+
+    await expect(sketch("unknown-photo", { kind: "rect", assetId: localAssetId(702) })).rejects.toThrow("spreads[0].marks[0].assetId must name a verified local source-photo asset.");
+    await expect(sketch("book-art-rect", { kind: "rect", assetId: artAssetId })).rejects.toThrow(/source-photo asset/);
+    await expect(sketch("ellipse-photo", { kind: "ellipse", assetId: photoAssetId })).rejects.toThrow(/assetId/);
+    cleanup();
+  });
+
   it("shares Codex pencil sketches and reader annotations through project context", async () => {
     const tools: WebMCP.ModelContextTool[] = [];
     vi.stubGlobal("document", {
