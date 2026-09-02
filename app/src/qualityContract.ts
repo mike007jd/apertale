@@ -1,7 +1,6 @@
 import qualityRubricSource from "../worker/qualityRubric.json";
 import {
   CREATION_READINESS_VERSION,
-  MAX_BOOK_PUBLISHABLE_ASSETS,
   assessCreationReadiness,
   creationBriefSourceAssetIds,
   interactionLayerTarget,
@@ -12,7 +11,7 @@ import {
 import { bookAssetReferenceIssues, bookAssetReferenceManifest } from "./bookAssetContract";
 import { hasAuthoredInteraction } from "./interaction";
 import { listStoredPublishedAssetIds } from "./projectArtifact";
-import { MAX_BOOK_SPREADS, isProceduralElement, spreadBaseAssetId } from "./types";
+import { MAX_BOOK_PUBLISHABLE_ASSETS, MAX_BOOK_SPREADS, isProceduralElement, spreadBaseAssetId } from "./types";
 import type { DocumentState, ThemeId } from "./types";
 
 export const QUALITY_CONTRACT_VERSION = 2 as const;

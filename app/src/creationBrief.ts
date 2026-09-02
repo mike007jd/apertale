@@ -2,7 +2,6 @@ import {
   CREATION_BOOK_TYPES,
   CREATION_READINESS_VERSION,
   GENERATED_COVER_COUNT,
-  MAX_BOOK_PUBLISHABLE_ASSETS,
   REQUIRED_GATE_IDS,
   assessCreationReadiness,
   checkSourceAsset,
@@ -17,7 +16,7 @@ import {
   type CreationReadinessAssessment,
   type CreationSourceAsset,
 } from "./authoringContract";
-import { MAX_BOOK_SPREADS } from "./types";
+import { MAX_BOOK_PUBLISHABLE_ASSETS, MAX_BOOK_SPREADS } from "./types";
 
 export const AUTHORING_MODES = ["idea", "photos", "both"] as const;
 export type AuthoringMode = (typeof AUTHORING_MODES)[number];

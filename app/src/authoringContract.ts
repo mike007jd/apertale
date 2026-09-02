@@ -1,6 +1,6 @@
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { isStoredAssetId } from "./assetId";
-import { MOTION_PRESETS } from "./types";
+import { MAX_BOOK_PUBLISHABLE_ASSETS, MOTION_PRESETS } from "./types";
 import siteManifest from "../site-manifest.json";
 
 export const SITE_TOOL = Object.freeze(siteManifest.webMcp.tools);
@@ -11,8 +11,6 @@ export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", 
 export const AUTHORING_GUIDE_DETAIL = "authoring-guide" as const;
 
 export const CREATION_READINESS_VERSION = 2 as const;
-/** Browser-local image capacity shared by readiness, quality review, and publishing. */
-export const MAX_BOOK_PUBLISHABLE_ASSETS = 50 as const;
 export const CREATION_BOOK_TYPES = ["illustrated-storybook", "photo-led-keepsake", "preserved-photo-album"] as const;
 export type CreationBookType = (typeof CREATION_BOOK_TYPES)[number];
 
@@ -100,7 +98,7 @@ function supportedSourceUse(value: unknown): value is PhotoSourceUse {
   return typeof value === "string" && (PHOTO_SOURCE_USES as readonly string[]).includes(value);
 }
 
-export type SourceAssetRejection = "shape" | "id" | "name";
+type SourceAssetRejection = "shape" | "id" | "name";
 
 /**
  * Shared shape rule for one brief source asset. The caller decides what a

@@ -3,7 +3,7 @@ import { SUPPORTED_IMAGE_TYPES as SUPPORTED_SOURCE_TYPES } from "./bookElementGr
 import { IMAGE_ANALYSIS_VERSION, MAX_SOURCE_IMAGE_BYTES, analyzeStoredImage, optimizeImportedImage } from "./imageOptimizer";
 import type { ImageContentAnalysis } from "./imageOptimizer";
 import type { ImageHandoffAssetUse } from "./imageHandoff";
-import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
+import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./types";
 import { bundledShelfCoverPreviewUrl } from "./shelfCoverPreview";
 
 export { isStoredAssetId } from "./assetId";
