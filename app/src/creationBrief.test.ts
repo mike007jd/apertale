@@ -57,25 +57,21 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("dedicated portrait cover");
     expect(brief.prompt).toContain("purpose-built full-spread artwork");
     expect(brief.prompt).toContain("approximately 1.62:1 stage");
-    expect(brief.prompt).toMatch(/composite and clean-plate sheets as generated.*never resize/i);
-    expect(brief.prompt).toMatch(/as generated.*never resize/i);
+    expect(brief.prompt).toMatch(/Do not call the page until every image exists.*two concurrent ImageGen rounds/);
+    expect(brief.prompt).toMatch(/never resize, reformat, or inspect pixels locally/);
     expect(brief.prompt).toMatch(/at most 50/i);
-    expect(brief.prompt).toMatch(/presentation status pending.*same requestId/i);
-    expect(brief.prompt).toMatch(/ok:false correction.*fresh requestId/i);
+    expect(brief.prompt).toMatch(/presentation status pending.*fresh requestId/i);
     expect(brief.prompt).toContain('set_presentation(surface: "shelf")');
     expect(brief.prompt).toContain('set_presentation(surface: "reader", spreadId)');
-    expect(brief.prompt).toMatch(/normal navigation and screenshots.*do not record revision-bound evidence/i);
-    expect(brief.prompt).toContain('photo-fidelity-integration with outcome: "note"');
-    expect(brief.prompt).toContain('scope: "book" and locator: "creationBrief.sourceAssets"');
-    expect(brief.prompt).toMatch(/personalSourceAssetId.*per-spread evidence/i);
     expect(brief.prompt).toContain("Never claim generation or import succeeded without evidence");
+    // The paste has to stay short enough that the Agent acts instead of narrating it.
+    expect(brief.prompt.length).toBeLessThan(7000);
     expect(brief.prompt.indexOf('detail: "authoring-guide"')).toBeLessThan(brief.prompt.indexOf('detail: "creation-readiness"'));
-    expect(brief.prompt).toContain("assetUse source-photo");
-    expect(brief.prompt).toContain("assetUse book-art");
+    expect(brief.prompt).toContain('request_image_handoff(assetUse: "book-art")');
     expect(brief.prompt).toContain("single manage_book create call");
     expect(brief.prompt).toContain("coverAssetId");
     expect(brief.prompt).toContain("2–3 native-alpha interactive layers");
-    expect(brief.prompt).toContain("A text-only shell is not a book");
+    expect(brief.prompt).toContain("a text-only shell is not a book");
 
     const assetSectionIndex = brief.prompt.indexOf("Selected source assets in order:");
     expect(assetSectionIndex).toBeGreaterThan(-1);
@@ -171,7 +167,7 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("cannot be represented as simply placing uploaded source photos on the right page");
     expect(brief.prompt).toContain("asset:ticket-stub — Ticket stub.jpg");
     expect(brief.prompt).toContain("generated full-spread count 4");
-    expect(brief.prompt).toMatch(/images array of base64 data URLs.*split: true.*Computer Use.*work\/final-assets.*drag/i);
+    expect(brief.prompt).toMatch(/images array of base64 data URLs.*split: true.*work\/final-assets.*drag/i);
   });
 
   it("preserves caller-selected source-asset order and rejects incomplete or remote ids", () => {

@@ -139,7 +139,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
   const prompt = [
     "Work on the Apertale page that is open beside this conversation. It is a WebMCP-enabled living-book canvas.",
     `Use creation brief contract version ${CREATION_READINESS_VERSION}. First read get_project_context(detail: \"authoring-guide\"), then call get_project_context(detail: \"creation-readiness\") with the structured brief you derive from this conversation.`,
-    "Follow the readiness plus two-phase host-side full-book creation contract in the current Codex conversation. Do not skip planning or final asset preparation and jump to layout.",
+    "Follow the two-phase host-side full-book creation contract in the current Codex conversation: plan on the page first, generate everything, then lay out through Site Tools.",
     `Authoring mode: ${input.mode}.`,
     `Book type: ${bookType ?? "not chosen yet"}.`,
     `Use exactly ${input.spreadCount} spreads and the visual direction: ${visualDirection}.`,
@@ -161,41 +161,28 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "Ask the returned blocking questions together in one concise turn. Do not replace a material photo or identity choice with a default.",
     "Do not ask me to repeat this brief inside Apertale.",
     "",
-    "Phase 1 — inspect, plan, and prepare final assets before any book mutation:",
-    "- Inspect the sources and user prompt.",
-    "- Define audience or assumption and a complete story arc.",
-    "- Plan the title, dedicated generated portrait cover, every spread, and ordered provenance.",
-    "- Sketch the whole rough book with sketch_storyboard(action: \"replace\"), then end your turn and ask me to circle changes in red on the book or say continue. Generate art only in a later turn, after reading my marks from get_project_context.",
+    "Phase 1 — plan on the page, no image generation yet:",
+    "- Inspect the sources and prompt, settle the audience, then write the complete story arc, the title, a dedicated portrait cover plan, and one character bible you will reuse verbatim in every image request.",
+    "- Sketch the whole rough book with sketch_storyboard(action: \"replace\"), then end your turn and ask me to circle changes in red on the book or say continue.",
     ...(bookType === "preserved-photo-album"
-      ? ["- Use ImageGen for the dedicated portrait cover. Prepare one source-true original-photo layout per spread for the approximately 1.62:1 stage without reillustrating people or changing photo geometry beyond the authorised policy."]
-      : ["- Use the host ImageGen/image editing capability in 2×2 sheets (cover alone; spreads, clean plates, and cutouts four per sheet) exactly as the authoring guide's imagegen-before-create and cutouts gates describe."]),
-    "- Compose full-spread artwork for the approximately 1.62:1 stage. The 1.45–2.10 input range is compatibility tolerance, not an art-direction target.",
-    "- Hand off the composite and clean-plate sheets as generated; the page splits and upscales both to the same tile size, so never resize or reformat locally.",
-    "- Use source photos as references and story truth, not as a lazy final right-page placement unless the user explicitly chose a literal photo-album treatment.",
+      ? ["- Use ImageGen for the dedicated portrait cover only. Prepare one source-true original-photo layout per spread for the approximately 1.62:1 stage without reillustrating people or changing photo geometry beyond the authorised policy."]
+      : photoLed
+        ? ["- Use source photos as references and story truth. Do not use a raw uploaded photo as finished interior or right-page artwork unless the user explicitly requested a literal photo album."]
+        : []),
     ...(bookType === "preserved-photo-album"
       ? [`Required asset counts: generated cover count ${generatedCoverCount}; generated full-spread count 0; preserved original-photo layout count ${preservedPhotoSpreadCount}; provenance entries ${provenanceEntryCount}.`]
       : [`Required generated-art counts: generated cover count ${generatedCoverCount}; generated full-spread count ${generatedFullSpreadCount}; provenance entries ${provenanceEntryCount}.`]),
     "",
     renderSourceAssets(sourceAssets),
     "",
-    "Phase 2 — only after the complete asset plan and final asset set exist, lay the book out through Site Tools:",
-    "- Call get_project_context(detail: \"creation-readiness\") again with the completed brief. Continue only when ready is true.",
-    "- Need a reference photo from me? Call request_image_handoff with assetUse source-photo and a plain-language reason.",
-    "- Need to transfer generated cover, spread, clean-plate, or cutout finals? Call request_image_handoff with assetUse book-art. Those assets stay out of the next source-photo brief.",
-    "- Refresh get_project_context(detail: \"assets\") and continue only when every cover, background, composite, cutout, and frame id in the plan exists in the browser registry.",
-    `- Deduplicate the browser-local reader-visible cover, resolved final base per spread, rendered layers, and frame ids. At most ${MAX_BOOK_PUBLISHABLE_ASSETS} may be uploaded. Author-only source and personal-photo provenance stays private and is excluded unless it is also selected for rendering.`,
-    "- Create one new independent book with a single manage_book create call; never overwrite a curated sample. Pass the same creationBrief, coverAssetId, and every complete spread manifest.",
+    "Phase 2 — after I say continue, generate everything, then lay the book out in two page calls:",
+    "- Do not call the page until every image exists. Generate in two concurrent ImageGen rounds: the portrait cover together with one 2×2 sheet per four spreads, then the matching 2×2 clean-plate sheet together with the 2×2 cutout sheet on a flat solid magenta backdrop. Compose every quadrant for the approximately 1.62:1 stage as purpose-built full-spread artwork; the page crops, splits, and upscales the tiles, so never resize, reformat, or inspect pixels locally.",
+    `- Transfer every final in one request_image_handoff(assetUse: \"book-art\") with an images array of base64 data URLs (WebP, quality about 85, under 3 MB each; split: true on every sheet, key: true on the cutout sheet; call timeout about 180 s). The result carries every asset id, size, hasMeaningfulAlpha, and heightAtScale1, so go straight to create. Only if inline bytes are impossible, call without images, open work/final-assets in my file manager, ask me to drag its files onto the visible drop target once, then refresh get_project_context(detail: \"assets\").`,
     interactionTarget.maximum === 0
-      ? "- Each spread manifest must use an empty layers array. Do not invent floating cutouts or interactions when interactionDensity is none."
-      : `- Each spread manifest must include background.sourceAssetId, background.cleanPlateAssetId, the book-type separation, personalSourceAssetId when declared, and ${interactionTarget.count} native-alpha interactive ${interactionTarget.maximum === 1 ? "layer" : "layers"}. Use only story-relevant subjects; do not pad the count with guessed decoration.`,
-    "- A text-only shell is not a book. If any prepared asset is missing, do not create; finish or hand off the asset set first. Use set-cover and apply_scene_patch only for later critique fixes.",
-    "- Use the same requestId only for an exact unchanged request. If a successful mutation returns presentation status pending, retry the same requestId to confirm the frame. After any ok:false correction or payload or asset change, use a fresh requestId.",
-    "- Present the cover with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId). Normal navigation and screenshots are observation only and do not record revision-bound evidence.",
-    "- Optional polish: read get_project_context(detail: \"quality-review\"), call manage_book(action: \"begin-critique\"), inspect the actual frames, and record visual criteria with action record-critique.",
-    "- If running quality review and no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and one evidence item with scope: \"book\" and locator: \"creationBrief.sourceAssets\", explaining that no personal source material exists. When any spread declares one, record per-spread evidence.",
-    "- Quality review is optional and advisory. Apply useful patches at most once; never delay or block a user-requested share.",
-    "- Verify all spreads against the completion gates.",
-    "Transfer images inline: call request_image_handoff with the correct assetUse and an images array of base64 data URLs (PNG/JPEG/WebP, under 12 MB each). Give every sheet split: true and the cutout sheet key: true (draw cutouts on a flat solid magenta backdrop; the page keys it out); the page stores its four tiles in reading order, upscales them to at least 1024×632, and returns the asset ids, sizes, hasMeaningfulAlpha, and heightAtScale1 in the result, so no assets refresh is needed. Compress before sending: convert each final to WebP (quality about 85, alpha kept) under 3 MB, then base64 it. Send every final in one call with a long call timeout (about 180 s). Only if inline bytes are impossible, call without images: it opens the drawer and drop target and returns immediately; then use Computer Use or a browser file chooser, or open the actual asset directory in my file manager (normally work/final-assets) and ask me to drag its files onto the visible target once. Then refresh get_project_context(detail: \"assets\"). Do not pretend a media transfer succeeded.",
+      ? "- Then a single manage_book create call with the same creationBrief, coverAssetId, and every spread's background.sourceAssetId, background.cleanPlateAssetId, the book-type separation, and personalSourceAssetId when declared; each spread manifest must use an empty layers array. Never overwrite a curated sample; a text-only shell is not a book."
+      : `- Then a single manage_book create call with the same creationBrief, coverAssetId, and every spread's background.sourceAssetId, background.cleanPlateAssetId, the book-type separation, personalSourceAssetId when declared, and ${interactionTarget.count} native-alpha interactive ${interactionTarget.maximum === 1 ? "layer" : "layers"} placed from the storyboard (story-relevant subjects only). At most ${MAX_BOOK_PUBLISHABLE_ASSETS} reader-visible assets. Never overwrite a curated sample; a text-only shell is not a book.`,
+    "- Present the cover with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId), then report. Use the same requestId only for an exact retry or a successful mutation with presentation status pending; after any ok:false correction use a fresh requestId.",
+    "- Optional polish: get_project_context(detail: \"quality-review\"), manage_book(action: \"begin-critique\"), inspect the actual frames, record-critique; at most two rounds, never block a share.",
     "",
     "Completion gates:",
     renderGates(gates),

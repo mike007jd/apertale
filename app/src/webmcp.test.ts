@@ -1469,9 +1469,9 @@ describe("WebMCP registration", () => {
     expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "photo-truth").rule).toMatch(
       /raw uploaded photo/,
     );
-    expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "imagegen-before-create").rule)
-      .toMatch(/before manage_book create/);
-    expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "handoff-before-refer").rule)
+    expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "art").rule)
+      .toMatch(/before any page call/);
+    expect(guideResult.authoringGuide.hardGates.find((gate: { id: string }) => gate.id === "handoff-create").rule)
       .toMatch(/assetUse book-art/);
     expect(guideResult.authoringGuide.phases[0].mutationAllowed).toBe(false);
     expect(guideResult.authoringGuide.phases[1].sequence).toEqual(["handoff", "create", "verify"]);

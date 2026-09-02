@@ -18,7 +18,7 @@ describe("site-native authoring guide contract", () => {
   it("returns a machine-readable quality contract that mirrors the two-phase skill and creation brief", () => {
     const guide = buildAuthoringGuide();
     expect(guide.id).toBe("apertale-authoring-guide");
-    expect(guide.version).toBe(4);
+    expect(guide.version).toBe(5);
     expect(guide.skillMirror).toBe("apertale-authoring");
     expect(guide.contract).toBe("two-phase");
     expect(guide.tools).toEqual([...SITE_TOOL_NAMES]);
@@ -54,10 +54,10 @@ describe("site-native authoring guide contract", () => {
     expect(artGate).toContain("For preserved-photo-album");
     expect(artGate).toContain("without reillustrating people");
     expect(guide.report.join(" ")).toContain("preserved original-photo layout count");
-    expect(guide.report.join(" ")).toContain("source-true layouts for preserved-photo-album");
-    expect(guide.report.join(" ")).toContain("optional quality-review");
+    expect(guide.report.join(" ")).toContain("reference or preserved layout");
+    expect(guide.report.join(" ")).toContain("undo token");
     expect(guide.report.join(" ")).not.toContain("publishAllowed");
-    expect(guide.verify.join(" ")).toMatch(/actual cover\/spread frames inspected/i);
+    expect(guide.verify.join(" ")).toMatch(/set_presentation\(surface: "shelf"\)/);
   });
 
   it("assesses storybook, photo keepsake, and preserved-album readiness from one versioned contract", () => {
@@ -218,45 +218,42 @@ describe("site-native authoring guide contract", () => {
   it("encodes the hard authoring gates any Site Tools conversation must obey", () => {
     const guide = buildAuthoringGuide();
     const byId = Object.fromEntries(guide.hardGates.map((gate) => [gate.id, gate.rule]));
-    expect(guide.hardGates.map((gate) => gate.id)).toEqual(["inspect", "story", "plan-art", "readiness-before-create", "imagegen-before-create", "photo-truth", "handoff-before-refer", "layout", "interaction", "cutouts", "provenance-revision", "verify"]);
+    expect(guide.hardGates.map((gate) => gate.id)).toEqual(["story", "storyboard", "art", "photo-truth", "handoff-create", "interaction", "present"]);
 
-    expect(byId.inspect).toMatch(/Inspect source assets and the user prompt/i);
-    expect(byId.story).toMatch(/coherent complete story arc/i);
-    expect(byId["plan-art"]).toMatch(/one dedicated portrait cover/i);
-    expect(byId["plan-art"]).toMatch(/that spread alone/);
-    expect(byId["plan-art"]).toMatch(/approximately 1\.62:1 stage per spread/i);
-    expect(byId["plan-art"]).toMatch(/1\.45–2\.10 is only the compatible input range/i);
-    expect(byId["plan-art"]).toMatch(/preserve source-photo geometry/i);
-    expect(byId["imagegen-before-create"]).toMatch(/host ImageGen/i);
-    expect(byId["imagegen-before-create"]).toMatch(/before manage_book create/i);
-    expect(byId["imagegen-before-create"]).toMatch(/do not reillustrate preserved-photo-album/i);
-    expect(byId["photo-truth"]).toBe(guide.gates.find((gate) => gate.id === "photo-truth")?.requirement);
+    expect(byId.story).toMatch(/Inspect source assets and the user prompt.*complete story arc.*character bible/i);
+    expect(byId.storyboard).toMatch(/one dedicated portrait cover/i);
+    expect(byId.storyboard).toMatch(/approximately 1\.62:1 stage per spread/i);
+    expect(byId.storyboard).toMatch(/1\.45–2\.10 is only the compatible input range/i);
+    expect(byId.storyboard).toMatch(/14–24 marks.*back to front.*at most 6 of them labelled/);
+    expect(byId.storyboard).toMatch(/at least 0\.3 of the spread height/);
+    expect(byId.storyboard).toMatch(/end the turn and ask the reader/);
+    expect(byId.storyboard).toMatch(/that spread alone/);
+    expect(byId.storyboard).toMatch(/preserve source-photo geometry/i);
+    expect(byId.art).toMatch(/generate every final before any page call/i);
+    expect(byId.art).toMatch(/two concurrent ImageGen rounds/);
+    expect(byId.art).toMatch(/2×2 sheet per four consecutive spreads/);
+    expect(byId.art).toMatch(/magenta backdrop/);
+    expect(byId.art).toMatch(/never ask ImageGen for transparency/i);
+    expect(byId.art).toMatch(/upscaled to at least 1024×632/);
+    expect(byId.art).toMatch(/never resize, reformat, or inspect pixels locally/);
+    expect(byId.art).toMatch(/do not reillustrate preserved-photo-album/i);
     expect(byId["photo-truth"]).toMatch(/raw uploaded photo/i);
     expect(byId["photo-truth"]).toMatch(/finished interior/i);
     expect(byId["photo-truth"]).toMatch(/literal photo album/i);
-    expect(byId["handoff-before-refer"]).toMatch(/assetUse source-photo/i);
-    expect(byId.layout).toMatch(/at or below 50/i);
-    expect(guide.revisions).toMatch(/presentation pending.*same requestId/i);
-    expect(byId["handoff-before-refer"]).toMatch(/assetUse book-art/i);
-    expect(byId["handoff-before-refer"]).toMatch(/no assets refresh is needed/i);
-    expect(byId.layout).toMatch(/atomically create with coverAssetId/i);
-    expect(byId.layout).toMatch(/text-only shell/i);
+    expect(byId["handoff-create"]).toMatch(/one request_image_handoff with assetUse book-art/i);
+    expect(byId["handoff-create"]).toMatch(/assetUse source-photo/i);
+    expect(byId["handoff-create"]).toMatch(/split: true on every sheet and key: true on the cutout sheet/);
+    expect(byId["handoff-create"]).toMatch(/heightAtScale1.*call manage_book create next without any other read/);
+    expect(byId["handoff-create"]).toMatch(/at or below 50/i);
+    expect(byId["handoff-create"]).toMatch(/scaleX = scaleY = the ellipse height ÷ the asset's heightAtScale1/);
+    expect(byId["handoff-create"]).toMatch(/expectedRevision/);
+    expect(byId["handoff-create"]).toMatch(/ok:false correction use a fresh one/i);
+    expect(byId["handoff-create"]).toMatch(/text-only shell/i);
     expect(byId.interaction).toMatch(/spread-specific/i);
-    expect(byId.cutouts).toMatch(/native transparent cutouts/i);
-    expect(byId["provenance-revision"]).toMatch(/provenance/i);
-    expect(byId["provenance-revision"]).toMatch(/expectedRevision/i);
-    expect(byId["provenance-revision"]).toMatch(/source composite and clean plate as generated.*never resize/i);
-    expect(byId["provenance-revision"]).toMatch(/ok:false correction.*fresh requestId/i);
-    expect(byId.verify).toMatch(/Verify content, book-type-specific asset counts, spread-specific interaction/i);
-    expect(byId.verify).toContain('set_presentation(surface: "shelf")');
-    expect(byId.verify).toContain('set_presentation(surface: "reader", spreadId)');
-    expect(byId.verify).toMatch(/normal navigation and screenshots.*do not record revision-bound evidence/i);
-    expect(byId.verify).toContain('photo-fidelity-integration with outcome: "note"');
-    expect(byId.verify).toContain('scope: "book" and locator: "creationBrief.sourceAssets"');
-    expect(byId.verify).toMatch(/personalSourceAssetId.*per-spread evidence/i);
-    expect(byId.verify).toMatch(/patch and re-check at most twice/i);
-    expect(guide.revisions).toMatch(/exact unchanged request/i);
-    expect(guide.revisions).toMatch(/ok:false correction.*fresh requestId/i);
+    expect(byId.present).toContain('set_presentation(surface: "shelf")');
+    expect(byId.present).toContain('set_presentation(surface: "reader", spreadId)');
+    expect(byId.present).toMatch(/at most two rounds/i);
+    expect(byId.present).toMatch(/never delay or block a user-requested share/i);
 
     expect(guide.interaction.required).toMatch(/spread-specific/i);
     expect(guide.interaction.hover).toEqual(HOVER_RESPONSES);
@@ -266,23 +263,13 @@ describe("site-native authoring guide contract", () => {
     expect(guide.cutouts.nativeAlpha).toBe(true);
     expect(guide.cutouts.oneSubjectPerAsset).toBe(true);
     expect(guide.cutouts.sheet).toMatch(/2x2/);
-    expect(byId["imagegen-before-create"]).toMatch(/2×2 sheet per four consecutive spreads/);
-    expect(byId["plan-art"]).toMatch(/14–24 marks.*back to front.*at most 6 of them labelled/);
-    expect(byId["plan-art"]).toMatch(/at least 0\.3 of the spread height/);
-    expect(byId["imagegen-before-create"]).toMatch(/upscaled to at least 1024×632/);
-    expect(byId["plan-art"]).toMatch(/end the turn and ask the reader/);
-    expect(byId.cutouts).toMatch(/magenta backdrop.*split and key/);
-    expect(byId["handoff-before-refer"]).toMatch(/images argument.*split: true/);
-    expect(byId["handoff-before-refer"]).toMatch(/heightAtScale1.*no assets refresh/);
-    expect(byId["layout"]).toMatch(/scaleX = scaleY = the ellipse height ÷ the asset's heightAtScale1/);
     expect(guide.verify).toEqual(expect.arrayContaining([
       expect.stringMatching(/content/i),
       expect.stringMatching(/asset counts/i),
-      expect.stringMatching(/interaction/i),
-      expect.stringMatching(/undo evidence/i),
       expect.stringMatching(/set_presentation\(surface: "shelf"\)/i),
-      expect.stringMatching(/creationBrief\.sourceAssets/i),
     ]));
+    // The whole guide has to stay small enough that the Agent acts instead of narrating it.
+    expect(JSON.stringify(guide).length).toBeLessThan(10000);
   });
 
   it("cannot silently drift from the creationBrief two-phase gates", () => {
