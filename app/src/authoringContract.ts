@@ -275,6 +275,7 @@ export const AUTHORING_HARD_GATE_IDS = [
   "inspect",
   "story",
   "plan-art",
+  "readiness-before-create",
   "imagegen-before-create",
   "photo-truth",
   "handoff-before-refer",
@@ -405,6 +406,10 @@ export function authoringHardGates(): AuthoringHardGate[] {
     {
       id: "plan-art",
       rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Before final art, call sketch_storyboard action replace so the complete rough book appears on the blank 3D pages: per spread a caption plus labelled rect/ellipse regions, arrows and short text in spread coordinates. Read the reader's red marks from compact project context (each carries page, loop-or-stroke, bounds, and the labels it touches; full geometry only under detail storyboard) and update only marked spreads, clearing applied marks through resolvedAnnotations with the storyboard revision you read. Generate illustrated compositions after that visible plan; preserve source-photo geometry for preserved-photo-album.",
+    },
+    {
+      id: "readiness-before-create",
+      rule: "Read get_project_context(detail: creation-readiness) with the structured brief, ask every returned blocking question, and re-check until ready: true. Pass that exact brief to manage_book create, which reruns the same gate and fails closed when assets are incomplete. A legacy personal book without a stored brief uses manage_book adopt-creation-brief once at the inspected revision; samples cannot be reclassified.",
     },
     {
       id: "imagegen-before-create",

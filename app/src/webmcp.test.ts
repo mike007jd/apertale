@@ -230,7 +230,9 @@ describe("WebMCP registration", () => {
     expect(tools.map((tool) => tool.name)).toEqual([...SITE_TOOL_NAMES]);
     for (const registeredTool of tools) {
       expect(registeredTool.name.length).toBeLessThanOrEqual(30);
-      expect(registeredTool.description.length).toBeLessThanOrEqual(500);
+      // The host address bar shows each description as one line: a capability
+      // sentence, not the workflow, which lives in the authoring guide.
+      expect(registeredTool.description.length).toBeLessThanOrEqual(160);
       expect(registeredTool.annotations).toEqual({
         readOnlyHint: registeredTool.name === "get_project_context",
         untrustedContentHint: registeredTool.name !== "set_presentation",
@@ -292,17 +294,16 @@ describe("WebMCP registration", () => {
     expect(spreadSchema?.properties?.layers?.items?.required).toEqual(["id", "label", "assetId", "page"]);
     expect(spreadSchema?.properties?.layers?.items?.properties?.id?.pattern).toBe("^[a-z0-9][a-z0-9-]{0,63}$");
     expect(handoffSchema.required).toEqual(["requestId", "assetUse", "reason"]);
-    expect(tool("get_project_context").description).toContain("authoring-guide");
-    expect(tool("get_project_context").description).toContain("creation-readiness");
-    expect(tool("get_project_context").description).toContain("ask every returned blocking question");
-    expect(tool("manage_book").description).toContain("exact brief");
-    expect(tool("manage_book").description).toContain("do not mutate");
-    expect(tool("manage_book").description).toContain("preserved-photo-album");
-    expect(tool("manage_book").description).toContain("record critique");
-    expect(tool("manage_book").description).toContain("adopt-creation-brief");
-    expect(tool("get_project_context").description).toContain("quality-review");
-    expect(tool("apply_scene_patch").description).toContain("original composite reference");
-    expect(tool("apply_scene_patch").description).toContain("personalSourceAssetId");
+    expect(tool("get_project_context").description).toContain("red storyboard marks");
+    expect((tool("get_project_context").inputSchema as TestSchema).properties?.detail?.description).toContain("creation-readiness before create");
+    expect(tool("manage_book").description).toContain("verified local assets");
+    expect(tool("apply_scene_patch").description).toContain("URLs rejected");
+    expect(tool("set_presentation").description).toContain("without changing the document revision");
+    expect(tool("sketch_storyboard").description).toContain("marked in red");
+    const guideRules = buildAuthoringGuide().hardGates.map((gate) => gate.rule).join("\n");
+    for (const moved of ["creation-readiness", "blocking question", "adopt-creation-brief", "personalSourceAssetId", "resolvedAnnotations", "presentation pending"]) {
+      expect(guideRules, moved).toContain(moved);
+    }
 
     bookEngine.setSelection("bird");
     const contextResult = await tool("get_project_context").execute({}, { signal: new AbortController().signal });

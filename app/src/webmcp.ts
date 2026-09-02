@@ -720,14 +720,14 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.context,
         title: "Get project context",
-        description: "Inspect Apertale. Create flow: authoring-guide → creation-readiness → ask every returned blocking question → create with the same brief. After rendering, quality-review can guide up to two polish rounds; it never blocks sharing.",
+        description: "Read the live book: ids, revision, spreads, elements, local assets, and the reader's red storyboard marks. detail adds readiness, guide, or quality review.",
         inputSchema: {
           type: "object",
           properties: {
             detail: {
               type: "string",
               enum: [...PROJECT_CONTEXT_DETAILS],
-              description: "Use creation-readiness before create; quality-review after real rendering; assets lists imports; storyboard returns full sketch strokes.",
+              description: "compact by default; creation-readiness before create, quality-review after rendering, assets for imports, storyboard for full strokes.",
             },
             creationBrief: creationBriefSchema,
           },
@@ -793,7 +793,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.manageBook,
         title: "Manage book",
-        description: "Open, atomically create a complete prepared book from the exact brief, adopt-creation-brief for one legacy book, set a cover, begin critique, or record critique. Create requires a verified cover, every spread's final base, and the layer count selected by creationBrief.interactionDensity, including preserved-photo-album layouts. If assets are incomplete, do not mutate or enter the shelf or reader. Critique is optional and never blocks sharing.",
+        description: "Open a book, or atomically create a complete one from a ready brief, a verified cover, and verified local assets; set a cover; run advisory critique.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1133,7 +1133,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.composeSpread,
         title: "Compose spread text",
-        description: "Rewrite the title, body, or kicker of one existing spread while preserving its imported assets and interactions. Use a spread id returned by get_project_context.",
+        description: "Rewrite one existing spread's title, kicker, or body, keeping its assets and interactions.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1167,7 +1167,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.applyScenePatch,
         title: "Apply atomic scene patch",
-        description: "Atomically set a full-spread original composite reference, its purpose-built clean plate or approved preserved-photo layout, and add, update, remove, or reorder up to 24 foreground layers. Keep personal photo provenance in personalSourceAssetId, separate from sourceAssetId. The stored ready brief fixes which treatment is allowed. Use validated assets only; arbitrary URLs and executable content are rejected.",
+        description: "Set a spread's composite and clean plate, then add, move, animate, or remove up to 24 layers in one undoable change. Verified local assets only; URLs rejected.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1293,7 +1293,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.setPresentation,
         title: "Set presentation",
-        description: "Switch Day/Night or Preview, or show the current shelf cover or one reader spread for rendered screenshot evidence, without changing document revision.",
+        description: "Turn to a spread, show the shelf cover, or switch Day/Night and Preview for screenshot evidence without changing the document revision.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1381,7 +1381,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.undoProjectChange,
         title: "Undo project change",
-        description: "Undo the exact reversible Apertale document change represented by an undo token while preserving non-overlapping later edits.",
+        description: "Undo one exact change by its undo token; later non-overlapping edits survive.",
         inputSchema: {
           type: "object",
           properties: { ...requiredMutation, undoToken: { type: "string", description: "Token returned by the mutation to undo." } },
@@ -1406,7 +1406,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.storyboard,
         title: "Sketch storyboards",
-        description: "Draw the rough pencil storyboard on the blank 3D book with labelled boxes, ellipses, arrows and text. Replace once for the whole plan; after reading the reader's red marks (each reports its page, whether it loops, and which labels it touches), update only marked spreads and clear applied marks. Never waits for review.",
+        description: "Draw a labelled pencil storyboard on the blank 3D book, then revise only the spreads the reader marked in red and clear the applied marks.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1469,8 +1469,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.requestImageHandoff,
         title: "Request an image handoff",
-        description:
-          "Open the matching image drawer and drop target, then return immediately. Check your own available tools: use Computer Use or a browser file chooser when present. Otherwise open the local asset folder and ask the reader to drag its files into the page once. Source photos join the next creation brief; book art only joins the reusable asset registry.",
+        description: "Open the drop target for source photos or generated book art and return at once; the reader or your own file tools supply the files.",
         inputSchema: {
           type: "object",
           properties: {
