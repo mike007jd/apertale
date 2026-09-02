@@ -62,6 +62,9 @@ are derived from the actual source list rather than trusted book-type labels.
 The Creation workshop session decides the book type and photo policy once,
 from the chosen photo use; the brief builder validates that decision against
 the supported book types and renders it instead of inferring it a second time.
+One shared predicate decides whether a source asset entry is well formed; the
+brief builder turns a rejection into a thrown error while readiness turns the
+same rejection into a soft blocker, so the two keep their own control flow.
 
 ## Authoring presentation protocol
 

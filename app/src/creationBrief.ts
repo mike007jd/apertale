@@ -5,6 +5,7 @@ import {
   MAX_BOOK_PUBLISHABLE_ASSETS,
   REQUIRED_GATE_IDS,
   assessCreationReadiness,
+  checkSourceAsset,
   creationCompletionGates,
   supportedBookType,
   creationReportRequirements,
@@ -59,11 +60,13 @@ function normalizeSourceAssets(raw: CreationBriefInput["sourceAssets"]): Creatio
   if (raw.length > CREATION_SOURCE_ASSET_LIMIT) invalid(`sourceAssets must contain at most ${CREATION_SOURCE_ASSET_LIMIT} items.`);
   const seen = new Set<string>();
   return raw.map((asset, index) => {
-    if (!asset || typeof asset !== "object") invalid(`sourceAssets[${index}] must be an object.`);
-    const id = typeof asset.id === "string" ? asset.id.trim() : "";
-    const name = typeof asset.name === "string" ? asset.name.trim() : "";
-    if (!id) invalid(`sourceAssets[${index}].id must be a non-empty stable asset id.`);
-    if (!name) invalid(`sourceAssets[${index}].name must be a non-empty user-visible name.`);
+    const checked = checkSourceAsset(asset);
+    if (!checked.ok) {
+      if (checked.reason === "shape") invalid(`sourceAssets[${index}] must be an object.`);
+      if (checked.reason === "id") invalid(`sourceAssets[${index}].id must be a non-empty stable asset id.`);
+      invalid(`sourceAssets[${index}].name must be a non-empty user-visible name.`);
+    }
+    const { id, name } = checked.asset;
     if (/^https?:\/\//i.test(id) || /^https?:\/\//i.test(name)) invalid(`sourceAssets[${index}] must not use a remote URL.`);
     if (seen.has(id)) invalid(`sourceAssets[${index}].id must be unique.`);
     seen.add(id);

@@ -100,14 +100,30 @@ function supportedSourceUse(value: unknown): value is PhotoSourceUse {
   return typeof value === "string" && (PHOTO_SOURCE_USES as readonly string[]).includes(value);
 }
 
+export type SourceAssetRejection = "shape" | "id" | "name";
+
+/**
+ * Shared shape rule for one brief source asset. The caller decides what a
+ * rejection means: `buildCreationBrief` throws, readiness collects a blocker.
+ */
+export function checkSourceAsset(
+  value: unknown,
+): { ok: true; asset: CreationSourceAsset } | { ok: false; reason: SourceAssetRejection } {
+  if (!value || typeof value !== "object") return { ok: false, reason: "shape" };
+  const { id, name } = value as Partial<CreationSourceAsset>;
+  const trimmedId = briefString(id);
+  if (!trimmedId) return { ok: false, reason: "id" };
+  const trimmedName = briefString(name);
+  if (!trimmedName) return { ok: false, reason: "name" };
+  return { ok: true, asset: { id: trimmedId, name: trimmedName } };
+}
+
 function briefAssets(input: CreationBriefPayload | undefined): CreationSourceAsset[] {
   if (!Array.isArray(input?.sourceAssets)) return [];
-  return input.sourceAssets.filter((asset): asset is CreationSourceAsset => Boolean(
-    asset
-    && typeof asset === "object"
-    && briefString(asset.id)
-    && briefString(asset.name),
-  )).map((asset) => ({ id: asset.id.trim(), name: asset.name.trim() }));
+  return input.sourceAssets.flatMap((asset) => {
+    const checked = checkSourceAsset(asset);
+    return checked.ok ? [checked.asset] : [];
+  });
 }
 
 export function creationBriefSourceAssetIds(input: CreationBriefPayload | undefined): string[] {
