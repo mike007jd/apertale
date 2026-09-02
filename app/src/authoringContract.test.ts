@@ -266,7 +266,7 @@ describe("site-native authoring guide contract", () => {
     expect(guide.cutouts.oneSubjectPerAsset).toBe(true);
     expect(guide.cutouts.sheet).toMatch(/2x2/);
     expect(byId["imagegen-before-create"]).toMatch(/2×2 sheet per four consecutive spreads/);
-    expect(byId["plan-art"]).toMatch(/16–30 marks.*back to front/);
+    expect(byId["plan-art"]).toMatch(/14–24 marks.*back to front.*at most 6 of them labelled/);
     expect(byId["plan-art"]).toMatch(/at least 0\.3 of the spread height/);
     expect(byId["imagegen-before-create"]).toMatch(/2048×1264/);
     expect(byId["handoff-before-refer"]).toMatch(/images argument.*split: true/);

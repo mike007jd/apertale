@@ -130,6 +130,20 @@ describe("paintWorkshopDrawing", () => {
     expect(half.strokes[0].color).not.toBe(LIGHT);
   });
 
+  it("draws an unlabelled ellipse once, thin and soft, and a labelled one as a hatched subject", () => {
+    const { strokes, pair } = recordingCanvas();
+    paintWorkshopDrawing(pair, spread([
+      { kind: "ellipse", x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+      { kind: "ellipse", x: 0.5, y: 0.1, w: 0.2, h: 0.2, label: "sun" },
+    ]), [], 1);
+    expect(strokes.map((item) => [item.width, item.color === "rgba(64, 58, 50, .55)"])).toEqual([[4, true], [6.5, false], [4, false], [4, false]]);
+
+    const lines = recordingCanvas();
+    paintWorkshopDrawing(lines.pair, spread([line(4), { ...line(4), label: "kite" }]), [], 1);
+    // A bare line is a horizon or a limb; a labelled line is a drawn subject.
+    expect(lines.strokes.map((item) => [item.width, item.color === "rgba(64, 58, 50, .55)"])).toEqual([[4, true], [4.5, false]]);
+  });
+
   it("writes shape labels inside the shape: rect top-left, ellipse centre", () => {
     const { positions, pair } = recordingCanvas();
     paintWorkshopDrawing(pair, spread([
@@ -190,8 +204,9 @@ describe("paintWorkshopDrawing", () => {
     paintWorkshopDrawing(pair, spread(marks), [], 1);
     expect(getSketchImageVersion()).toBe(before);
     expect(drawn).toEqual([]);
-    // Two paints × (outline + lighter second pass).
-    expect(strokes).toHaveLength(4);
+    // An unlabelled box is construction: one soft pass per paint, no overdraw.
+    expect(strokes).toHaveLength(2);
+    expect(strokes[0].color).toBe("rgba(64, 58, 50, .55)");
   });
 
   it("fades the finished plan over the loaded overlay and leaves the overlay alone at alpha 0", () => {

@@ -27,6 +27,7 @@ const PENCIL_DARK = "rgba(38, 34, 30, .95)";
 const PENCIL_ERASER = "#d8615a";
 const RED_PENCIL = "rgba(230, 74, 61, .94)";
 const PENCIL_LIGHT = "rgba(64, 58, 50, .36)";
+const PENCIL_SOFT = "rgba(64, 58, 50, .55)";
 /** Construction lines thin, subjects heavy; a shape's second pass and hatching thinner still. */
 const MARK_WIDTH = { line: 4.5, arrow: 5.5, rect: 6.5, ellipse: 6.5, label: 6.5 } as const;
 const HAND_FONT = "\"Marker Felt\", \"Chalkboard SE\", \"Bradley Hand\", \"Segoe Print\", \"Comic Sans MS\", cursive";
@@ -145,13 +146,16 @@ function paintMark(context: CanvasRenderingContext2D, mark: StoryboardMark, widt
     context.drawImage(ghost, crop.x, crop.y, crop.width, crop.height, l, t, w, h);
     context.restore();
   }
-  context.strokeStyle = PENCIL;
-  context.lineWidth = MARK_WIDTH[mark.kind];
+  // An unlabelled mark is construction (a horizon, a cloud, a limb, a head): thin, soft, drawn once.
+  // A labelled one, or the action arrow, is a subject the reader may mark: full weight, a second pass, hatching.
+  const subject = Boolean(mark.label) || mark.kind === "arrow";
+  context.strokeStyle = subject ? PENCIL : PENCIL_SOFT;
+  context.lineWidth = subject ? MARK_WIDTH[mark.kind] : 4;
   const tip = tracePath(context, path, progress, seed);
   if (progress < 1) return tip;
   if (mark.kind === "arrow") paintArrowHead(context, path[1], path[2]);
-  if (mark.kind === "rect" || mark.kind === "ellipse") {
-    // A rough goes round twice: a lighter pass with its own wobble, then hatching on a mass's shadow side.
+  if ((mark.kind === "rect" || mark.kind === "ellipse") && mark.label) {
+    // A rough goes round its subjects twice: a lighter pass with its own wobble, then hatching on a mass's shadow side.
     // ponytail: every ellipse is hatched bottom-right; add an optional shade field if the Agent needs control.
     context.strokeStyle = PENCIL_LIGHT;
     context.lineWidth = 4;

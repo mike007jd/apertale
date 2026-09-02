@@ -540,7 +540,7 @@ const storyboardSpreadSchema = {
       type: "array",
       maxItems: MAX_MARKS_PER_SPREAD,
       items: storyboardMarkSchema,
-      description: "16–30 marks back to front: horizon, contours, background masses, props, characters as head + body ellipses with limbs, motion lines, arrow, text rect.",
+      description: "14–24 marks back to front: horizon, contours, masses, props, characters as head + body ellipses with limbs, motion lines, arrow, text rect; label ≤ 6.",
     },
   },
   required: ["index", "marks"],
@@ -1437,7 +1437,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.storyboard,
         title: "Sketch storyboards",
-        description: "Pencil an illustrator's thumbnail per spread (16–30 marks, back to front) on the blank 3D book, then revise only the spreads the reader marked in red.",
+        description: "Pencil an illustrator's thumbnail per spread (14–24 marks, at most 6 labelled) on the blank 3D book, then revise only the spreads the reader marked in red.",
         inputSchema: {
           type: "object",
           properties: {
