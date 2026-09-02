@@ -59,6 +59,16 @@ needs, and photo/identity boundaries. Both context inspection and the create
 command consume the same assessment; source-asset existence and identity risk
 are derived from the actual source list rather than trusted book-type labels.
 
+## Authoring presentation protocol
+
+The Authoring presentation protocol owns one request at a time to show an exact
+frame and prove it was shown. It holds the pending request and its render
+evidence token, decides readiness from a whole pushed observation of the
+surface, records the visible frame as revision-bound render evidence, and
+settles the calling Site Tool within a bounded timeout. The Reader shell and
+the WebMCP tool catalog are Adapters: they push observations and perform the
+view changes the protocol asks for, and never re-implement the readiness rule.
+
 ## Authoring quality lifecycle
 
 The Authoring quality lifecycle is browser-local workflow state beside a

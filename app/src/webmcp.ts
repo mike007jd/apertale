@@ -14,7 +14,7 @@ import {
 } from "./bookAssetContract";
 import { isStoredAssetId } from "./assetId";
 import { IMAGE_HANDOFF_ASSET_USES, dismissImageHandoff, requestImageHandoff } from "./imageHandoff";
-import type { AuthoringSurfaceRequest } from "./authoringSurface";
+import type { AuthoringSurfaceRequest } from "./authoringPresentation";
 import { recordDiagnostic } from "./diagnostics";
 import {
   BOOK_ELEMENT_GRAMMAR,
