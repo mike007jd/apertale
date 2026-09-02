@@ -24,7 +24,7 @@ export type AuthoringMode = (typeof AUTHORING_MODES)[number];
 
 const CREATION_SPREAD_COUNT_MIN = 1;
 const CREATION_SPREAD_COUNT_MAX = MAX_BOOK_SPREADS;
-const CREATION_SOURCE_ASSET_LIMIT = 24;
+export const CREATION_SOURCE_ASSET_LIMIT = 24;
 
 export type CreationBriefInput = {
   mode: AuthoringMode;
