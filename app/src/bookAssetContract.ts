@@ -75,7 +75,7 @@ function dimensions(asset: StoredAssetMetadata | undefined, label: string, issue
 function assetUseIssues(
   assetIds: readonly string[],
   metadata: readonly StoredAssetMetadata[],
-  allowedUses: ReadonlySet<NonNullable<StoredAssetMetadata["assetUse"]>>,
+  allowedUse: NonNullable<StoredAssetMetadata["assetUse"]>,
   label: string,
 ) {
   const byId = metadataMap(metadata);
@@ -86,15 +86,15 @@ function assetUseIssues(
     const itemLabel = assetIds.length === 1 ? label : `${label} ${index + 1}`;
     if (!asset.assetUse) {
       issues.push(`${itemLabel} was imported before asset roles were recorded; re-import it through the matching image handoff.`);
-    } else if (!allowedUses.has(asset.assetUse)) {
+    } else if (asset.assetUse !== allowedUse) {
       issues.push(`${itemLabel} was imported as ${asset.assetUse} and cannot be used in this book-art role.`);
     }
   });
   return issues;
 }
 
-const BOOK_ART_USE = new Set(["book-art"] as const);
-const SOURCE_PHOTO_USE = new Set(["source-photo"] as const);
+const BOOK_ART_USE = "book-art";
+const SOURCE_PHOTO_USE = "source-photo";
 
 export function sourcePhotoAssetRoleIssues(
   assetIds: readonly string[],

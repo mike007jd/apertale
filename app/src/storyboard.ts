@@ -12,7 +12,7 @@
  */
 export type StoryboardPoint = { x: number; y: number };
 export type StoryboardStroke = { points: StoryboardPoint[] };
-export type StoryboardBox = { x: number; y: number; w: number; h: number };
+type StoryboardBox = { x: number; y: number; w: number; h: number };
 
 export type StoryboardMark =
   | { kind: "line"; points: StoryboardPoint[]; label?: string }
@@ -30,7 +30,7 @@ export type StoryboardSpread = {
   annotations: StoryboardStroke[];
 };
 
-export type StoryboardSnapshot = {
+type StoryboardSnapshot = {
   revision: number;
   spreads: StoryboardSpread[];
   /** Set once the plan became this book; the reader fades the sketch over its first spread, then the plan is reset. */
@@ -44,7 +44,7 @@ export type StoryboardSketchInput = {
 };
 
 /** A reader stroke as Codex reads it: where it is and what it points at. */
-export type AnnotationSummary = StoryboardStroke & {
+type AnnotationSummary = StoryboardStroke & {
   /** A closed loop encloses something; a stroke underlines, crosses, or points. */
   shape: "loop" | "stroke";
   page: "left" | "right" | "both";
@@ -157,7 +157,7 @@ const boundsOf = (points: readonly StoryboardPoint[]): StoryboardBox => {
 };
 
 /** Where a mark sits, for overlap tests and the compact summary. */
-export function markBox(mark: StoryboardMark): StoryboardBox {
+function markBox(mark: StoryboardMark): StoryboardBox {
   switch (mark.kind) {
     case "line": return boundsOf(mark.points);
     case "rect":

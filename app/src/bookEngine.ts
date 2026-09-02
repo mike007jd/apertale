@@ -255,7 +255,7 @@ type CoordinatedOpenResult =
       summary: string;
     };
 
-export type CoordinatedRemoveResult =
+type CoordinatedRemoveResult =
   | { ok: true; nextBookId: string; summary: string }
   | {
       ok: false;

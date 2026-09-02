@@ -23,7 +23,7 @@ export type BookPointerProps = {
   onAnnotationStroke?: (stroke: StoryboardStroke) => void;
 };
 
-export type BookPointerDeps = {
+type BookPointerDeps = {
   canvas: HTMLCanvasElement;
   camera: THREE.Camera;
   stageCamera: THREE.Camera;

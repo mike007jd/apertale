@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { DocumentState } from "./types";
+import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import {
+  MINIMUM_CAPABLE_BOOK_ASSETS,
+  QUALITY_CONTRACT_VERSION,
   QUALITY_REVIEW_MAX_ROUNDS,
   QUALITY_RUBRIC,
   QUALITY_VISUAL_CRITERION_IDS,
@@ -406,5 +409,15 @@ describe("quality blocker grouping", () => {
 
   it("survives a report that never arrived", () => {
     expect(groupQualityBlockers(undefined)).toEqual([]);
+  });
+});
+
+describe("quality rubric", () => {
+  it("stays aligned with the shipped contract constants", () => {
+    expect(QUALITY_RUBRIC.version).toBe(QUALITY_CONTRACT_VERSION);
+    expect(QUALITY_RUBRIC.maxReviewRounds).toBe(QUALITY_REVIEW_MAX_ROUNDS);
+    expect(QUALITY_RUBRIC.maxBookUploadedAssets).toBe(MAX_BOOK_PUBLISHABLE_ASSETS);
+    expect(Number.isInteger(MAX_BOOK_PUBLISHABLE_ASSETS)).toBe(true);
+    expect(MAX_BOOK_PUBLISHABLE_ASSETS).toBeGreaterThanOrEqual(MINIMUM_CAPABLE_BOOK_ASSETS);
   });
 });

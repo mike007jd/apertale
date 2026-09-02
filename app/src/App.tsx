@@ -27,10 +27,8 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
-import { deleteBookEverywhere } from "./bookLifecycle";
 import { acquireAssetPreviewUrl, acquireAssetUrl, releaseAssetUrls, storeLocalImages, type AssetUrlLease } from "./assetStore";
 import {
-  CREATION_INTERACTION_DENSITIES,
   INITIAL_CREATION_WORKSHOP,
   MAX_WORKSHOP_ASSETS,
   admitWorkshopAssets,
@@ -82,7 +80,7 @@ import { canTurnPage, createPageTurnSession, pageTurnNavDisabled, pageTurnWaitSt
 import { PublicationPanel, commitPublicationRecordIfCurrent, publicationLauncherPresentation, publicationRecordForDocument } from "./PublicationPanel";
 import { deletePublication, getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
-import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
+import { INTERACTION_DENSITIES, MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
 import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
 import { MAX_ANNOTATIONS_PER_SPREAD, addStoryboardAnnotation, clearStoryboardAnnotations, describeAnnotation, getStoryboardSnapshot, subscribeToStoryboard, undoStoryboardAnnotation } from "./storyboard";
@@ -117,7 +115,7 @@ const forcedOpenProgress = (() => {
 let threeBookRendererPromise: Promise<typeof import("./ThreeBook")> | null = null;
 
 /** Shares one retryable renderer import across React.lazy, idle warmup, and reader intent. */
-export function warmThreeBookRenderer() {
+function warmThreeBookRenderer() {
   if (!threeBookRendererPromise) {
     threeBookRendererPromise = import("./ThreeBook").catch((error) => {
       threeBookRendererPromise = null;
@@ -1632,7 +1630,7 @@ export function App() {
   const pickerReady = handoffIsBookArt || workshopHydrated;
   const pickerAtCapacity = !handoffIsBookArt && workshopAssets.length >= MAX_WORKSHOP_ASSETS;
   const creationBrief = useMemo(() => buildCreationWorkshopBrief(creationWorkshop), [creationWorkshop]);
-  const creationInteractionChoice = CREATION_INTERACTION_DENSITIES.find((choice) => choice.id === creationInteractionDensity)!;
+  const creationInteractionChoice = INTERACTION_DENSITIES.find((choice) => choice.id === creationInteractionDensity)!;
   const briefAssets = creationBrief.sourceAssets;
   const createPrompt = creationBrief.prompt;
   const copied = copiedPrompt === createPrompt;
@@ -1694,13 +1692,8 @@ export function App() {
 
     setDeletingBookId(action.book.id);
     try {
-      const hasPublication = Boolean(getPublicationRecord(action.book.id));
-      const result = await deleteBookEverywhere(
-        action.book.id,
-        hasPublication,
-        deletePublication,
-        (documentId) => bookEngine.removeBookCoordinated(documentId),
-      );
+      if (getPublicationRecord(action.book.id)) await deletePublication(action.book.id);
+      const result = await bookEngine.removeBookCoordinated(action.book.id);
       handlePublicationRecordChange(action.book.id, getPublicationRecord(action.book.id));
       if (!result.ok) {
         setPendingDestructiveAction((current) => current?.kind === "delete-book" && current.book.id === action.book.id

@@ -15,16 +15,6 @@ export function bookLifecycleLockManager() {
   return globalThis.navigator?.locks ?? null;
 }
 
-export async function deleteBookEverywhere<T>(
-  documentId: string,
-  hasPublication: boolean,
-  deletePublication: (id: string) => Promise<void>,
-  deleteLocalBook: (id: string) => Promise<T>,
-) {
-  if (hasPublication) await deletePublication(documentId);
-  return deleteLocalBook(documentId);
-}
-
 export function storedLibraryDocumentMatches(documentState: DocumentState) {
   try {
     const raw = localStorage.getItem(BOOK_LIBRARY_STORAGE_KEY);
