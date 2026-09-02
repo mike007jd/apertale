@@ -27,6 +27,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine";
+import { BOOK_ELEMENT_GRAMMAR } from "./bookElementGrammar";
 import { acquireAssetPreviewUrl, acquireAssetUrl, releaseAssetUrls, storeLocalImages, type AssetUrlLease } from "./assetStore";
 import {
   INITIAL_CREATION_WORKSHOP,
@@ -1373,7 +1374,8 @@ export function App() {
   const adjustSelected = (kind: "scale" | "rotate", amount: number) => {
     if (!selected || selected.locked) return;
     if (kind === "scale") {
-      const scale = Math.max(0.3, Math.min(1.8, selected.transform.scaleX + amount));
+      const { min, max } = BOOK_ELEMENT_GRAMMAR.transform.scaleX;
+      const scale = Math.max(min, Math.min(max, selected.transform.scaleX + amount));
       void humanEdit(selected.id, { scaleX: scale, scaleY: scale });
     } else void humanEdit(selected.id, { rotationDeg: selected.transform.rotationDeg + amount });
   };
