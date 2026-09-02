@@ -29,7 +29,7 @@ Creative direction begins as intent—"build a moonlit atlas from my travel phot
 - The Agent calls `sketch_storyboard` once for the whole plan. The blank 3D book draws the pencil marks in order while the person watches; the page reports "Codex sketched 4 spreads".
 - The person picks up the red pencil, circles the boat, and strikes through the lighthouse. No typing.
 - The Agent reads the marks back as "right page, loop around `boat`" and "left page, stroke across `lighthouse`", revises only that spread with the storyboard revision it read, and the page reports "Codex applied your marks on spread 2".
-- The Agent generates final art in the user's own conversation, hands it into the page through host media transfer or `request_image_handoff`, and creates the complete book atomically with `manage_book`.
+- The Agent generates final art in the user's own conversation as 2×2 sheets, hands every final into the page in one `request_image_handoff` call as inline WebP data URLs (the page splits each sheet into four tiles and trims cutouts to their subject), and creates the complete book atomically with `manage_book`.
 - The person drags a finished element by hand; the Agent inspects the new position and adds motion without moving it.
 - Exact undo removes the Agent's motion patch while the later human position remains.
 - Day/Night, Preview, and page navigation change presentation without touching the document revision, and the page narrates them as the Agent's actions.
@@ -88,7 +88,7 @@ Voice: "Codex did not receive forty coordinates. It received: right page, circle
 
 ### 1:30–1:55 — From pencil to book
 
-Codex generates the cover, spreads, and cutouts in the conversation, calls `request_image_handoff` with `assetUse: "book-art"`, and the drop target opens; add the files once. Codex calls `manage_book(action: "create")`. The pencil plan gives way to the finished book, and the reader opens on spread 1. Turn two pages, hover a cutout, click for the fact card.
+Codex generates the cover, spread sheets, and cutout sheets in the conversation and calls `request_image_handoff` once with `assetUse: "book-art"` and every final inline as WebP; the page stores the tiles and answers with their ids. Codex calls `manage_book(action: "create")`. The pencil plan gives way to the finished book, and the reader opens on spread 1. Turn two pages, hover a cutout, click for the fact card.
 
 Page evidence: image drawer; receipt "Codex created ‹title›"; "Codex turned to ‹spread›" as `set_presentation` walks the spreads.
 
