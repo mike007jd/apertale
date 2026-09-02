@@ -10,7 +10,7 @@ Run from `app/` against the exact judge-facing URL:
 npm run verify:deployment -- https://PUBLIC_APERTALE_URL/
 ```
 
-The command must return `ok: true`, the exact seven tool names, `Origin-Agent-Cluster: ?1`, `Permissions-Policy: tools=(self)`, and `hostLoop: required`. A 401, redirect to private sign-in, missing header, wrong product manifest, or missing tool identifier fails this gate.
+The command must return `ok: true`, the exact eight tool names, `Origin-Agent-Cluster: ?1`, `Permissions-Policy: tools=(self)`, and `hostLoop: required`. A 401, redirect to private sign-in, missing header, wrong product manifest, or missing tool identifier fails this gate.
 
 This check proves the deployed artifact and document policy. It does not claim that ChatGPT injected `document.modelContext` or discovered the tools.
 
@@ -20,13 +20,14 @@ This check proves the deployed artifact and document policy. It does not claim t
 2. Open the exact public URL from step 1. Do not use an embedded iframe; Site Tools from embedded content are not supported.
 3. Confirm the address-bar Site Tools arrow appears.
 4. Open the Story panel and confirm the status changes from **WebMCP ready** to **WebMCP connected**.
-5. Open the address-bar tool list and record exactly these seven names:
+5. Open the address-bar tool list and record exactly these eight names:
    - `get_project_context`
    - `manage_book`
    - `compose_spread`
    - `apply_scene_patch`
    - `set_presentation`
    - `undo_project_change`
+   - `sketch_storyboard`
    - `request_image_handoff`
 
 Create flows must call `get_project_context` with `detail: "authoring-guide"`, then `detail: "creation-readiness"`. Blocking results are user questions, not permission to generate; create must reuse the same ready brief and rerun the same gate. Before create, every finished cover, spread background, clean plate, layer, and frame must exist as a verified browser-local asset. Full-spread composition targets the approximately 1.62:1 stage; 1.45–2.10 is only the compatible admission range. After deduplication, the reader-visible cover, resolved final base for each spread, rendered layers, and frames together must total at most 50 uploaded assets. Author-only source and personal-photo provenance remains private and is excluded unless selected for rendering. `manage_book(action: "create")` accepts one complete, publishable finished-book manifest and commits it atomically; a text-only shell, missing artwork, deferred required art, or incomplete interaction contract returns a structured failure without adding it to the shelf, changing the document, or opening the reader. When direct host media transfer is unavailable, `request_image_handoff` opens a reader-mediated import drawer and returns browser-local asset ids without changing the document revision. `assetUse: "source-photo"` adds reader references to the next brief; `assetUse: "book-art"` imports generated covers, spreads, clean plates, or cutouts without changing the brief. `compose_spread` and `apply_scene_patch` are reserved for bounded changes discovered after the complete book exists. After actual rendering, the Agent reads `detail: "quality-review"`, explicitly calls `manage_book(action: "begin-critique")`, inspects real frames, and records the critique. Share stays closed until the current revision's report allows publication.
@@ -165,7 +166,7 @@ Record all of the following before declaring the host gate passed:
 
 - Public URL and UTC timestamp.
 - ChatGPT desktop app version, account/workspace class, and selected model.
-- Screenshot of the address-bar list with exactly seven tools.
+- Screenshot of the address-bar list with exactly eight tools.
 - Screen recording containing the prompts, visible tool activity, resulting book changes, human drag, exact undo, and presentation switch.
 - Screenshots of the incomplete readiness questions, checking/blocked state, every visually inspected cover/spread, and final publish-ready or needs-material state.
 - Structured readiness response, quality render manifest, both critique round results when a repair was needed, and final quality report.

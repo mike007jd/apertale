@@ -194,7 +194,7 @@ export function PublicationPanel({ document: documentState, record, onRecordChan
   return (
     <section className="publication-overlay">
       <dialog
-        className="publication-card"
+        className="agent-card publication-card"
         ref={card}
         aria-labelledby="publication-title"
         onCancel={(event) => {

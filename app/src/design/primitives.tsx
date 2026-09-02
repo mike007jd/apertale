@@ -93,16 +93,21 @@ export function WorkspaceTransition({
 type SwitchOption<T extends string> = {
   value: T;
   label: ReactNode;
-  ariaLabel: string;
+  /** Only needed when the visible label is not the full spoken name. */
+  ariaLabel?: string;
 };
 
 /**
- * A segmented control whose selected thumb physically travels between options.
+ * A segmented control whose selected marker physically travels between options.
  *
  * The previous implementation swapped a background colour, which is a state
  * change with no motion in it — you could not see which way the selection
- * moved. `layoutId` gives the thumb a shared identity across options, so
+ * moved. `layoutId` gives the marker a shared identity across options, so
  * Motion measures both positions and animates the real distance between them.
+ *
+ * `thumb` is a pill behind the option (Day/Night). `underline` is a rule under
+ * the word, the way print marks a selection; the workshop pickers used to
+ * hand-roll that with a CSS `::after`, which is the same job done a second way.
  */
 export function Switch<T extends string>({
   value,
@@ -110,6 +115,7 @@ export function Switch<T extends string>({
   onChange,
   className,
   groupLabel,
+  variant = "thumb",
   disabled = false,
 }: {
   value: T;
@@ -117,6 +123,7 @@ export function Switch<T extends string>({
   onChange: (value: T) => void;
   className?: string;
   groupLabel: string;
+  variant?: "thumb" | "underline";
   disabled?: boolean;
 }) {
   const reduced = useReducedMotionConfig();
@@ -137,7 +144,7 @@ export function Switch<T extends string>({
             {selected && (
               <motion.span
                 aria-hidden="true"
-                className="switch-thumb"
+                className={variant === "thumb" ? "switch-thumb" : "switch-underline"}
                 layoutId={`${groupLabel}-thumb`}
                 transition={reduced ? { duration: 0 } : spring}
               />

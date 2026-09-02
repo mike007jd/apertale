@@ -4,7 +4,7 @@ Apertale is a WebMCP-native creative canvas for living illustrated books. A pers
 
 The page is explicitly WebMCP-enabled. In a browser without the injected runtime, the Story panel reports `WebMCP ready`; in a supported ChatGPT desktop built-in browser it reports `WebMCP connected` after the tools register.
 
-WebMCP is agent-neutral, not universally callable. Any Agent whose browser or host implements WebMCP discovery, permission mediation, and execution can use this seven-tool surface; an arbitrary standalone Agent cannot call it merely because the page registers tools. As of 2026-08-27, OpenAI Site Tools require account/model access and the ChatGPT desktop built-in browser, with the providing page kept open.
+WebMCP is agent-neutral, not universally callable. Any Agent whose browser or host implements WebMCP discovery, permission mediation, and execution can use this eight-tool surface; an arbitrary standalone Agent cannot call it merely because the page registers tools. As of 2026-08-27, OpenAI Site Tools require account/model access and the ChatGPT desktop built-in browser, with the providing page kept open.
 
 ## Current product slice
 
@@ -35,9 +35,9 @@ The page registers exactly eight project-level tools through `document.modelCont
 7. `sketch_storyboard`
 8. `request_image_handoff`
 
-Every mutating tool requires a `requestId`. Book and presentation mutations also require `expectedDocumentId` and `expectedRevision` from the same current context; successful document mutations include an exact `undoToken`. `sketch_storyboard` draws normalized pencil strokes on the blank 3D book and reads the reader's red annotations back through project context before changing only marked spreads. `request_image_handoff` requires an explicit asset role: `source-photo` adds reader references to the next creation brief, while `book-art` imports generated covers, spreads, clean plates, or cutouts into the reusable asset registry. `set_presentation` can acknowledge either a visible reader spread or a shelf cover; neither operation changes the document revision.
+Every mutating tool requires a `requestId`. Book and presentation mutations also require `expectedDocumentId` and `expectedRevision` from the same current context; successful document mutations include an exact `undoToken`. `sketch_storyboard` draws a labelled pencil plan (boxes, ellipses, arrows, text, freehand lines in spread coordinates) on the blank 3D book and reads the reader's red annotations back through project context, each interpreted as page, loop-or-stroke, bounds, and the labels it touches, before changing only marked spreads; clearing marks through `resolvedAnnotations` requires the `expectedStoryboardRevision` that was read, and the storyboard survives a reload in `sessionStorage` until the book is created. `request_image_handoff` requires an explicit asset role: `source-photo` adds reader references to the next creation brief, while `book-art` imports generated covers, spreads, clean plates, or cutouts into the reusable asset registry. `set_presentation` can acknowledge either a visible reader spread or a shelf cover; neither operation changes the document revision.
 
-`get_project_context` defaults to a compact response. Focused details add `authoring-guide`, structured `creation-readiness`, local `assets`, a selected reveal, or the versioned `quality-review` rubric/render manifest. Create reads the guide, checks readiness, asks every blocking question, and reuses the same brief; the command runs that gate again and fails closed. A legacy personal book can use the one-time, revision-bound `adopt-creation-brief` action with the same gate; samples and books that already own a brief cannot be reclassified. After real rendering, `manage_book` explicitly begins and records at most two critique rounds. `manage_book` also opens books and assigns a validated browser-local portrait cover. `apply_scene_patch` covers Lift, transform, structured reveal, motion, interaction, add/remove, and ordering through one bounded atomic contract. A local `asset:` ID is accepted only after the IndexedDB adapter proves that it exists. Internal fine-grained commands remain shared with the human UI but are not exposed as additional WebMCP tools.
+`get_project_context` defaults to a compact response. Focused details add `authoring-guide`, structured `creation-readiness`, local `assets`, a selected reveal, the versioned `quality-review` rubric/render manifest, or the full `storyboard` stroke geometry; compact context carries every mark as a labelled box plus the interpreted red annotations, never freehand geometry. Create reads the guide, checks readiness, asks every blocking question, and reuses the same brief; the command runs that gate again and fails closed. A legacy personal book can use the one-time, revision-bound `adopt-creation-brief` action with the same gate; samples and books that already own a brief cannot be reclassified. After real rendering, `manage_book` explicitly begins and records at most two critique rounds. `manage_book` also opens books and assigns a validated browser-local portrait cover. `apply_scene_patch` covers Lift, transform, structured reveal, motion, interaction, add/remove, and ordering through one bounded atomic contract. A local `asset:` ID is accepted only after the IndexedDB adapter proves that it exists. Internal fine-grained commands remain shared with the human UI but are not exposed as additional WebMCP tools.
 
 Deterministic checks prove structural facts such as cover/final-base presence, an original-composite reference, separate personal-photo provenance, 2–4 foreground layers, meaningful interaction, text bounds, and current-revision render events. WebGL waits for the exact spread asset/texture set; the 2D fallback composes the same final base and non-procedural foregrounds, and neither path records evidence after a load failure. These checks do not claim aesthetic quality. The Agent must inspect real cover/spread frames for composition, readability, consistency, photo fidelity, alpha edges, and promotional value, then submit evidence-backed blocker/warn/note results. Blockers close Share; recorded warnings may proceed only in a sample-ready report. The Worker accepts checked-in `/assets/...` references only from the generated bundled-asset catalog and revalidates the same brief/provenance policy.
 
@@ -68,11 +68,17 @@ The production build is emitted as a host-portable bundle:
 
 ## Architecture map
 
-- `src/ThreeBook.tsx` — Three.js physical-book renderer, page geometry, illustrated layer raycasting, theme lighting, frame animation, and dual-surface turn sampling.
+- `src/ThreeBook.tsx` — Three.js physical-book renderer: scene assembly, theme lighting, frame animation, and dual-surface turn sampling.
+- `src/bookGeometry.ts` — page and case dimensions, resting page geometry, the watertight turn leaf, and per-layer scene elements, built without a renderer.
+- `src/pageCanvas.ts` — 2D canvas painting for page textures: illustrated background crops, the typeset left page, and the workshop pencil storyboard with red marks.
+- `src/bookPointer.ts` — pointer controller for hover picking, element drag, edge page gestures, and red-pencil strokes, driven by injected camera, pages, and scene elements.
 - `src/interaction.ts` — closed declarative interaction vocabulary and renderer traits.
 - `src/imageOptimizer.ts` — browser-local resize/compression with alpha-aware PNG/JPEG output and a 1.5 MB storage ceiling.
 - `src/assetStore.ts` — IndexedDB Blob persistence, optimization metadata, and safe object URL resolution.
 - `src/bookEngine.ts` — authoritative document/session state, persistence, revision checks, idempotency, and exact undo.
+- `src/qualityLifecycle.ts` — pure creation-brief adoption, render-evidence, and bounded critique-round decisions over the persisted lifecycle store; `bookEngine` persists what it reports as changed.
+- `src/storyboard.ts` — Codex pencil storyboard and reader red-mark state, resampled strokes, sessionStorage persistence, and the compact summary returned by project context.
+- `src/workshopControls.tsx` and `src/ElementAgentCard.tsx` — presentational creation-workshop pickers, storyboard pencil controls, and the element handoff card, rendered and tested apart from `App.tsx`.
 - `src/pageTurn.ts` — shared editor/reader page-turn session lifecycle and physical-page geometry helpers.
 - `src/creationWorkshop.ts` — creation setup state, ordered local-asset restoration, and brief materialization.
 - `src/authoringContract.ts` and `src/creationBrief.ts` — versioned readiness ownership, direct questions, and site-native Agent instructions.
@@ -84,7 +90,7 @@ The production build is emitted as a host-portable bundle:
 
 Three.js is loaded as a lazy production chunk so the editor shell can render before the WebGL engine finishes loading.
 
-The repository-level [Apertale Authoring skill](../.codex/skills/apertale-authoring/SKILL.md) teaches Agents the text-led, photo-led, and illustration-led workflows, the seven-tool sequence, host-first media transfer with an explicit handoff fallback, revision discipline, and optional quality review.
+The repository-level [Apertale Authoring skill](../.codex/skills/apertale-authoring/SKILL.md) teaches Agents the text-led, photo-led, and illustration-led workflows, the eight-tool sequence, host-first media transfer with an explicit handoff fallback, revision discipline, and optional quality review.
 
 ## Current technical baseline
 

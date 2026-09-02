@@ -34,7 +34,7 @@ type TurnContentPlan = {
   underlaySpreadIndex: number;
 };
 
-const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+export const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
 /**
  * The cover and illustrated front matter share one physical opening arc. Their

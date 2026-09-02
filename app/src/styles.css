@@ -59,8 +59,7 @@ button {
  * overwriting them. */
 button,
 select,
-summary,
-[role="button"] {
+summary {
   transition:
     scale var(--motion-feedback) var(--ease-object),
     box-shadow var(--motion-feedback) var(--ease-info),
@@ -71,37 +70,32 @@ summary,
     filter var(--motion-feedback) var(--ease-info);
 }
 
-button:hover:not(:disabled),
-[role="button"]:hover:not([aria-disabled="true"]) {
+button:hover:not(:disabled) {
   scale: 1.015;
 }
 
 /* A control sinks quickly and returns on the object easing, the way a physical
    key does. Symmetric timing reads as a light switch, not as a press. */
-button:active:not(:disabled),
-[role="button"]:active:not([aria-disabled="true"]) {
+button:active:not(:disabled) {
   scale: .965;
   transition-duration: var(--motion-press);
 }
 
 button:disabled,
-select:disabled,
-[aria-disabled="true"] {
+select:disabled {
   opacity: .48;
   cursor: not-allowed;
 }
 
 button:focus-visible,
 select:focus-visible,
-summary:focus-visible,
-[role="button"]:focus-visible {
+summary:focus-visible {
   outline: none;
   box-shadow: var(--ring-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  button:hover:not(:disabled), button:active:not(:disabled),
-  [role="button"]:hover, [role="button"]:active { scale: 1; }
+  button:hover:not(:disabled), button:active:not(:disabled) { scale: 1; }
 }
 
 .app-shell {
@@ -178,7 +172,7 @@ summary:focus-visible,
   display: grid;
   place-items: center;
   margin-bottom: 28px;
-  color: #b54638;
+  color: var(--status-danger);
   animation: portrait-phone-turn 3.2s var(--ease-navigation) infinite;
 }
 
@@ -255,7 +249,7 @@ summary:focus-visible,
   border: 0;
   padding: 6px 10px;
   background: transparent;
-  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-display);
   font-size: var(--text-title);
   font-weight: 700;
   letter-spacing: -0.035em;
@@ -354,7 +348,7 @@ summary:focus-visible,
   gap: 9px;
   border: 0;
   padding: 7px 0;
-  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-display);
   font-size: var(--text-title);
   font-weight: 700;
   letter-spacing: -.03em;
@@ -399,7 +393,7 @@ summary:focus-visible,
 
 .library-intro h1 {
   margin: 0;
-  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-display);
   font-size: var(--text-display-l);
   line-height: .95;
   letter-spacing: -.045em;
@@ -656,7 +650,7 @@ summary:focus-visible,
 }
 
 .book-loading-card > span:last-child { display: grid; gap: 3px; min-width: 0; }
-.book-loading-card strong { overflow: hidden; font-family: "Iowan Old Style", Baskerville, Georgia, serif; font-size: var(--text-lead); text-overflow: ellipsis; white-space: nowrap; }
+.book-loading-card strong { overflow: hidden; font-family: var(--font-display); font-size: var(--text-lead); text-overflow: ellipsis; white-space: nowrap; }
 .book-loading-card small { color: var(--muted); font-size: var(--text-caption); }
 
 @keyframes book-loading-spin { to { transform: rotate(1turn); } }
@@ -699,9 +693,9 @@ summary:focus-visible,
 
 .library-delete-button:hover:not(:disabled),
 .library-delete-button:focus-visible {
-  border-color: rgba(181, 70, 56, .28);
-  color: #b54638;
-  background: rgba(181, 70, 56, .08);
+  border-color: color-mix(in srgb, var(--status-danger) 42%, transparent);
+  color: var(--status-danger);
+  background: var(--status-danger-soft);
 }
 
 .library-delete-button:disabled { cursor: wait; opacity: .62; }
@@ -712,7 +706,7 @@ summary:focus-visible,
   display: -webkit-box;
   min-height: 32px;
   overflow: hidden;
-  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-display);
   font-size: var(--text-body);
   line-height: 1.08;
   -webkit-box-orient: vertical;
@@ -1102,7 +1096,7 @@ summary:focus-visible,
 }
 
 .agent-action-success { color: var(--ink); }
-.agent-action-error { color: #b54638; }
+.agent-action-error { color: var(--status-danger); }
 .agent-action button {
   min-height: 28px;
   border: 0;
@@ -1213,7 +1207,7 @@ summary:focus-visible,
 }
 
 .outline-head > div { display: grid; gap: 3px; }
-.outline-head span { font-family: "Iowan Old Style", Baskerville, Georgia, serif; font-size: var(--text-title); font-weight: 700; }
+.outline-head span { font-family: var(--font-display); font-size: var(--text-title); font-weight: 700; }
 .outline-head small,
 .outline-foot { color: var(--muted); font-size: var(--text-caption); }
 
@@ -1228,7 +1222,7 @@ summary:focus-visible,
   cursor: pointer;
 }
 
-.outline-head button { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--shape-circle); }
+.outline-head button { display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--shape-circle); }
 
 .story-outline ol {
   display: grid;
@@ -1257,7 +1251,7 @@ summary:focus-visible,
 .story-outline li button.is-current { border-color: var(--line); background: var(--accent-soft); }
 .story-outline li button > span { padding-top: 2px; color: var(--accent); font-size: var(--text-caption); }
 .story-outline li button > div { display: grid; gap: 5px; }
-.story-outline li strong { color: var(--ink); font-family: "Iowan Old Style", Baskerville, Georgia, serif; font-size: var(--text-body); }
+.story-outline li strong { color: var(--ink); font-family: var(--font-display); font-size: var(--text-body); }
 
 .story-outline li small {
   display: -webkit-box;
@@ -1270,7 +1264,7 @@ summary:focus-visible,
 .outline-foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); }
 .outline-foot > span { display: flex; align-items: center; gap: 7px; }
 .outline-foot i { width: 7px; height: 7px; border-radius: var(--shape-circle); background: #a7a49c; }
-.outline-foot .is-connected i { background: #47a879; box-shadow: var(--ring-ok); }
+.outline-foot .is-connected i { background: var(--status-success-dot); box-shadow: var(--ring-ok); }
 
 .copy-starter-button {
   display: inline-flex;
@@ -1304,7 +1298,7 @@ summary:focus-visible,
 
 .workshop-signal i { flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--shape-circle); background: #aaa59a; box-shadow: var(--ring-neutral); }
 .workshop-signal.is-connected { color: var(--ink-2); }
-.workshop-signal.is-connected i { background: #47a879; box-shadow: var(--ring-ok); }
+.workshop-signal.is-connected i { background: var(--status-success-dot); box-shadow: var(--ring-ok); }
 
 /* Creation is a full workspace, not a form modal. The live Three.js stage
    supplies the blank physical book while this layer supplies only controls. */
@@ -1337,7 +1331,7 @@ summary:focus-visible,
 }
 
 .workspace-transition-mark {
-  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-display);
   font-size: var(--text-title);
   font-weight: 700;
   letter-spacing: -.035em;
@@ -1394,7 +1388,7 @@ summary:focus-visible,
   bottom: 26px;
   left: 28px;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px auto auto;
+  grid-template-columns: 44px minmax(0, 1fr) 44px auto auto auto;
   align-items: center;
   gap: 7px;
   min-height: 54px;
@@ -1432,6 +1426,24 @@ summary:focus-visible,
 .story-pencil-beat { display: grid; gap: 1px; min-width: 0; padding-inline: 6px; }
 .story-pencil-beat small { color: var(--accent); font-size: var(--text-caption); font-weight: var(--weight-strong); letter-spacing: var(--track-caps); text-transform: uppercase; }
 .story-pencil-beat strong { overflow: hidden; font-family: var(--font-display); font-size: var(--text-body); font-weight: var(--weight-text); text-overflow: ellipsis; white-space: nowrap; }
+
+.story-pencil-notice {
+  position: absolute;
+  z-index: 5;
+  left: 28px;
+  bottom: 92px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-pill);
+  padding: 9px 14px;
+  color: var(--status-success);
+  background: color-mix(in srgb, var(--surface-strong) 94%, transparent);
+  box-shadow: var(--elev-2);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-strong);
+  pointer-events: none;
+}
 
 @keyframes workshop-in { from { opacity: 0; } }
 
@@ -1541,7 +1553,7 @@ summary:focus-visible,
 
 .workshop-headline h2 {
   margin: 0;
-  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-display);
   font-size: var(--text-title);
   line-height: 1.03;
   letter-spacing: -.035em;
@@ -1550,7 +1562,7 @@ summary:focus-visible,
 .workshop-field { display: grid; gap: var(--space-2); margin: 0; border: 0; padding: 0; min-width: 0; }
 .workshop-field + .workshop-field { margin-top: var(--space-3); }
 
-.workshop-field legend {
+.workshop-field-label {
   padding: 0;
   color: var(--muted);
   font-size: var(--text-caption);
@@ -1567,7 +1579,7 @@ summary:focus-visible,
    spaced as one, and the choice shows in ink weight and a rule under the
    selected word - which is how print marks a selection. Fourteen outlines
    were doing the grouping that the legend and the spacing already do. */
-.workshop-option {
+.workshop-picker button {
   position: relative;
   min-width: 0;
   min-height: 40px;
@@ -1583,29 +1595,25 @@ summary:focus-visible,
   text-align: left;
 }
 
-.workshop-option::after {
+/* The selected rule is a real element with a shared layout identity, so it
+   travels to the next word instead of fading out and back in. */
+.workshop-picker .switch-underline {
   position: absolute;
   left: var(--space-1);
   right: var(--space-1);
   bottom: 6px;
   height: 2px;
   background: var(--accent);
-  content: "";
-  opacity: 0;
-  scale: 0.4 1;
-  transition: opacity var(--motion-feedback) var(--ease-info), scale var(--motion-state) var(--ease-object);
 }
 
-.workshop-option:hover:not(:disabled) { color: var(--ink-2); }
+.workshop-picker button:hover:not(:disabled) { color: var(--ink-2); }
 
-.workshop-option.is-selected {
+.workshop-picker button.is-active {
   color: var(--ink);
   font-weight: var(--weight-strong);
 }
 
-.workshop-option.is-selected::after { opacity: 1; scale: 1 1; }
-
-.workshop-lengths .workshop-option { font-family: var(--font-display); font-size: var(--text-lead); }
+.workshop-lengths button { font-family: var(--font-display); font-size: var(--text-lead); }
 
 /* The Agent's request, set where the reader acts on it rather than left in
    the conversation pane. */
@@ -1744,10 +1752,10 @@ summary:focus-visible,
   align-items: start;
   gap: 4px 8px;
   margin: 0;
-  color: #b04a37;
+  color: var(--status-danger);
   border-radius: var(--radius-s);
   padding: 9px 11px;
-  background: rgba(181, 70, 56, .12);
+  background: var(--status-danger-soft);
   font-size: var(--text-caption);
   line-height: 1.4;
 }
@@ -1766,7 +1774,6 @@ summary:focus-visible,
   font-weight: 700;
 }
 
-:root[data-theme="night"] .workshop-import-error { color: #f0968a; }
 
 .workshop-actionbar {
   display: grid;
@@ -1824,8 +1831,7 @@ summary:focus-visible,
 }
 
 .is-followup .workshop-codex-status { border-width: 1px; padding: 0 10px; opacity: 1; }
-.workshop-codex-status.is-active { color: #2f7f57; }
-:root[data-theme="night"] .workshop-codex-status.is-active { color: #6ba88f; }
+.workshop-codex-status.is-active { color: var(--status-success); }
 
 
 .copy-fallback {
@@ -1862,8 +1868,10 @@ summary:focus-visible,
   animation: workshop-in var(--motion-reveal) var(--ease-info) both;
 }
 
-.element-agent-card {
-  width: min(440px, calc(100vw - 32px));
+/* One card chrome for every Agent handoff dialog: the element request, the
+   sharing panel, and the destructive confirmation. Each variant below keeps
+   only its own footprint. */
+.agent-card {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--line) 82%, white);
   border-radius: var(--radius-l);
@@ -1872,13 +1880,12 @@ summary:focus-visible,
   box-shadow: var(--elev-3);
 }
 
-:root[data-theme="night"] .element-agent-card {
+:root[data-theme="night"] .agent-card {
   border-color: rgba(255, 233, 200, .2);
   background: rgba(38, 29, 23, .96);
-  box-shadow: var(--elev-3);
 }
 
-.element-agent-card > header {
+.agent-card > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1887,19 +1894,23 @@ summary:focus-visible,
   border-bottom: 1px solid var(--line);
 }
 
-.element-agent-card > header span { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-size: var(--text-caption); font-weight: 760; letter-spacing: .02em; }
-.element-agent-card > header button { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: var(--shape-circle); color: var(--ink); background: var(--surface-strong); cursor: pointer; }
-.element-agent-card > header button:hover { border-color: var(--accent); color: var(--accent); }
+.agent-card > header span { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-size: var(--text-caption); font-weight: 760; letter-spacing: .02em; }
+.agent-card > header button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: var(--shape-circle); color: var(--ink); background: transparent; cursor: pointer; }
+.agent-card > header button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.agent-card > header button:disabled { opacity: .45; cursor: wait; }
+.agent-card > footer { display: grid; border-top: 1px solid var(--line); background: #fff3e9; }
+:root[data-theme="night"] .agent-card > footer { background: #33261f; }
+
+.element-agent-card { width: min(440px, calc(100vw - 32px)); }
 .element-agent-body { padding: 26px 26px 20px; }
 .element-agent-body > p { margin: 0 0 7px; color: var(--accent); font-size: var(--text-caption); font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.element-agent-body h2 { margin: 0; font-family: "Iowan Old Style", Baskerville, Georgia, serif; font-size: var(--text-display-m); line-height: .98; font-weight: 650; }
+.element-agent-body h2 { margin: 0; font-family: var(--font-display); font-size: var(--text-display-m); line-height: .98; font-weight: 650; }
 .element-agent-body > span { display: block; max-width: 34ch; margin-top: 12px; color: var(--muted); font-size: var(--text-body); line-height: 1.5; }
 .element-agent-body dl { display: grid; gap: 0; margin: 24px 0 0; }
 .element-agent-body dl > div { display: grid; grid-template-columns: 72px 1fr; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); }
 .element-agent-body dt { color: var(--muted); font-size: var(--text-caption); font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
 .element-agent-body dd { margin: 0; font-size: var(--text-caption); line-height: 1.4; }
-.element-agent-card > footer { display: grid; gap: 11px; padding: 18px 26px 24px; border-top: 1px solid var(--line); background: #fff3e9; }
-:root[data-theme="night"] .element-agent-card > footer { background: #33261f; }
+.element-agent-card > footer { gap: 11px; padding: 18px 26px 24px; }
 .element-agent-card > footer p { margin: 0; color: var(--muted); font-size: var(--text-caption); }
 .copy-element-request { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; border: 0; border-radius: var(--radius-pill); padding: 0 18px; color: white; background: var(--accent); box-shadow: var(--elev-accent-rest); cursor: pointer; font-weight: 760; }
 .copy-element-request:hover { transform: translateY(-1px); filter: saturate(1.06); }
@@ -1958,7 +1969,7 @@ summary:focus-visible,
   .workshop-headline h2 { font-size: var(--text-title); }
   .workshop-actionbar { padding: 11px 14px max(12px, env(safe-area-inset-bottom)); }
   .workshop-segment { grid-template-columns: 1fr 1fr; }
-  .workshop-segment .workshop-option:last-child { grid-column: 1 / -1; }
+  .workshop-segment button:last-child { grid-column: 1 / -1; }
   .story-pencil-controls {
     right: max(10px, env(safe-area-inset-right));
     bottom: max(12px, env(safe-area-inset-bottom));
@@ -2223,7 +2234,7 @@ summary:focus-visible,
 .reveal-card h2 {
   margin: 0;
   color: var(--ink);
-  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-display);
   font-size: var(--text-title);
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -2265,12 +2276,12 @@ summary:focus-visible,
 
 .reveal-close {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: 7px;
+  right: 7px;
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 44px;
+  height: 44px;
   border: 0;
   border-radius: var(--shape-circle);
   color: var(--muted);
@@ -2302,7 +2313,7 @@ summary:focus-visible,
 .fallback-plate h2 {
   margin: 0;
   max-width: 16ch;
-  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-display);
   font-size: var(--text-display-m);
   line-height: 1.1;
 }
@@ -2497,11 +2508,9 @@ summary:focus-visible,
 }
 
 .publish-button:hover { border-color: var(--accent); color: var(--accent); }
-.publish-button.is-live { border-color: color-mix(in srgb, #47a879 62%, var(--line)); color: #2f7f57; }
-.publish-button.is-danger { color: #b54638; }
-.publish-button.is-danger:hover { border-color: rgba(181, 70, 56, .48); color: #b54638; background: rgba(181, 70, 56, .08); }
-:root[data-theme="night"] .publish-button.is-live { color: #86d3ac; }
-:root[data-theme="night"] .publish-button.is-danger { color: #f0968a; }
+.publish-button.is-live { border-color: var(--status-success-dot); color: var(--status-success); }
+.publish-button.is-danger { color: var(--status-danger); }
+.publish-button.is-danger:hover { border-color: color-mix(in srgb, var(--status-danger) 42%, transparent); color: var(--status-danger); background: var(--status-danger-soft); }
 
 .publication-overlay {
   position: fixed;
@@ -2526,33 +2535,7 @@ summary:focus-visible,
   margin: auto;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--line) 82%, white);
-  border-radius: var(--radius-l);
-  color: var(--ink);
-  background: #fffaf0;
-  box-shadow: var(--elev-3);
 }
-
-:root[data-theme="night"] .publication-card {
-  border-color: rgba(255, 233, 200, .2);
-  background: rgba(38, 29, 23, .96);
-  box-shadow: var(--elev-3);
-}
-
-.publication-card > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 58px;
-  padding: 0 16px 0 20px;
-  border-bottom: 1px solid var(--line);
-}
-
-.publication-card > header span { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-size: var(--text-caption); font-weight: 760; }
-.publication-card > header button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: var(--shape-circle); color: var(--ink); background: transparent; cursor: pointer; }
-.publication-card > header button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.publication-card > header button:disabled { opacity: .45; cursor: wait; }
 
 .publication-body { padding: 22px 24px 18px; overflow-y: auto; }
 
@@ -2569,13 +2552,13 @@ summary:focus-visible,
 }
 
 .publication-status i { width: 8px; height: 8px; border-radius: var(--shape-circle); background: #a7a49c; }
-.publication-status.is-published i { background: #47a879; box-shadow: var(--ring-ok); }
+.publication-status.is-published i { background: var(--status-success-dot); box-shadow: var(--ring-ok); }
 .publication-status.is-publishing i { background: var(--accent); box-shadow: var(--ring-accent); }
-.publication-status.is-revoked i { background: #b54638; }
+.publication-status.is-revoked i { background: var(--status-danger); }
 
 .publication-body h2 {
   margin: 0;
-  font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+  font-family: var(--font-display);
   font-size: var(--text-title);
   font-weight: 650;
   line-height: 1.02;
@@ -2612,13 +2595,12 @@ summary:focus-visible,
   align-items: flex-start;
   gap: 7px;
   margin: 10px 0 0;
-  color: #a53b2e;
+  color: var(--status-danger);
   font-size: var(--text-caption);
   line-height: 1.45;
 }
 
 .publication-copy-error svg { flex: none; margin-top: 1px; }
-:root[data-theme="night"] .publication-copy-error { color: #f0968a; }
 
 .publication-primary,
 .publication-secondary,
@@ -2640,9 +2622,8 @@ summary:focus-visible,
 .publication-secondary { border: 1px solid var(--line); color: var(--ink); background: transparent; }
 .publication-secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .publication-secondary.is-caution:hover:not(:disabled) { border-color: #b8863a; color: #96651f; }
-.publication-danger { border: 1px solid rgba(181, 70, 56, .48); color: #b54638; background: transparent; }
-.publication-danger:hover:not(:disabled) { color: #fff; background: #b54638; }
-:root[data-theme="night"] .publication-danger { border-color: rgba(240, 141, 126, .42); color: #f0968a; }
+.publication-danger { border: 1px solid color-mix(in srgb, var(--status-danger) 42%, transparent); color: var(--status-danger); background: transparent; }
+.publication-danger:hover:not(:disabled) { color: #fff; background: var(--status-danger); }
 
 .publication-primary:disabled,
 .publication-secondary:disabled,
@@ -2660,10 +2641,8 @@ summary:focus-visible,
   line-height: 1.45;
 }
 
-.publication-notice.is-stale { color: #8a5a15; background: rgba(214, 158, 61, .16); }
-.publication-notice.is-error { color: #a53b2e; background: rgba(181, 70, 56, .13); }
-:root[data-theme="night"] .publication-notice.is-stale { color: #f2c987; }
-:root[data-theme="night"] .publication-notice.is-error { color: #f0968a; }
+.publication-notice.is-stale { color: var(--status-warning); background: var(--status-warning-soft); }
+.publication-notice.is-error { color: var(--status-danger); background: var(--status-danger-soft); }
 
 .publication-progress { margin-top: 16px; }
 .publication-progress p { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink); font-size: var(--text-body); font-weight: 620; }
@@ -2679,8 +2658,7 @@ summary:focus-visible,
 
 .publication-progress-track i { display: block; height: 100%; border-radius: var(--radius-pill); background: var(--accent); transition: width var(--motion-state) var(--ease-info); }
 
-.publication-actions { display: grid; gap: 9px; padding: 16px 24px 20px; border-top: 1px solid var(--line); background: #fff3e9; }
-:root[data-theme="night"] .publication-actions { background: #33261f; }
+.publication-actions { gap: 9px; padding: 16px 24px 20px; }
 
 .destructive-action-card {
   position: fixed;
@@ -2810,7 +2788,7 @@ summary:focus-visible,
   .reader-sheet-copy h2 {
     margin: 0;
     color: var(--ink);
-    font-family: "Iowan Old Style", Baskerville, Georgia, serif;
+    font-family: var(--font-display);
     display: -webkit-box;
     overflow: hidden;
     -webkit-box-orient: vertical;

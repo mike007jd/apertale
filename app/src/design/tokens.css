@@ -1,6 +1,5 @@
 :root {
   /* — color ————————————————————————————————— */
-  --ink-rgb: 25 27 24;
   --ink: rgb(25 27 24);
   --ink-2: rgb(25 27 24 / .72);
   --ink-3: rgb(25 27 24 / .55);
@@ -12,7 +11,12 @@
   --accent: #ff654f;
   --accent-soft: rgba(255, 101, 79, 0.14);
   --accent-ink: #fffdf8;
-  --shadow: rgba(74, 55, 39, 0.18);
+  --status-danger: #b54638;
+  --status-danger-soft: rgba(181, 70, 56, 0.1);
+  --status-success: #2f7f57;
+  --status-success-dot: #47a879;
+  --status-warning: #8a5a15;
+  --status-warning-soft: rgba(214, 158, 61, 0.16);
 
   /* — type ——————————————————————————————————— */
   --font-ui: "Avenir Next", Avenir, "Segoe UI", system-ui, sans-serif;
@@ -20,25 +24,17 @@
   --weight-text: 400;
   --weight-strong: 600;
   --weight-title: 700;
-  --weight-display: 800;
   --track-caps: .12em;
-  --track-normal: 0;
   --track-tight: -.02em;
-  --track-display: -.035em;
   --text-caption: 12px;
   --leading-caption: 1.4;
   --text-body: 16px;
-  --leading-body: 1.5;
   --text-lead: 21px;
-  --leading-lead: 1.4;
   --text-title: 28px;
-  --leading-title: 1.25;
   --text-display-s: clamp(28px, 3.4vw, 38px);
   --leading-display-s: 1.15;
   --text-display-m: clamp(28px, 4.2vw, 50px);
-  --leading-display-m: 1.08;
   --text-display-l: clamp(38px, 4.6vw, 66px);
-  --leading-display-l: 1.02;
 
   /* — radius —————————————————————————————————— */
   --radius-s: 8px;
@@ -50,7 +46,6 @@
   --shape-selection: 45% 52% 44% 48%;
 
   /* — space ——————————————————————————————————— */
-  --space-0: 0;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -59,8 +54,6 @@
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
-  --space-hair: 2px;
-  --space-fluid: clamp(24px, 4vw, 64px);
 
   /* — elevation ——————————————————————————————— */
   --elev-1: 0 1px 2px rgb(74 55 39 / .10), 0 2px 6px rgb(74 55 39 / .08);
@@ -92,7 +85,6 @@
 }
 
 :root[data-theme="night"] {
-  --ink-rgb: 247 240 227;
   --ink: rgb(247 240 227);
   --ink-2: rgb(247 240 227 / .74);
   --ink-3: rgb(247 240 227 / .56);
@@ -104,7 +96,11 @@
   --accent: #f1bd6a;
   --accent-soft: rgba(241, 189, 106, 0.16);
   --accent-ink: #241a11;
-  --shadow: rgba(0, 0, 0, 0.42);
+  --status-danger: #f0968a;
+  --status-danger-soft: rgba(240, 141, 126, 0.14);
+  --status-success: #86d3ac;
+  --status-warning: #f2c987;
+  --status-warning-soft: rgba(242, 201, 135, 0.16);
   --elev-1: 0 1px 2px rgb(0 0 0 / .34), 0 2px 6px rgb(0 0 0 / .28), inset 0 1px 0 rgb(255 183 87 / .05);
   --elev-2: 0 2px 4px rgb(0 0 0 / .40), 0 10px 24px rgb(0 0 0 / .36), 0 0 28px rgb(255 183 87 / .05);
   --elev-3: 0 4px 8px rgb(0 0 0 / .46), 0 28px 64px rgb(0 0 0 / .52), 0 0 70px rgb(255 183 87 / .09);

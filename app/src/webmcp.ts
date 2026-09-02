@@ -18,7 +18,7 @@ import type { AuthoringSurfaceRequest } from "./authoringSurface";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { listProjectAssetReferences } from "./projectArtifact";
-import { applyStoryboardSketches, getStoryboardSnapshot, type StoryboardSketchInput } from "./storyboard";
+import { MAX_LABEL_LENGTH, MAX_MARKS_PER_SPREAD, MAX_STROKE_POINTS, applyStoryboardSketches, getStoryboardSnapshot, resetStoryboard, summarizeStoryboard, type StoryboardMark, type StoryboardPoint, type StoryboardSketchInput } from "./storyboard";
 import { BOOK_ELEMENT_ID_PATTERN, BOOK_ELEMENT_ID_PATTERN_SOURCE, MOTION_PRESETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, PreparedBookBackground, PreparedBookLayer, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 import {
@@ -177,42 +177,63 @@ function parseFrames(raw: unknown): string[] | null | undefined {
   return raw.map((item) => String(item));
 }
 
+function parseStoryboardPoint(raw: unknown, name: string): StoryboardPoint {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`${name} must be an object.`);
+  const point = raw as ToolInput;
+  assertOnly(point, ["x", "y"]);
+  const x = optionalBoundedNumber(point, "x", 0, 1);
+  const y = optionalBoundedNumber(point, "y", 0, 1);
+  if (typeof x === "undefined" || typeof y === "undefined") invalid(`${name} requires x and y.`);
+  return { x, y };
+}
+
+function parseStoryboardMark(raw: unknown, name: string): StoryboardMark {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid(`${name} must be an object.`);
+  const mark = raw as ToolInput;
+  const kind = pick(mark.kind, `${name}.kind`, ["line", "rect", "ellipse", "arrow", "label"] as const);
+  if (!kind) invalid(`${name}.kind is required.`);
+  const label = boundedString(mark, "label", MAX_LABEL_LENGTH, true);
+  const unitField = (key: string) => {
+    const value = optionalBoundedNumber(mark, key, 0, 1);
+    if (typeof value === "undefined") invalid(`${name}.${key} is required.`);
+    return value;
+  };
+  if (kind === "line") {
+    assertOnly(mark, ["kind", "points", "label"]);
+    if (!Array.isArray(mark.points) || mark.points.length < 2 || mark.points.length > MAX_STROKE_POINTS) {
+      invalid(`${name}.points must contain 2–${MAX_STROKE_POINTS} points.`);
+    }
+    return { kind, points: mark.points.map((point, index) => parseStoryboardPoint(point, `${name}.points[${index}]`)), label };
+  }
+  if (kind === "rect" || kind === "ellipse") {
+    assertOnly(mark, ["kind", "x", "y", "w", "h", "label"]);
+    return { kind, x: unitField("x"), y: unitField("y"), w: unitField("w"), h: unitField("h"), label };
+  }
+  if (kind === "arrow") {
+    assertOnly(mark, ["kind", "from", "to", "label"]);
+    return { kind, from: parseStoryboardPoint(mark.from, `${name}.from`), to: parseStoryboardPoint(mark.to, `${name}.to`), label };
+  }
+  assertOnly(mark, ["kind", "x", "y", "text", "size"]);
+  return { kind, x: unitField("x"), y: unitField("y"), text: boundedString(mark, "text", MAX_LABEL_LENGTH), size: pick(mark.size, `${name}.size`, ["s", "m", "l"] as const) };
+}
+
 function parseStoryboardSpreads(raw: unknown): StoryboardSketchInput[] {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 12) invalid("spreads must contain 1–12 storyboard spreads.");
   const seen = new Set<number>();
   return raw.map((rawSpread, spreadPosition) => {
     if (!rawSpread || typeof rawSpread !== "object" || Array.isArray(rawSpread)) invalid(`spreads[${spreadPosition}] must be an object.`);
     const spread = rawSpread as ToolInput;
-    assertOnly(spread, ["index", "caption", "strokes"]);
+    assertOnly(spread, ["index", "caption", "marks"]);
     const index = spread.index;
     if (!Number.isInteger(index) || Number(index) < 0 || Number(index) > 11 || seen.has(Number(index))) {
       invalid(`spreads[${spreadPosition}].index must be a unique integer from 0 to 11.`);
     }
     seen.add(Number(index));
-    if (!Array.isArray(spread.strokes) || spread.strokes.length > 36) invalid(`spreads[${spreadPosition}].strokes must contain at most 36 strokes.`);
-    const strokes = spread.strokes.map((rawStroke, strokeIndex) => {
-      if (!rawStroke || typeof rawStroke !== "object" || Array.isArray(rawStroke)) invalid(`spreads[${spreadPosition}].strokes[${strokeIndex}] must be an object.`);
-      const stroke = rawStroke as ToolInput;
-      assertOnly(stroke, ["points"]);
-      if (!Array.isArray(stroke.points) || stroke.points.length < 2 || stroke.points.length > 120) {
-        invalid(`spreads[${spreadPosition}].strokes[${strokeIndex}].points must contain 2–120 points.`);
-      }
-      return {
-        points: stroke.points.map((rawPoint, pointIndex) => {
-          if (!rawPoint || typeof rawPoint !== "object" || Array.isArray(rawPoint)) invalid(`point ${pointIndex} must be an object.`);
-          const point = rawPoint as ToolInput;
-          assertOnly(point, ["x", "y"]);
-          const x = optionalBoundedNumber(point, "x", 0, 1);
-          const y = optionalBoundedNumber(point, "y", 0, 1);
-          if (typeof x === "undefined" || typeof y === "undefined") invalid(`point ${pointIndex} requires x and y.`);
-          return { x, y };
-        }),
-      };
-    });
+    if (!Array.isArray(spread.marks) || spread.marks.length > MAX_MARKS_PER_SPREAD) invalid(`spreads[${spreadPosition}].marks must contain at most ${MAX_MARKS_PER_SPREAD} marks.`);
     return {
       index: Number(index),
       caption: boundedString(spread, "caption", 160, true),
-      strokes,
+      marks: spread.marks.map((mark, markIndex) => parseStoryboardMark(mark, `spreads[${spreadPosition}].marks[${markIndex}]`)),
     };
   });
 }
@@ -448,14 +469,57 @@ const creationBriefSchema = {
   additionalProperties: false,
 };
 
+const unitNumber = { type: "number", minimum: 0, maximum: 1 };
+
 const storyboardPointSchema = {
   type: "object",
-  properties: {
-    x: { type: "number", minimum: 0, maximum: 1 },
-    y: { type: "number", minimum: 0, maximum: 1 },
-  },
+  properties: { x: unitNumber, y: unitNumber },
   required: ["x", "y"],
   additionalProperties: false,
+};
+
+const markLabel = { type: "string", maxLength: MAX_LABEL_LENGTH, description: "Short name Codex and the reader share, e.g. \"boat\"." };
+
+const storyboardMarkSchema = {
+  type: "object",
+  description: "One pencil mark. Spread coordinates: x 0 = left page outer edge, 0.5 = gutter, 1 = right page outer edge; y 0 = top, 1 = bottom.",
+  oneOf: [
+    {
+      properties: { kind: { const: "rect" }, x: unitNumber, y: unitNumber, w: unitNumber, h: unitNumber, label: markLabel },
+      required: ["kind", "x", "y", "w", "h"],
+      additionalProperties: false,
+    },
+    {
+      properties: { kind: { const: "ellipse" }, x: unitNumber, y: unitNumber, w: unitNumber, h: unitNumber, label: markLabel },
+      required: ["kind", "x", "y", "w", "h"],
+      additionalProperties: false,
+    },
+    {
+      properties: { kind: { const: "arrow" }, from: storyboardPointSchema, to: storyboardPointSchema, label: markLabel },
+      required: ["kind", "from", "to"],
+      additionalProperties: false,
+    },
+    {
+      properties: {
+        kind: { const: "label" },
+        x: unitNumber,
+        y: unitNumber,
+        text: { type: "string", minLength: 1, maxLength: MAX_LABEL_LENGTH },
+        size: { type: "string", enum: ["s", "m", "l"] },
+      },
+      required: ["kind", "x", "y", "text"],
+      additionalProperties: false,
+    },
+    {
+      properties: {
+        kind: { const: "line" },
+        points: { type: "array", minItems: 2, maxItems: MAX_STROKE_POINTS, items: storyboardPointSchema },
+        label: markLabel,
+      },
+      required: ["kind", "points"],
+      additionalProperties: false,
+    },
+  ],
 };
 
 const storyboardSpreadSchema = {
@@ -463,20 +527,14 @@ const storyboardSpreadSchema = {
   properties: {
     index: { type: "integer", minimum: 0, maximum: 11, description: "Zero-based spread index." },
     caption: { type: "string", maxLength: 160, description: "Short story beat shown beside the book." },
-    strokes: {
+    marks: {
       type: "array",
-      maxItems: 36,
-      items: {
-        type: "object",
-        properties: {
-          points: { type: "array", minItems: 2, maxItems: 120, items: storyboardPointSchema },
-        },
-        required: ["points"],
-        additionalProperties: false,
-      },
+      maxItems: MAX_MARKS_PER_SPREAD,
+      items: storyboardMarkSchema,
+      description: "Labelled regions first (rect/ellipse), then arrows and text; freehand lines only for shapes the vocabulary lacks.",
     },
   },
-  required: ["index", "strokes"],
+  required: ["index", "marks"],
   additionalProperties: false,
 };
 
@@ -669,7 +727,7 @@ export function registerWebMcpTools(
             detail: {
               type: "string",
               enum: [...PROJECT_CONTEXT_DETAILS],
-              description: "Use creation-readiness before create; quality-review is optional polish after real rendering; assets lists imports.",
+              description: "Use creation-readiness before create; quality-review after real rendering; assets lists imports; storyboard returns full sketch strokes.",
             },
             creationBrief: creationBriefSchema,
           },
@@ -694,7 +752,10 @@ export function registerWebMcpTools(
           const qualityLifecycle = detail === "quality-review" ? bookEngine.getQualityLifecycle() : null;
           const result = {
             ...context,
-            storyboard: getStoryboardSnapshot(),
+            // The Agent authored the sketches; echoing them back cost ~550 KB
+            // per context read. Compact carries counts plus the reader's red
+            // marks, which are the only strokes the Agent has not seen.
+            storyboard: detail === "storyboard" ? getStoryboardSnapshot() : summarizeStoryboard(),
             assets: detail === "assets"
               ? await listAssetMetadata()
               : await getAssetMetadata(currentSpread.elements.map((element) => element.assetId)),
@@ -1047,6 +1108,8 @@ export function registerWebMcpTools(
           }, "agent", options?.signal);
           if (result.ok) {
             if (!result.documentId || !result.changedIds[0]) invalid("create did not return its stable presentation target.");
+            // The rough plan belonged to the book that now exists.
+            resetStoryboard();
             const session = bookEngine.getSnapshot().session;
             pendingPresentations.set(requestId, {
               result,
@@ -1343,13 +1406,18 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.storyboard,
         title: "Sketch storyboards",
-        description: "Draw rough pencil storyboards on the blank 3D book. Replace once for the whole plan; after reading red annotations from project context, update only marked spreads and clear applied marks. This never waits for review.",
+        description: "Draw the rough pencil storyboard on the blank 3D book with labelled boxes, ellipses, arrows and text. Replace once for the whole plan; after reading the reader's red marks (each reports its page, whether it loops, and which labels it touches), update only marked spreads and clear applied marks. Never waits for review.",
         inputSchema: {
           type: "object",
           properties: {
             requestId: { type: "string", description: "Caller-supplied idempotency id." },
             action: { type: "string", enum: ["replace", "update"] },
             spreads: { type: "array", minItems: 1, maxItems: 12, items: storyboardSpreadSchema },
+            expectedStoryboardRevision: {
+              type: "integer",
+              minimum: 0,
+              description: "storyboard.revision from the context you read. Required with resolvedAnnotations so marks drawn after that read are never cleared unseen.",
+            },
             resolvedAnnotations: {
               type: "array",
               maxItems: 12,
@@ -1363,23 +1431,35 @@ export function registerWebMcpTools(
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: (input, options) => runRegisteredTool(SITE_TOOL.storyboard, options?.signal ?? uncancelledToolSignal, () => {
-          assertOnly(input, ["requestId", "action", "spreads", "resolvedAnnotations"]);
+          assertOnly(input, ["requestId", "action", "spreads", "expectedStoryboardRevision", "resolvedAnnotations"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
           const action = pick(input.action, "action", ["replace", "update"] as const);
           if (!action) invalid("action is required.");
-          const storyboard = applyStoryboardSketches(
-            action,
-            parseStoryboardSpreads(input.spreads),
-            parseStoryboardIndexes(input.resolvedAnnotations),
-          );
+          const resolvedAnnotations = parseStoryboardIndexes(input.resolvedAnnotations);
+          const expectedStoryboardRevision = input.expectedStoryboardRevision;
+          if (typeof expectedStoryboardRevision !== "undefined" && (!Number.isInteger(expectedStoryboardRevision) || Number(expectedStoryboardRevision) < 0)) {
+            invalid("expectedStoryboardRevision must be a non-negative integer.");
+          }
+          if (resolvedAnnotations.length > 0 && typeof expectedStoryboardRevision === "undefined") {
+            invalid("expectedStoryboardRevision is required when clearing annotations.");
+          }
+          const applied = applyStoryboardSketches(action, parseStoryboardSpreads(input.spreads), resolvedAnnotations, expectedStoryboardRevision as number | undefined);
+          if (!applied.ok) {
+            return remember(requestId, {
+              ...applied,
+              currentStoryboardRevision: applied.currentRevision,
+              storyboard: summarizeStoryboard(),
+              summary: `The reader changed the storyboard after revision ${expectedStoryboardRevision}; read the new annotations and retry with a fresh requestId.`,
+            });
+          }
           onStoryboardUpdate();
           return remember(requestId, {
             ok: true,
-            storyboard,
+            storyboard: summarizeStoryboard(applied.storyboard),
             summary: action === "replace" ? "The complete rough storyboard is visible on the book." : "The marked spreads were revised in place.",
-            next: "Continue working. If the reader adds red marks, refresh get_project_context and revise only those spreads.",
+            next: "Continue working. If the reader adds red marks, refresh get_project_context: a loop around a label means change that thing; a stroke across it means remove or move it. Revise only those spreads.",
           });
         }),
       },

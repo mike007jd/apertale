@@ -21,7 +21,7 @@ export const CREATION_PHOTO_USES = [
   { id: "preserve-originals", label: "Keep original photos" },
 ] as const;
 export const CREATION_INTERACTION_DENSITIES = INTERACTION_DENSITIES;
-type CreationPhotoUse = (typeof CREATION_PHOTO_USES)[number]["id"];
+export type CreationPhotoUse = (typeof CREATION_PHOTO_USES)[number]["id"];
 
 /** One source image per spread covers a full book without overloading the horizontal strip. */
 export const MAX_WORKSHOP_ASSETS = 12;
@@ -30,7 +30,7 @@ const WORKSHOP_ASSET_ORDER_KEY = "apertale:workshop-asset-order:v1";
 type CreationStyle = (typeof CREATION_STYLES)[number];
 export type WorkshopAsset = { id: string; name: string; url: string };
 
-type CreationWorkshopState = {
+export type CreationWorkshopState = {
   mode: AuthoringMode;
   spreadCount: number;
   visualDirection: CreationStyle;
@@ -48,7 +48,7 @@ export const INITIAL_CREATION_WORKSHOP: CreationWorkshopState = {
   assets: [],
 };
 
-type CreationWorkshopAction =
+export type CreationWorkshopAction =
   | { type: "set-mode"; mode: AuthoringMode }
   | { type: "set-spread-count"; spreadCount: number }
   | { type: "set-visual-direction"; visualDirection: CreationStyle }
@@ -190,8 +190,11 @@ export async function importCreationWorkshopAssets(files: Iterable<File>, limit:
   };
 }
 
+/** Photos are in play for every mode except a pure idea brief. */
+export const workshopUsesPhotos = (state: Pick<CreationWorkshopState, "mode">) => state.mode !== "idea";
+
 export function buildCreationWorkshopBrief(state: CreationWorkshopState): CreationBrief {
-  const usesPhotos = state.mode !== "idea";
+  const usesPhotos = workshopUsesPhotos(state);
   const bookType = !usesPhotos
     ? "illustrated-storybook"
     : state.photoUse === "illustrated-keepsake"

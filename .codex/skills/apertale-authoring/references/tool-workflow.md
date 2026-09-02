@@ -11,18 +11,32 @@ Call `get_project_context`:
 - `detail: "creation-readiness"` with the structured brief before create; ask every blocking question and re-check until `ready: true`;
 - `detail: "assets"` after direct host media transfer or a completed `request_image_handoff`;
 - `detail: "selected-reveal"` only when revising the selected element's knowledge card.
-- `detail: "quality-review"` after the current cover and every spread have rendered; use its rubric, deterministic checks, render manifest, and round state.
+- `detail: "quality-review"` after the current cover and every spread have rendered; use its rubric, deterministic checks, render manifest, and round state;
+- `detail: "storyboard"` only when you need the full pencil stroke geometry back. Compact context already carries `storyboard.revision`, per-spread stroke counts, captions, and every red annotation the reader drew.
 
 Treat returned book, spread, and element ids as stable identifiers. Never invent an existing id.
 Read the returned capabilities as a runtime contract. In particular, use `full-spread-illustration-stage` for cross-gutter composition and `layered-image-interaction` for hover/click planning.
 
-## 2. Request an image handoff when needed
+## 2. Sketch the storyboard before final art
+
+Call `sketch_storyboard(action: "replace")` once with every planned spread: a short `caption` and 4–10 `marks`. Spread coordinates run x 0 → 1 from the left page's outer edge through the gutter at 0.5 to the right page's outer edge, and y 0 → 1 top to bottom. Plan in labelled regions, not freehand:
+
+- `{ kind: "rect" | "ellipse", x, y, w, h, label }` for every subject and its place (`"boat"`, `"lighthouse"`, `"title"`);
+- `{ kind: "arrow", from, to, label }` for motion, gaze, or reading order;
+- `{ kind: "label", x, y, text, size }` for words on the page: the working title, a mood note, a caption placeholder;
+- `{ kind: "line", points }` only for a horizon, path, or outline the vocabulary cannot express.
+
+Keep each label short and reuse the exact same word when you generate the final art, because the reader's red marks come back addressed to those labels. The blank 3D book draws the marks one after another and the workshop opens on the reader's screen; the call never waits for review.
+
+The reader may draw red marks on any spread. Read them from compact `get_project_context` (`storyboard.spreads[].annotations`): each carries `page` (`left`, `right`, `both`), `shape` (`loop` encloses something, `stroke` underlines, crosses, or points), `bounds`, and `near`, the labels it touches. A loop around `"boat"` means change that thing; a stroke across it means remove or move it; a mark with no `near` label is a new element the reader wants there. Then call `sketch_storyboard(action: "update")` for only the marked spreads, passing the `expectedStoryboardRevision` you read together with `resolvedAnnotations` for the spreads you incorporated. A `storyboard_conflict` result means the reader drew more after your read: read again, then retry with a fresh `requestId`. Generate final compositions only after this visible plan.
+
+## 3. Request an image handoff when needed
 
 Use `request_image_handoff` only when direct host media transfer is unavailable. Supply a unique `requestId`, an `assetUse`, and a concise `reason` that tells the reader what image material and quantity are needed. Use `source-photo` for reader-supplied reference images; those join the next creation brief and share its 12-photo limit. Use `book-art` for generated covers, spread composites, clean plates, and cutouts; those enter only the reusable asset registry and do not alter the brief. The call returns as soon as the matching drawer and drop target are visible.
 
 Inspect the current Agent tool inventory after the drawer opens; the page cannot detect host capabilities. When Computer Use or a browser file chooser is available, select the files from their actual directory. Otherwise open that directory in the user's file manager and ask the reader once to drag its files onto the visible target. Generated book art normally lives in `work/final-assets`; resolve and open the real path instead of asking the reader to find a hidden work directory. After import, refresh `get_project_context(detail: "assets")` and bind only returned browser-local asset ids. Do not claim success until those ids appear.
 
-## 3. Open or atomically create a complete book
+## 4. Open or atomically create a complete book
 
 Use `manage_book`:
 
@@ -39,11 +53,11 @@ Image generation does not happen inside this tool. Generate the cover, composite
 
 If a mutation returns `ok: true` with `presentation.status: "pending"`, the document is already saved but the exact visible frame was not confirmed. Retry the same `requestId` until presentation completes. A new request id would create a duplicate instead of resuming.
 
-## 4. Refine copy
+## 5. Refine copy
 
 Use `compose_spread` to change one existing spread's title, kicker, or body without disturbing its scene. Refresh context after each call because every document mutation advances the revision.
 
-## 5. Refine the scene after visual critique
+## 6. Refine the scene after visual critique
 
 The initial scene already arrives in the atomic create manifest. Use one atomic `apply_scene_patch` per coherent post-create critique fix. It can add, update, remove, or reorder up to 24 elements.
 
@@ -62,11 +76,11 @@ Interaction vocabulary:
 
 Use a reveal when interaction teaches, identifies, or advances the story. Keep illustrated subjects still by default and signal interaction with hover light or a short lift. Use `water-bob` for a boat that should remain on its local patch of water; reserve traversal for a subject whose route stays visually valid. Do not add motion merely to make every object move.
 
-## 6. Present
+## 7. Present
 
 Use `set_presentation` for `paper-atelier` (Day), `midnight-desk` (Night), Preview, `surface: "shelf"` cover inspection, and `spreadId` reader navigation during visual review. A non-pending result confirms that the requested shelf or reader surface is visible; `presentation.status: "pending"` is not visual evidence and must be resumed with the same `requestId`. Rendering evidence remains separately observable in quality context. Presentation changes do not advance the document revision.
 
-## 7. Critique, patch, and publish gate
+## 8. Critique, patch, and publish gate
 
 1. Render the cover on the shelf and visit every spread in the current revision.
 2. Call `get_project_context(detail: "quality-review")`.
@@ -76,7 +90,7 @@ Use `set_presentation` for `paper-atelier` (Day), `midnight-desk` (Night), Previ
 6. Patch, render, read the refreshed quality context, and explicitly begin the next check when needed. Round two is the final automated critique round.
 7. Stop for source material or a user decision when blockers remain. Share is available only when `publishAllowed: true`; recorded warnings may proceed.
 
-## 8. Undo
+## 9. Undo
 
 Use `undo_project_change` with the current revision and the exact returned undo token. Undo is conflict-aware and will preserve newer edits. Record replacement undo tokens returned by successful undo operations.
 

@@ -16,7 +16,6 @@ import {
   Lock,
   LockOpen,
   Minus,
-  PencilSimple,
   Plus,
   ImageSquare,
   LinkSimple,
@@ -31,16 +30,13 @@ import { bookEngine, humanAnimate, humanEdit, humanInteract } from "./bookEngine
 import { deleteBookEverywhere } from "./bookLifecycle";
 import { acquireAssetPreviewUrl, acquireAssetUrl, releaseAssetUrls, storeLocalImages, type AssetUrlLease } from "./assetStore";
 import {
-  CREATION_LENGTHS,
   CREATION_INTERACTION_DENSITIES,
-  CREATION_PHOTO_USES,
-  CREATION_SOURCES,
-  CREATION_STYLES,
   INITIAL_CREATION_WORKSHOP,
   MAX_WORKSHOP_ASSETS,
   admitWorkshopAssets,
   buildCreationWorkshopBrief,
   importCreationWorkshopAssets,
+  workshopUsesPhotos,
   persistCreationWorkshopAssetOrder,
   reduceCreationWorkshop,
   restoreCreationWorkshopAssets,
@@ -89,8 +85,10 @@ import type { PublicationRecord } from "./publishingClient";
 import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
 import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
-import { addStoryboardAnnotation, getStoryboardSnapshot, subscribeToStoryboard, undoStoryboardAnnotation } from "./storyboard";
+import { MAX_ANNOTATIONS_PER_SPREAD, addStoryboardAnnotation, clearStoryboardAnnotations, getStoryboardSnapshot, subscribeToStoryboard, undoStoryboardAnnotation } from "./storyboard";
 import { registerWebMcpTools } from "./webmcp";
+import { StoryPencilControls, WorkshopPickers } from "./workshopControls";
+import { ElementAgentCard } from "./ElementAgentCard";
 
 const runtimeParams = new URLSearchParams(window.location.search);
 const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -284,6 +282,9 @@ export function App() {
   const storyboard = useSyncExternalStore(subscribeToStoryboard, getStoryboardSnapshot, getStoryboardSnapshot);
   const [workshopSpreadIndex, setWorkshopSpreadIndex] = useState(0);
   const [storyPencilActive, setStoryPencilActive] = useState(false);
+  const [storyboardNotice, setStoryboardNotice] = useState<string | null>(null);
+  const previousStoryboard = useRef(storyboard);
+  const storyboardNoticeTimeout = useRef(0);
   const [workshopHydrated, setWorkshopHydrated] = useState(false);
   const [workshopHydrationAttempt, setWorkshopHydrationAttempt] = useState(0);
   const [assetImporting, setAssetImporting] = useState(false);
@@ -310,11 +311,10 @@ export function App() {
   const creationStyle = creationWorkshop.visualDirection;
   const creationInteractionDensity = creationWorkshop.interactionDensity;
   const creationSource = creationWorkshop.mode;
-  const creationPhotoUse = creationWorkshop.photoUse;
   const workshopAssets = creationWorkshop.assets;
   const activeWorkshopSpreadIndex = Math.min(workshopSpreadIndex, creationSpreadCount - 1);
   const currentStoryboardSpread = storyboard.spreads.find((item) => item.index === activeWorkshopSpreadIndex);
-  const storyboardVisible = storyboard.spreads.some((item) => item.sketches.length > 0);
+  const storyboardVisible = storyboard.spreads.some((item) => item.marks.length > 0);
   const pageTurnIndexRef = useRef(snapshot.session.currentSpreadIndex);
   const pageTurnCountRef = useRef(snapshot.document.spreads.length);
   const pageTurnDocumentRef = useRef(snapshot.document.id);
@@ -390,6 +390,32 @@ export function App() {
   useEffect(() => {
     if (!showCreateGuide) setStoryPencilActive(false);
   }, [showCreateGuide]);
+
+  // The reader's marks vanish when Codex applies them. Say so, or the reader
+  // cannot tell an applied correction from a mis-tap on Undo.
+  useEffect(() => {
+    const previous = previousStoryboard.current;
+    previousStoryboard.current = storyboard;
+    if (storyboard.revision <= previous.revision) return;
+    const applied = storyboard.spreads.filter((spread) => {
+      const before = previous.spreads.find((item) => item.index === spread.index);
+      return before && before.annotations.length > 0 && spread.annotations.length === 0 && spread.sketchRevision > before.sketchRevision;
+    });
+    const sketched = storyboard.spreads.filter((spread) => spread.sketchRevision === storyboard.revision);
+    const notice = applied.length === 1
+      ? `Codex applied your marks on spread ${applied[0].index + 1}`
+      : applied.length > 1
+        ? `Codex applied your marks on ${applied.length} spreads`
+        : sketched.length === 1 && previous.spreads.some((spread) => spread.index === sketched[0].index)
+          ? `Codex revised spread ${sketched[0].index + 1}`
+          : sketched.length > 0
+            ? `Codex sketched ${sketched.length} spread${sketched.length === 1 ? "" : "s"}`
+            : null;
+    if (!notice) return;
+    setStoryboardNotice(notice);
+    window.clearTimeout(storyboardNoticeTimeout.current);
+    storyboardNoticeTimeout.current = window.setTimeout(() => setStoryboardNotice(null), 4200);
+  }, [storyboard]);
 
   const turnPage = turnController.turnPage;
   const onPageGesture = turnController.onPageGesture;
@@ -1575,7 +1601,7 @@ export function App() {
     window.setTimeout(() => addPhotoButton.current?.focus(), 0);
   };
 
-  const usesPhotos = creationSource !== "idea";
+  const usesPhotos = workshopUsesPhotos(creationWorkshop);
   const displayedImageHandoff = handoffRequest ?? partialImageHandoff;
   const handoffIsBookArt = displayedImageHandoff?.assetUse === "book-art";
   const showImagePicker = usesPhotos || Boolean(displayedImageHandoff);
@@ -2147,39 +2173,24 @@ export function App() {
           <div className="workshop-atmosphere" aria-hidden="true" />
           <dialog className="workshop-ui" ref={createGuideCard} aria-labelledby="codex-guide-title">
             {storyboardVisible && !handoffIsBookArt && (
-              <div className="story-pencil-controls" aria-label="Storyboard pages and correction pencil">
-                <button
-                  type="button"
-                  onClick={() => setWorkshopSpreadIndex((index) => Math.max(0, index - 1))}
-                  disabled={activeWorkshopSpreadIndex === 0}
-                  aria-label="Previous storyboard spread"
-                ><ArrowLeft size={18} weight="bold" /></button>
-                <span className="story-pencil-beat">
-                  <small>Storyboard {activeWorkshopSpreadIndex + 1}/{creationSpreadCount}</small>
-                  <strong>{currentStoryboardSpread?.caption ?? "Waiting for Codex sketch"}</strong>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setWorkshopSpreadIndex((index) => Math.min(creationSpreadCount - 1, index + 1))}
-                  disabled={activeWorkshopSpreadIndex === creationSpreadCount - 1}
-                  aria-label="Next storyboard spread"
-                ><ArrowRight size={18} weight="bold" /></button>
-                <button
-                  type="button"
-                  className={`story-pencil-toggle ${storyPencilActive ? "is-active" : ""}`}
-                  onClick={() => setStoryPencilActive((active) => !active)}
-                  aria-pressed={storyPencilActive}
-                  aria-label={storyPencilActive ? "Stop marking changes" : "Mark changes on this spread"}
-                ><PencilSimple size={19} weight={storyPencilActive ? "fill" : "regular"} /><span>{storyPencilActive ? "Marking" : "Mark changes"}</span></button>
-                {Boolean(currentStoryboardSpread?.annotations.length) && (
-                  <button
-                    type="button"
-                    onClick={() => undoStoryboardAnnotation(activeWorkshopSpreadIndex)}
-                    aria-label="Undo last red mark"
-                  ><ArrowCounterClockwise size={18} /></button>
-                )}
-              </div>
+              <StoryPencilControls
+                index={activeWorkshopSpreadIndex}
+                count={creationSpreadCount}
+                caption={currentStoryboardSpread?.caption}
+                active={storyPencilActive}
+                annotationCount={currentStoryboardSpread?.annotations.length ?? 0}
+                annotationLimit={MAX_ANNOTATIONS_PER_SPREAD}
+                onPrevious={() => setWorkshopSpreadIndex((index) => Math.max(0, index - 1))}
+                onNext={() => setWorkshopSpreadIndex((index) => Math.min(creationSpreadCount - 1, index + 1))}
+                onToggle={() => setStoryPencilActive((active) => !active)}
+                onUndo={() => undoStoryboardAnnotation(activeWorkshopSpreadIndex)}
+                onClear={() => clearStoryboardAnnotations(activeWorkshopSpreadIndex)}
+              />
             )}
+            <Toast open={Boolean(storyboardNotice)} className="story-pencil-notice">
+              <Check size={16} weight="bold" />
+              <span>{storyboardNotice}</span>
+            </Toast>
             <header className="workshop-topbar">
               <button
                 className="library-button"
@@ -2201,92 +2212,7 @@ export function App() {
                   <span>{webMcpAvailable ? "Site tools ready for Codex" : "Read here. Open in Codex (ChatGPT desktop) to create."}</span>
                 </p>}
 
-                {!handoffIsBookArt && <fieldset className="workshop-field">
-                  <legend>Start from</legend>
-                  <div className="workshop-segment">
-                    {CREATION_SOURCES.map((source) => (
-                      <button
-                        type="button"
-                        key={source.id}
-                        className={`workshop-option ${creationSource === source.id ? "is-selected" : ""}`}
-                        onClick={() => dispatchCreationWorkshop({ type: "set-mode", mode: source.id })}
-                        aria-pressed={creationSource === source.id}
-                      >{source.label}</button>
-                    ))}
-                  </div>
-                </fieldset>}
-
-                {!handoffIsBookArt && <fieldset className="workshop-field">
-                  <legend>Spreads</legend>
-                  <div className="workshop-lengths">
-                    {CREATION_LENGTHS.map((count) => (
-                      <button
-                        type="button"
-                        key={count}
-                        className={`workshop-option ${creationSpreadCount === count ? "is-selected" : ""}`}
-                        onClick={() => dispatchCreationWorkshop({ type: "set-spread-count", spreadCount: count })}
-                        aria-pressed={creationSpreadCount === count}
-                        aria-label={`${count} spreads`}
-                      >{count}</button>
-                    ))}
-                  </div>
-                </fieldset>}
-
-                {!handoffIsBookArt && <fieldset className="workshop-field">
-                  <legend>Style</legend>
-                  <div className="workshop-chips">
-                    {CREATION_STYLES.map((style) => (
-                      <button
-                        type="button"
-                        key={style}
-                        className={`workshop-option ${creationStyle === style ? "is-selected" : ""}`}
-                        onClick={() => dispatchCreationWorkshop({ type: "set-visual-direction", visualDirection: style })}
-                        aria-pressed={creationStyle === style}
-                      >{style}</button>
-                    ))}
-                  </div>
-                </fieldset>}
-
-                {!handoffIsBookArt && <fieldset className="workshop-field">
-                  <legend>Interactive layers</legend>
-                  <div className="workshop-segment">
-                    {CREATION_INTERACTION_DENSITIES.map((choice) => (
-                      <button
-                        type="button"
-                        key={choice.id}
-                        className={`workshop-option ${creationInteractionDensity === choice.id ? "is-selected" : ""}`}
-                        onClick={() => dispatchCreationWorkshop({ type: "set-interaction-density", interactionDensity: choice.id })}
-                        aria-pressed={creationInteractionDensity === choice.id}
-                        aria-label={`${choice.label}: ${choice.count} per spread`}
-                      >{choice.label}{choice.id === "low" || choice.id === "balanced" ? ` · ${choice.count}` : ""}</button>
-                    ))}
-                  </div>
-                </fieldset>}
-
-                {/* Photo use sits at the END of the panel, beside the photos
-                    it describes. It used to be inserted between Start from and
-                    Spreads, so choosing a photo mode shoved everything the
-                    reader was already looking at further down the page.
-                    Deliberately NOT height-animated: an animated collapse that
-                    fails to run leaves the options present but invisible and
-                    unclickable, and hiding working controls is a worse failure
-                    than appearing without a flourish. */}
-                {!handoffIsBookArt && usesPhotos && (
-                  <fieldset className="workshop-field">
-                    <legend>Photo use</legend>
-                    <div className="workshop-segment workshop-photo-use">
-                      {CREATION_PHOTO_USES.map((choice) => (
-                        <button
-                          type="button"
-                          key={choice.id}
-                          className={`workshop-option ${creationPhotoUse === choice.id ? "is-selected" : ""}`}
-                          onClick={() => dispatchCreationWorkshop({ type: "set-photo-use", photoUse: choice.id })}
-                          aria-pressed={creationPhotoUse === choice.id}
-                        >{choice.label}</button>
-                      ))}
-                    </div>
-                  </fieldset>
-                )}
+                {!handoffIsBookArt && <WorkshopPickers workshop={creationWorkshop} dispatch={dispatchCreationWorkshop} />}
                 {showImagePicker && (
                   <section
                     className="workshop-photos"
@@ -2408,37 +2334,18 @@ export function App() {
       )}
 
       {showElementAgentGuide && selected && !snapshot.session.preview && (
-        <section className="element-agent-overlay">
-          <dialog className="element-agent-card" ref={elementAgentCard} aria-labelledby="element-agent-title">
-            <header>
-              <span><Sparkle size={16} weight="fill" /> Ask Codex about this element</span>
-              <button autoFocus onClick={closeElementAgentGuide} aria-label="Close Ask Codex handoff"><X size={18} /></button>
-            </header>
-            <div className="element-agent-body">
-              <p>Selected element</p>
-              <h2 id="element-agent-title">{selected.label}</h2>
-              <span>This keeps the current book and spread. It does not start a new book.</span>
-              <dl>
-                <div><dt>Book</dt><dd>{snapshot.document.title}</dd></div>
-                <div><dt>Spread</dt><dd>{spread.title}</dd></div>
-                <div><dt>Intent</dt><dd>{selectedInteraction?.hint}</dd></div>
-              </dl>
-            </div>
-            <footer>
-              <p>Continue in the Agent conversation beside this page.</p>
-              <button className="copy-element-request" onClick={() => void copySelectedElementPrompt()}>
-                {elementPromptCopied ? <Check size={17} weight="bold" /> : <Copy size={17} weight="bold" />}
-                {elementPromptCopied ? "Copied — paste in your Agent" : "Copy element request"}
-              </button>
-              {elementPromptCopyError && (
-                <div className="copy-fallback" role="alert">
-                  <span>Copy was blocked. Select the request below.</span>
-                  <textarea readOnly value={selectedElementPrompt} onFocus={(event) => event.currentTarget.select()} aria-label="Element request to copy manually" />
-                </div>
-              )}
-            </footer>
-          </dialog>
-        </section>
+        <ElementAgentCard
+          dialogRef={elementAgentCard}
+          label={selected.label}
+          bookTitle={snapshot.document.title}
+          spreadTitle={spread.title}
+          hint={selectedInteraction?.hint}
+          prompt={selectedElementPrompt}
+          copied={elementPromptCopied}
+          copyError={elementPromptCopyError}
+          onCopy={() => void copySelectedElementPrompt()}
+          onClose={closeElementAgentGuide}
+        />
       )}
 
       {showPublication && isCreatorBook && !snapshot.session.preview && (
@@ -2453,7 +2360,7 @@ export function App() {
 
       {pendingDestructiveAction && (
         <dialog
-          className="publication-card destructive-action-card"
+          className="agent-card publication-card destructive-action-card"
           ref={destructiveActionDialog}
           role="alertdialog"
           aria-labelledby="destructive-action-title"

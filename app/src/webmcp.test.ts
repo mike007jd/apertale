@@ -166,19 +166,47 @@ describe("WebMCP registration", () => {
       spreads: [{
         index: 0,
         caption: "The guide finds a hidden path",
-        strokes: [{ points: [{ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.5 }] }],
+        marks: [
+          { kind: "rect", x: 0.55, y: 0.4, w: 0.2, h: 0.25, label: "guide" },
+          { kind: "arrow", from: { x: 0.3, y: 0.5 }, to: { x: 0.5, y: 0.5 }, label: "path" },
+          { kind: "label", x: 0.1, y: 0.1, text: "Dawn", size: "l" },
+          { kind: "line", points: [{ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.5 }] },
+        ],
       }],
     }, { signal: new AbortController().signal })));
-    expect(result).toMatchObject({ ok: true, storyboard: { revision: 1 } });
+    expect(result).toMatchObject({ ok: true, storyboard: { revision: 1, spreads: [{ index: 0, marks: [{ kind: "rect", label: "guide" }, { kind: "arrow" }, { kind: "label", label: "Dawn" }, { kind: "line" }] }] } });
+    expect(JSON.stringify(result.storyboard)).not.toContain("points");
     expect(revealStoryboard).toHaveBeenCalledOnce();
 
-    addStoryboardAnnotation(0, { points: [{ x: 0.2, y: 0.3 }, { x: 0.25, y: 0.35 }] });
+    addStoryboardAnnotation(0, { points: [{ x: 0.6, y: 0.45 }, { x: 0.7, y: 0.5 }] });
     const context = JSON.parse(String(await tool("get_project_context").execute({}, { signal: new AbortController().signal })));
     expect(context.storyboard.spreads[0]).toMatchObject({
       caption: "The guide finds a hidden path",
-      annotations: [{ points: [{ x: 0.2, y: 0.3 }, { x: 0.25, y: 0.35 }] }],
+      annotations: [{ shape: "stroke", page: "right", near: ["guide"], points: [{ x: 0.6, y: 0.45 }, { x: 0.7, y: 0.5 }] }],
     });
+    const full = JSON.parse(String(await tool("get_project_context").execute({ detail: "storyboard" }, { signal: new AbortController().signal })));
+    expect(full.storyboard.spreads[0].marks[3]).toEqual({ kind: "line", points: [{ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.5 }] });
     expect(getStoryboardSnapshot().revision).toBe(2);
+
+    // A mark drawn after the Agent's read must survive its resolvedAnnotations.
+    addStoryboardAnnotation(0, { points: [{ x: 0.6, y: 0.6 }, { x: 0.7, y: 0.7 }] });
+    const update = (requestId: string, expectedStoryboardRevision?: number) => tool("sketch_storyboard").execute({
+      requestId,
+      action: "update",
+      spreads: [{ index: 0, marks: [{ kind: "line", points: [{ x: 0.2, y: 0.2 }, { x: 0.3, y: 0.3 }] }] }],
+      ...(typeof expectedStoryboardRevision === "number" ? { expectedStoryboardRevision } : {}),
+      resolvedAnnotations: [0],
+    }, { signal: new AbortController().signal });
+    await expect(update("storyboard-2")).rejects.toThrow(/expectedStoryboardRevision/);
+    expect(JSON.parse(String(await update("storyboard-3", 2)))).toMatchObject({
+      ok: false,
+      code: "storyboard_conflict",
+      currentStoryboardRevision: 3,
+      storyboard: { spreads: [{ index: 0, annotations: [{}, {}] }] },
+    });
+    expect(getStoryboardSnapshot().spreads[0].annotations).toHaveLength(2);
+    expect(JSON.parse(String(await update("storyboard-4", 3)))).toMatchObject({ ok: true, storyboard: { revision: 4 } });
+    expect(getStoryboardSnapshot().spreads[0].annotations).toHaveLength(0);
     cleanup();
   });
 

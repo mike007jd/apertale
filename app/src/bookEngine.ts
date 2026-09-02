@@ -7,7 +7,7 @@ import {
   BOOK_LIBRARY_STORAGE_KEY,
 } from "./bookLifecycle";
 import { isStoredAssetId } from "./assetId";
-import { CREATION_READINESS_VERSION, MAX_BOOK_PUBLISHABLE_ASSETS, assessCreationReadiness, interactionLayerTarget, type CreationBriefPayload } from "./authoringContract";
+import { MAX_BOOK_PUBLISHABLE_ASSETS, assessCreationReadiness, interactionLayerTarget, type CreationBriefPayload } from "./authoringContract";
 import {
   bookAssetReferenceFindings,
   bookAssetReferenceIssueKey,
@@ -19,17 +19,20 @@ import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS, has
 import { listProjectAssetReferences, listStoredPublishedAssetIds } from "./projectArtifact";
 import { getPublicationRecord } from "./publishingClient";
 import {
+  adoptCreationBrief as adoptCreationBriefLifecycle,
+  beginQualityReview as beginQualityReviewLifecycle,
+  recordQualityReview as recordQualityReviewLifecycle,
+  recordRenderEvidence as recordRenderEvidenceLifecycle,
+} from "./qualityLifecycle";
+import {
   QUALITY_REVIEW_MAX_ROUNDS,
   QUALITY_REVIEW_STATUSES,
-  buildQualityReport,
   creationArtifactIssues,
   creationAssetPolicyIssues,
-  evaluateDeterministicQuality,
   isCurrentQualityReport,
   qualityGateState,
-  validateVisualReview,
 } from "./qualityContract";
-import { BOOK_ELEMENT_ID_PATTERN, DIRECT_MANIPULATION, MOTION_PRESETS, MAX_BOOK_SPREADS, THEME_IDS, isProceduralAssetId, isProceduralElement, spreadBaseAssetId } from "./types";
+import { BOOK_ELEMENT_ID_PATTERN, DIRECT_MANIPULATION, MOTION_PRESETS, MAX_BOOK_SPREADS, isProceduralAssetId, isProceduralElement, spreadBaseAssetId } from "./types";
 import type {
   AuthoringQualityLifecycle,
   QualityGateState,
@@ -66,17 +69,6 @@ import type {
 const SAMPLE_SOURCE_VERSION = 4;
 const REQUEST_RESULT_LIMIT = 128;
 const UNDO_RECORD_LIMIT = 32;
-
-/**
- * Every render-evidence identity a fully rendered book can hold at one
- * revision: each spread on both themes across the WebGL and fallback
- * surfaces, plus a shelf cover per theme. Bounding the buffer at this derived
- * size keeps storage bounded while a complete 12-spread book can never evict
- * genuine current-revision evidence.
- */
-const RENDER_EVIDENCE_LIMIT = MAX_BOOK_SPREADS * THEME_IDS.length * 2 + THEME_IDS.length;
-
-const renderEvidenceKey = (item: QualityRenderEvidence) => `${item.scope}:${item.spreadId ?? ""}:${item.theme}:${item.surface}`;
 
 type ElementField = "label" | "kind" | "assetId" | "frameAssetIds" | "page" | "depth" | "locked" | "motion" | "transform" | "interaction" | "provenance";
 
@@ -499,19 +491,6 @@ export class BookEngine {
     return this.libraryState.authoringQuality?.[documentId] ?? null;
   }
 
-  private ensureQualityLifecycle(documentId = this.documentState.id) {
-    const existing = this.qualityLifecycle(documentId);
-    if (existing) return existing;
-    const lifecycle: AuthoringQualityLifecycle = {
-      creationBrief: {},
-      reviewRounds: 0,
-      reviewStatus: "needs-review",
-      renderEvidence: [],
-    };
-    this.qualityLifecycles()[documentId] = lifecycle;
-    return lifecycle;
-  }
-
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -724,7 +703,7 @@ export class BookEngine {
         }
         const target = durableLibrary.documents.find((book) => book.id === documentId);
         if (!target) return fail("not_found", "That book is no longer in Your books.");
-        if (sampleBooks.some((sample) => sample.id === documentId)) {
+        if (this.isSampleDocument(documentId)) {
           return fail("sample_book", "Curated Apertale books stay in Explore and cannot be deleted.");
         }
         if (getPublicationRecord(documentId)) {
@@ -784,282 +763,52 @@ export class BookEngine {
     }) ?? false;
   }
 
+  private isSampleDocument(documentId = this.documentState.id) {
+    return sampleBooks.some((sample) => sample.id === documentId);
+  }
+
+  /** Persists a lifecycle decision that moved the store; a surfaced action replaces the plain emit. */
+  private commitLifecycle<Outcome extends { changed: boolean; action?: string; result: unknown }>(outcome: Outcome): Outcome["result"] {
+    if (outcome.changed) {
+      this.persist();
+      if (outcome.action) this.showAction("agent", "success", outcome.action);
+      else this.emit();
+    }
+    return outcome.result;
+  }
+
   adoptCreationBrief(
     creationBrief: CreationBriefPayload,
     validatedSourceAssetIds: string[],
     expectedRevision: number,
     assetRoleIssues: readonly string[],
   ) {
-    if (expectedRevision !== this.documentState.revision) {
-      return {
-        ok: false as const,
-        code: "revision_conflict" as const,
-        currentRevision: this.documentState.revision,
-        summary: `Expected revision ${expectedRevision}; refresh creation-readiness before attaching the brief.`,
-      };
-    }
-    if (sampleBooks.some((sample) => sample.id === this.documentState.id)) {
-      return {
-        ok: false as const,
-        code: "invalid" as const,
-        currentRevision: this.documentState.revision,
-        summary: "Curated samples keep their shipped provenance and cannot adopt a personal creation brief.",
-      };
-    }
-    const existing = this.qualityLifecycle();
-    if (
-      existing?.creationBrief?.bookType
-      && existing.creationBrief.contractVersion === CREATION_READINESS_VERSION
-    ) {
-      return {
-        ok: false as const,
-        code: "creation_brief_already_attached" as const,
-        currentRevision: this.documentState.revision,
-        summary: "This book already has its immutable creation brief.",
-      };
-    }
-    if (assetRoleIssues.length > 0) {
-      return {
-        ok: false as const,
-        code: "creation_artifact_incomplete" as const,
-        currentRevision: this.documentState.revision,
-        summary: "This legacy book contains assets whose stored roles do not match their reader-facing use.",
-        issues: [...assetRoleIssues],
-      };
-    }
-    const readiness = assessCreationReadiness(creationBrief, {
-      expectedSpreadCount: this.documentState.spreads.length,
+    return this.commitLifecycle(adoptCreationBriefLifecycle(
+      this.qualityLifecycles(),
+      this.documentState,
+      this.isSampleDocument(),
+      creationBrief,
       validatedSourceAssetIds,
-    });
-    if (!readiness.ready) {
-      return {
-        ok: false as const,
-        code: "creation_not_ready" as const,
-        currentRevision: this.documentState.revision,
-        summary: "This legacy book needs a complete creation brief before quality review.",
-        readiness,
-      };
-    }
-    this.qualityLifecycles()[this.documentState.id] = {
-      creationBrief: clone(creationBrief),
-      reviewRounds: 0,
-      reviewStatus: "needs-review",
-      renderEvidence: [],
-    };
-    this.persist();
-    this.emit();
-    return {
-      ok: true as const,
-      currentRevision: this.documentState.revision,
-      summary: "Attached the ready creation brief. Render this revision before critique.",
-      qualityGate: this.getQualityGate(),
-    };
+      expectedRevision,
+      assetRoleIssues,
+    ));
   }
 
   beginQualityReview(expectedRevision?: number) {
-    if (typeof expectedRevision === "number" && expectedRevision !== this.documentState.revision) {
-      return {
-        ok: false as const,
-        code: "revision_conflict" as const,
-        currentRevision: this.documentState.revision,
-        summary: `Expected revision ${expectedRevision}; refresh quality-review before starting critique.`,
-      };
-    }
-    const lifecycle = this.ensureQualityLifecycle();
-    if (
-      lifecycle.creationBrief?.bookType
-      && lifecycle.creationBrief.contractVersion !== CREATION_READINESS_VERSION
-    ) {
-      return {
-        ok: false as const,
-        code: "creation_brief_upgrade_required" as const,
-        currentRevision: this.documentState.revision,
-        summary: `Replace the legacy creation brief with contract version ${CREATION_READINESS_VERSION} before starting quality review.`,
-        qualityGate: this.getQualityGate(),
-      };
-    }
-    if (!lifecycle.creationBrief?.bookType) {
-      return {
-        ok: false as const,
-        code: "creation_brief_required" as const,
-        currentRevision: this.documentState.revision,
-        summary: "Attach a readiness-passed creation brief before starting quality review.",
-        qualityGate: this.getQualityGate(),
-      };
-    }
-    if (
-      isCurrentQualityReport(lifecycle.report)
-      && lifecycle.report.status === "ready"
-      && lifecycle.report.reviewedRevision === this.documentState.revision
-    ) {
-      return {
-        ok: true as const,
-        currentRevision: this.documentState.revision,
-        alreadyReviewed: true,
-        nextRound: null,
-        remainingRounds: QUALITY_REVIEW_MAX_ROUNDS - lifecycle.reviewRounds,
-      };
-    }
-    if (lifecycle.reviewStatus === "checking") {
-      return {
-        ok: true as const,
-        currentRevision: this.documentState.revision,
-        nextRound: lifecycle.reviewRounds + 1,
-        remainingRounds: QUALITY_REVIEW_MAX_ROUNDS - lifecycle.reviewRounds,
-      };
-    }
-    if (lifecycle.reviewRounds >= QUALITY_REVIEW_MAX_ROUNDS && lifecycle.report?.status !== "ready") {
-      return {
-        ok: false as const,
-        code: "quality_review_limit" as const,
-        currentRevision: this.documentState.revision,
-        summary: "Two quality review rounds are complete. Ask for new material or a user decision.",
-        qualityGate: this.getQualityGate(),
-      };
-    }
-    if (lifecycle.report && lifecycle.report.status !== "ready" && lifecycle.report.reviewedRevision === this.documentState.revision) {
-      return {
-        ok: false as const,
-        code: "quality_patch_required" as const,
-        currentRevision: this.documentState.revision,
-        summary: "Apply the suggested patches before starting the next quality review round.",
-        qualityGate: this.getQualityGate(),
-      };
-    }
-    lifecycle.reviewStatus = "checking";
-    this.persist();
-    this.emit();
-    return {
-      ok: true as const,
-      currentRevision: this.documentState.revision,
-      nextRound: lifecycle.reviewRounds + 1,
-      remainingRounds: QUALITY_REVIEW_MAX_ROUNDS - lifecycle.reviewRounds,
-    };
+    return this.commitLifecycle(beginQualityReviewLifecycle(this.qualityLifecycles(), this.documentState, expectedRevision));
   }
 
   recordRenderEvidence(input: Omit<QualityRenderEvidence, "renderedAt">) {
     const documentState = input.documentId === this.documentState.id
       ? this.documentState
       : this.libraryState.documents.find((document) => document.id === input.documentId);
-    if (
-      !documentState
-      || input.revision !== documentState.revision
-      || sampleBooks.some((sample) => sample.id === documentState.id)
-    ) return false;
-    if (input.scope === "spread" && !documentState.spreads.some((spread) => spread.id === input.spreadId)) return false;
-    const lifecycle = this.ensureQualityLifecycle(documentState.id);
-    const next: QualityRenderEvidence = {
-      ...input,
-      renderedAt: new Date().toISOString(),
-    };
-    // Drop stale-revision history and the entry this render supersedes, keyed
-    // by evidence identity so WebGL and fallback evidence for the same spread
-    // coexist without evicting each other.
-    lifecycle.renderEvidence = [
-      ...lifecycle.renderEvidence.filter((item) => (
-        item.revision === documentState.revision && renderEvidenceKey(item) !== renderEvidenceKey(next)
-      )),
-      next,
-    ].slice(-RENDER_EVIDENCE_LIMIT);
-    if (
-      lifecycle.report?.reviewedRevision === documentState.revision
-      && lifecycle.report.status !== "ready"
-      && lifecycle.report.checks.some((check) => (
-        check.criterionId === "render-evidence-completeness" && check.outcome === "blocker"
-      ))
-      && evaluateDeterministicQuality(documentState, lifecycle.renderEvidence, lifecycle.creationBrief).some((check) => (
-        check.criterionId === "render-evidence-completeness" && check.outcome === "pass"
-      ))
-    ) {
-      lifecycle.reviewStatus = "needs-review";
-      delete lifecycle.report;
-    }
-    this.persist();
-    this.emit();
-    return true;
+    if (!documentState || this.isSampleDocument(documentState.id)) return false;
+    const changed = recordRenderEvidenceLifecycle(this.qualityLifecycles(), documentState, input);
+    return this.commitLifecycle({ changed, result: changed });
   }
 
   recordQualityReview(submission: QualityVisualReviewSubmission, expectedRevision?: number) {
-    if (typeof expectedRevision === "number" && expectedRevision !== this.documentState.revision) {
-      return {
-        ok: false as const,
-        code: "revision_conflict" as const,
-        currentRevision: this.documentState.revision,
-        summary: `Expected revision ${expectedRevision}; refresh quality-review before recording critique.`,
-      };
-    }
-    const lifecycle = this.ensureQualityLifecycle();
-    const nextRound = lifecycle.reviewRounds + 1;
-    if (lifecycle.reviewStatus !== "checking") {
-      return {
-        ok: false as const,
-        code: "quality_review_not_started" as const,
-        currentRevision: this.documentState.revision,
-        summary: "Start the quality review before recording the visual critique.",
-        qualityGate: this.getQualityGate(),
-      };
-    }
-    if (nextRound > QUALITY_REVIEW_MAX_ROUNDS) {
-      return {
-        ok: false as const,
-        code: "quality_review_limit" as const,
-        currentRevision: this.documentState.revision,
-        summary: "Two quality review rounds are complete. Ask for new material or a user decision.",
-        qualityGate: this.getQualityGate(),
-      };
-    }
-    if (lifecycle.report && lifecycle.report.status !== "ready" && lifecycle.report.reviewedRevision === this.documentState.revision) {
-      return {
-        ok: false as const,
-        code: "quality_patch_required" as const,
-        currentRevision: this.documentState.revision,
-        summary: "Apply the suggested patches before recording the next quality review round.",
-        qualityGate: this.getQualityGate(),
-      };
-    }
-    const invalid = validateVisualReview(this.documentState, submission, nextRound);
-    if (invalid) {
-      return {
-        ok: false as const,
-        code: "invalid_quality_review" as const,
-        currentRevision: this.documentState.revision,
-        summary: invalid,
-        qualityGate: this.getQualityGate(),
-      };
-    }
-    const deterministic = evaluateDeterministicQuality(this.documentState, lifecycle.renderEvidence, lifecycle.creationBrief);
-    const renderEvidenceBlocker = deterministic.find((check) => (
-      check.criterionId === "render-evidence-completeness" && check.outcome === "blocker"
-    ));
-    if (renderEvidenceBlocker) {
-      return {
-        ok: false as const,
-        code: "render_evidence_required" as const,
-        currentRevision: this.documentState.revision,
-        summary: renderEvidenceBlocker.message,
-        qualityGate: this.getQualityGate(),
-      };
-    }
-    const report = buildQualityReport(this.documentState, nextRound, deterministic, submission, lifecycle.creationBrief);
-    lifecycle.reviewRounds = nextRound;
-    lifecycle.reviewStatus = report.status;
-    lifecycle.report = report;
-    this.persist();
-    this.showAction(
-      "agent",
-      "success",
-      report.status === "ready"
-        ? "Quality review complete — this revision looks ready"
-        : report.status === "needs-user-input"
-          ? "Quality review complete — new material or a decision could improve it"
-          : "Quality review recorded — polish notes are available",
-    );
-    return {
-      ok: true as const,
-      currentRevision: this.documentState.revision,
-      qualityReport: clone(report),
-      qualityGate: this.getQualityGate(),
-    };
+    return this.commitLifecycle(recordQualityReviewLifecycle(this.qualityLifecycles(), this.documentState, submission, expectedRevision));
   }
 
   private makeSnapshot(): BookSnapshot {
@@ -1229,7 +978,7 @@ export class BookEngine {
         coverAssetId: book.coverAssetId,
         coverTextureUrl: book.coverTextureUrl ?? book.spreads[0]?.textureUrl ?? "/assets/generated/day-background.png",
         firstSpreadTitle: book.spreads[0]?.title ?? "Untitled spread",
-        sample: sampleBooks.some((sample) => sample.id === book.id),
+        sample: this.isSampleDocument(book.id),
       })),
     };
   }

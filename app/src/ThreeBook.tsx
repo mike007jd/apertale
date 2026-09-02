@@ -2,20 +2,19 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { acquireAssetUrl, acquireAssetUrls, isStoredAssetId, type AssetUrlLease } from "./assetStore";
 import { smootherstep } from "./design/curves";
-import { durationMs } from "./design/tokens";
 import { recordDiagnostic } from "./diagnostics";
 import { coverBoardMaterials, createCoverEndpaperCanvas, paintCoverEndpaper } from "./endpaper";
-import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
+import { BOARD_H, BOARD_T, BOARD_W, BODY_BASE, JOINT, PAGE_H, PAGE_THICKNESS, PAGE_W, buildSceneElement, createTurnLeaf, makeOpenPageGeometry, makePageMaterial, type SceneElement } from "./bookGeometry";
+import { createBookPointer, type BookPointerProps } from "./bookPointer";
+import { MARK_REVEAL_MS, MAX_REVEAL_MS, loadPagePairs, paintWorkshopDrawing, type PagePair } from "./pageCanvas";
 import { readerCameraPage, readerSinglePagePresentation, spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
-import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
+import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, clamp01, resolveTurnContentPlan } from "./pageTurn";
 import { readerSceneStructureKey, resourceAttemptIsCurrent, sceneAssetsReadyForEvidence, spreadResourceIndexes, type ReaderRenderEvidence } from "./renderEvidence";
-import type { StoryboardPoint, StoryboardSpread, StoryboardStroke } from "./storyboard";
-import { renderedElementAssetIds, spreadArtworkFit, spreadBaseAssetId, type BookElement, type BookSnapshot, type Spread, type TurnState } from "./types";
+import type { StoryboardSpread } from "./storyboard";
+import { renderedElementAssetIds, type BookElement, type Spread } from "./types";
 
-type Props = {
-  snapshot: BookSnapshot;
-  turn: TurnState;
+type Props = Omit<BookPointerProps, "annotationEnabled" | "readOnly"> & {
   renderEvidenceToken?: string;
   mode?: "reader" | "workshop";
   workshopDrawing?: { revision: number; spread?: StoryboardSpread };
@@ -39,11 +38,6 @@ type Props = {
    * on the way home.
    */
   handoffRect?: { readonly current: ShelfSlot | null };
-  onSelect: (elementId: string | null) => void;
-  onHover: (elementId: string | null) => void;
-  onMoveElement: (elementId: string, x: number, y: number) => void;
-  onPageGesture: (direction: "forward" | "backward", phase: "start" | "move" | "end", amount: number) => void;
-  onAnnotationStroke?: (stroke: StoryboardStroke) => void;
   onPageTurnReady?: (direction: "forward" | "backward", ready: boolean) => void;
   onLoading: (documentId: string) => void;
   onReady: (documentId: string) => void;
@@ -54,646 +48,11 @@ type Props = {
 /** The shelf card a book is being lifted out of, in viewport pixels. */
 type ShelfSlot = { x: number; y: number; width: number; height: number };
 
-type PagePair = {
-  spread: THREE.CanvasTexture;
-  overlay: THREE.CanvasTexture;
-};
-
-function paintStroke(
-  context: CanvasRenderingContext2D,
-  stroke: StoryboardStroke,
-  width: number,
-  height: number,
-  progress = 1,
-) {
-  const visiblePoints = Math.max(0, Math.min(stroke.points.length, Math.ceil(stroke.points.length * progress)));
-  if (visiblePoints < 2) return;
-  context.beginPath();
-  context.moveTo(stroke.points[0].x * width, stroke.points[0].y * height);
-  for (let index = 1; index < visiblePoints; index += 1) {
-    context.lineTo(stroke.points[index].x * width, stroke.points[index].y * height);
-  }
-  context.stroke();
-}
-
-function paintWorkshopDrawing(
-  pair: PagePair,
-  spread: StoryboardSpread | undefined,
-  draft: readonly StoryboardPoint[],
-  sketchProgress: number,
-) {
-  const canvas = pair.overlay.image as HTMLCanvasElement | undefined;
-  const context = canvas?.getContext("2d");
-  if (!canvas || !context) return;
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.strokeStyle = "rgba(77, 70, 59, .62)";
-  context.lineWidth = 5.5;
-  const sketches = spread?.sketches ?? [];
-  sketches.forEach((stroke, index) => {
-    const strokeProgress = sketches.length === 0 ? 1 : Math.max(0, Math.min(1, sketchProgress * sketches.length - index));
-    paintStroke(context, stroke, canvas.width, canvas.height, strokeProgress);
-  });
-  context.strokeStyle = "rgba(230, 74, 61, .94)";
-  context.lineWidth = 8;
-  spread?.annotations.forEach((stroke) => paintStroke(context, stroke, canvas.width, canvas.height));
-  if (draft.length >= 2) paintStroke(context, { points: [...draft] }, canvas.width, canvas.height);
-  pair.overlay.needsUpdate = true;
-}
 
 /** Surfaces that never animate the case hold it fully open. */
 const STATIC_OPEN = { current: 1 } as const;
 /** Surfaces with no shelf behind them open in place. */
 const NO_HANDOFF = { current: null } as const;
-
-const PAGE_W = 4.2;
-const PAGE_H = 5.18;
-const PAGE_THICKNESS = 0.024;
-/**
- * Case dimensions. BOARD_W x 2 plus the spine reproduces the previous 9.05
- * cover width for a five-spread book, so the open framing is unchanged; the
- * fore-edge squab of 0.07 is 1.35% of page height, which is where real
- * bookbinding puts it (about 3mm on a 210mm trim).
- */
-const BOARD_W = 4.27;
-const BOARD_H = 5.75;
-const BOARD_T = 0.055;
-/** Endpapers, backbone and headbands, present regardless of extent. */
-const BODY_BASE = 0.2;
-/** The groove between board and spine that lets the cover hinge. */
-const JOINT = 0.028;
-
-function clamp(value: number, min = 0, max = 1) {
-  return Math.max(min, Math.min(max, value));
-}
-
-/**
- * Splitting on the ASCII space is only line breaking for scripts that use one.
- * A Chinese, Japanese or Thai body produced a single token, so the whole
- * paragraph became one unbreakable line that ran off the bottom of the page.
- * Intl.Segmenter knows where each script actually allows a break.
- */
-const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
-
-function segmentsOf(text: string): string[] {
-  return [...segmenter.segment(text)].map((entry) => entry.segment);
-}
-
-function wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: number) {
-  const lines: string[] = [];
-  let line = "";
-  for (const piece of segmentsOf(text)) {
-    // A break opportunity at the start of a line would leave the line empty,
-    // so a single over-long segment is allowed to overhang rather than loop.
-    const test = line + piece;
-    if (line && context.measureText(test).width > maxWidth) {
-      lines.push(line.trimEnd());
-      line = piece.trimStart();
-      continue;
-    }
-    line = test;
-  }
-  if (line.trim()) lines.push(line.trimEnd());
-  return lines.length ? lines : [""];
-}
-
-function sampleCanvasLuminance(context: CanvasRenderingContext2D) {
-  const samples = context.getImageData(96, 110, 600, 900).data;
-  let weighted = 0;
-  let count = 0;
-  for (let index = 0; index < samples.length; index += 4 * 64) {
-    weighted += samples[index] * 0.2126 + samples[index + 1] * 0.7152 + samples[index + 2] * 0.0722;
-    count += 1;
-  }
-  return count > 0 ? weighted / count : 255;
-}
-
-function createPageBackgroundCanvas(
-  image: HTMLImageElement | null,
-  side: "left" | "right",
-  fit: "cover" | "contain",
-) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1024;
-  canvas.height = 1264;
-  const context = canvas.getContext("2d");
-  if (!context) return canvas;
-
-  if (image) {
-    if (fit === "contain") {
-      // Preserved-photo layouts promise source geometry, so show the complete
-      // layout on paper instead of silently cropping a reader-owned original.
-      context.fillStyle = "#f7efdf";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      const placement = centeredContainPlacement(
-        image.naturalWidth,
-        image.naturalHeight,
-        canvas.width * 2,
-        canvas.height,
-      );
-      context.save();
-      context.translate(side === "left" ? 0 : -canvas.width, 0);
-      context.drawImage(image, placement.x, placement.y, placement.width, placement.height);
-      context.restore();
-    } else {
-      // Crop the full illustration once in spread coordinates, then give each
-      // page exactly half. Mapping either raw half directly onto the page would
-      // squash every source whose aspect differs from the physical stage.
-      const crop = centeredCoverCrop(image.naturalWidth, image.naturalHeight, (PAGE_W * 2) / PAGE_H);
-      const sourceWidth = crop.width / 2;
-      const sourceX = crop.x + (side === "left" ? 0 : sourceWidth);
-      context.drawImage(image, sourceX, crop.y, sourceWidth, crop.height, 0, 0, canvas.width, canvas.height);
-    }
-  } else {
-    // Warm uncoated paper fallback for books that have not received a generated
-    // full-spread illustration yet.
-    const wash = context.createLinearGradient(0, 0, side === "left" ? canvas.width : 0, canvas.height);
-    wash.addColorStop(0, "#fbf5e7");
-    wash.addColorStop(1, "#f0e6d1");
-    context.fillStyle = wash;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-  }
-  return canvas;
-}
-
-function createPageOverlayCanvas(background: HTMLCanvasElement, spread: Spread, side: "left" | "right", illustrated: boolean) {
-  const canvas = document.createElement("canvas");
-  canvas.width = background.width;
-  canvas.height = background.height;
-  const context = canvas.getContext("2d");
-  const backgroundContext = background.getContext("2d");
-  if (!context || !backgroundContext) return canvas;
-
-  if (side === "left") {
-    const darkSpread = illustrated && sampleCanvasLuminance(backgroundContext) < 126;
-    context.save();
-    context.fillStyle = darkSpread ? "rgba(244, 232, 203, .95)" : "rgba(18, 20, 18, .96)";
-    context.textBaseline = "top";
-    let top = 190;
-
-    context.font = `${darkSpread ? 72 : 76}px Georgia, serif`;
-    const titleLines = wrapText(context, spread.title, 620);
-
-    /**
-     * The body used to be authored at 31px, which lands at under 15 CSS px on
-     * the primary canvas with no resolution headroom. It is set at 56px now,
-     * and steps down only as far as it must to stay on the page - the old code
-     * had no clamp at all, so an 800-character body simply ran off the bottom.
-     */
-    const bodyTop = 190 + titleLines.length * 86 + 44;
-    const bodyRoom = canvas.height - bodyTop - 150;
-    let bodySize = 56;
-    let bodyLines: string[] = [];
-    for (;;) {
-      context.font = `${bodySize}px Avenir Next, Arial, sans-serif`;
-      bodyLines = wrapText(context, spread.body, 560);
-      if (bodyLines.length * (bodySize * 1.46) <= bodyRoom || bodySize <= 34) break;
-      bodySize -= 3;
-    }
-    const bodyLeading = bodySize * 1.46;
-    const bodyFits = Math.max(1, Math.floor(bodyRoom / bodyLeading));
-    if (bodyLines.length > bodyFits) bodyLines = bodyLines.slice(0, bodyFits);
-
-    if (illustrated) {
-      /**
-       * This used to be a rounded rectangle with a hard edge - a card drawn on
-       * the paper, with the story written inside the card. Print does not do
-       * that: it lays a wash into the sheet and sets the type in it, so the
-       * page reads as one surface. Two gradients, no border, nothing to catch
-       * the eye as an edge.
-       */
-      const across = context.createLinearGradient(0, 0, 880, 0);
-      across.addColorStop(0, darkSpread ? "rgba(9, 14, 13, .94)" : "rgba(255, 251, 242, .90)");
-      across.addColorStop(0.72, darkSpread ? "rgba(9, 14, 13, .78)" : "rgba(255, 251, 242, .66)");
-      across.addColorStop(1, darkSpread ? "rgba(9, 14, 13, 0)" : "rgba(255, 251, 242, 0)");
-      context.fillStyle = across;
-      context.fillRect(0, 0, 880, canvas.height);
-
-      const down = context.createLinearGradient(0, 0, 0, canvas.height);
-      down.addColorStop(0, darkSpread ? "rgba(9, 14, 13, .18)" : "rgba(255, 251, 242, .22)");
-      down.addColorStop(0.34, "rgba(0, 0, 0, 0)");
-      down.addColorStop(0.72, "rgba(0, 0, 0, 0)");
-      down.addColorStop(1, darkSpread ? "rgba(9, 14, 13, .16)" : "rgba(255, 251, 242, .2)");
-      context.fillStyle = down;
-      context.fillRect(0, 0, canvas.width, canvas.height);
-
-      context.fillStyle = darkSpread ? "rgba(244, 232, 203, .96)" : "rgba(18, 20, 18, .96)";
-    }
-
-    if (spread.kicker) {
-      context.font = "28px Avenir Next, Arial, sans-serif";
-      context.globalAlpha = 0.62;
-      context.fillText(spread.kicker.toUpperCase(), 112, top - 66);
-      context.globalAlpha = 1;
-    }
-
-    context.font = `${darkSpread ? 72 : 76}px Georgia, serif`;
-    titleLines.forEach((titleLine, index) => context.fillText(titleLine, 112, top + index * 84));
-    context.font = `${bodySize}px Avenir Next, Arial, sans-serif`;
-    context.globalAlpha = 0.88;
-    top = bodyTop;
-    bodyLines.forEach((bodyLine, index) => context.fillText(bodyLine, 114, top + index * bodyLeading));
-
-    if (!illustrated) {
-      const rule = top + bodyLines.length * bodyLeading + 46;
-      context.globalAlpha = 0.16;
-      context.fillRect(116, rule, 300, 2);
-      context.globalAlpha = 0.6;
-      context.font = "26px Avenir Next, Arial, sans-serif";
-      context.fillText("Interactive plate", 116, rule + 26);
-    }
-    context.restore();
-  }
-  return canvas;
-}
-
-async function loadPagePairs(spreads: Spread[], mode: "reader" | "workshop") {
-  const entries = await Promise.all(
-    spreads.map(async (spread) => {
-      const baseAssetId = spreadBaseAssetId(spread);
-      const artworkLease = baseAssetId ? await acquireAssetUrl(baseAssetId) : undefined;
-      try {
-        let image: HTMLImageElement | null = null;
-        if (artworkLease) {
-          image = new Image();
-          image.decoding = "async";
-          image.src = artworkLease.url;
-          await image.decode();
-        }
-        const fit = spreadArtworkFit(spread);
-        const leftCanvas = createPageBackgroundCanvas(image, "left", fit);
-        const rightCanvas = createPageBackgroundCanvas(image, "right", fit);
-        const leftOverlay = mode === "workshop"
-          ? document.createElement("canvas")
-          : createPageOverlayCanvas(leftCanvas, spread, "left", Boolean(image));
-        const rightOverlay = mode === "workshop"
-          ? document.createElement("canvas")
-          : createPageOverlayCanvas(rightCanvas, spread, "right", Boolean(image));
-        if (mode === "workshop") {
-          leftOverlay.width = rightOverlay.width = leftCanvas.width;
-          leftOverlay.height = rightOverlay.height = leftCanvas.height;
-        }
-        const spreadCanvas = document.createElement("canvas");
-        spreadCanvas.width = leftCanvas.width + rightCanvas.width;
-        spreadCanvas.height = leftCanvas.height;
-        const spreadContext = spreadCanvas.getContext("2d");
-        spreadContext?.drawImage(leftCanvas, 0, 0);
-        spreadContext?.drawImage(rightCanvas, leftCanvas.width, 0);
-        const spreadTexture = new THREE.CanvasTexture(spreadCanvas);
-        spreadTexture.colorSpace = THREE.SRGBColorSpace;
-        spreadTexture.anisotropy = 8;
-        spreadTexture.needsUpdate = true;
-        const overlayCanvas = document.createElement("canvas");
-        overlayCanvas.width = spreadCanvas.width;
-        overlayCanvas.height = spreadCanvas.height;
-        const overlayContext = overlayCanvas.getContext("2d");
-        overlayContext?.drawImage(leftOverlay, 0, 0);
-        overlayContext?.drawImage(rightOverlay, leftOverlay.width, 0);
-        const overlayTexture = new THREE.CanvasTexture(overlayCanvas);
-        overlayTexture.colorSpace = THREE.SRGBColorSpace;
-        overlayTexture.anisotropy = 8;
-        overlayTexture.needsUpdate = true;
-        return [spread.id, { spread: spreadTexture, overlay: overlayTexture }] as const;
-      } finally {
-        artworkLease?.release();
-      }
-    }),
-  );
-  return new Map<string, PagePair>(entries);
-}
-
-function makePageMaterial(side: THREE.Side) {
-  return new THREE.MeshStandardMaterial({
-    color: 0xfffbef,
-    roughness: 0.82,
-    metalness: 0,
-    emissive: new THREE.Color(0x6b3d1e),
-    emissiveIntensity: 0,
-    side,
-    polygonOffset: true,
-    polygonOffsetFactor: side === THREE.FrontSide ? -1 : 1,
-    polygonOffsetUnits: 1,
-  });
-}
-
-function makeOpenPageGeometry(side: "left" | "right") {
-  const geometry = new THREE.PlaneGeometry(PAGE_W, PAGE_H, 40, 8);
-  const positions = geometry.attributes.position as THREE.BufferAttribute;
-  const uvs = geometry.attributes.uv as THREE.BufferAttribute;
-  for (let index = 0; index < positions.count; index += 1) {
-    const x = positions.getX(index);
-    const y = positions.getY(index);
-    const profileX = side === "left" ? -x : x;
-    positions.setZ(index, restingPageDepth(profileX, y, PAGE_W, PAGE_H));
-    const pageU = uvs.getX(index);
-    uvs.setX(index, side === "left" ? pageU * 0.5 : 0.5 + pageU * 0.5);
-  }
-  uvs.needsUpdate = true;
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-type TurnLeaf = {
-  geometry: THREE.BufferGeometry;
-  update: (progress: number) => void;
-};
-
-/**
- * One watertight paper leaf with separately textured front and back faces.
- * The old implementation rendered two coplanar planes, which produced the
- * dark seams and apparent tears visible when a leaf was nearly edge-on.
- */
-function createTurnLeaf(): TurnLeaf {
-  const widthSegments = 48;
-  const heightSegments = 8;
-  const columns = widthSegments + 1;
-  const rows = heightSegments + 1;
-  const surfaceVertexCount = columns * rows;
-  const positions = new Float32Array(surfaceVertexCount * 2 * 3);
-  const uvs = new Float32Array(surfaceVertexCount * 2 * 2);
-  const base = new Float32Array(surfaceVertexCount * 2);
-  const indices: number[] = [];
-
-  for (let row = 0; row < rows; row += 1) {
-    const v = row / heightSegments;
-    const y = -PAGE_H / 2 + v * PAGE_H;
-    for (let column = 0; column < columns; column += 1) {
-      const u = column / widthSegments;
-      const x = -PAGE_W / 2 + u * PAGE_W;
-      const index = row * columns + column;
-      base[index * 2] = x;
-      base[index * 2 + 1] = y;
-      uvs[index * 2] = u;
-      uvs[index * 2 + 1] = v;
-      const backIndex = surfaceVertexCount + index;
-      uvs[backIndex * 2] = u;
-      uvs[backIndex * 2 + 1] = v;
-    }
-  }
-
-  const frontStart = indices.length;
-  for (let row = 0; row < heightSegments; row += 1) {
-    for (let column = 0; column < widthSegments; column += 1) {
-      const a = row * columns + column;
-      const b = a + 1;
-      const c = a + columns;
-      const d = c + 1;
-      indices.push(a, b, c, b, d, c);
-    }
-  }
-  const frontCount = indices.length - frontStart;
-
-  const backStart = indices.length;
-  for (let row = 0; row < heightSegments; row += 1) {
-    for (let column = 0; column < widthSegments; column += 1) {
-      const a = surfaceVertexCount + row * columns + column;
-      const b = a + 1;
-      const c = a + columns;
-      const d = c + 1;
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-  const backCount = indices.length - backStart;
-
-  const edgeStart = indices.length;
-  const connect = (frontA: number, frontB: number) => {
-    const backA = surfaceVertexCount + frontA;
-    const backB = surfaceVertexCount + frontB;
-    indices.push(frontA, backA, frontB, frontB, backA, backB);
-  };
-  for (let column = 0; column < widthSegments; column += 1) {
-    connect(column, column + 1);
-    const bottom = heightSegments * columns + column;
-    connect(bottom + 1, bottom);
-  }
-  for (let row = 0; row < heightSegments; row += 1) {
-    connect((row + 1) * columns, row * columns);
-    connect(row * columns + widthSegments, (row + 1) * columns + widthSegments);
-  }
-  const edgeCount = indices.length - edgeStart;
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  geometry.addGroup(frontStart, frontCount, 0);
-  geometry.addGroup(backStart, backCount, 1);
-  geometry.addGroup(edgeStart, edgeCount, 2);
-
-  const point = new THREE.Vector3();
-  const beforeX = new THREE.Vector3();
-  const afterX = new THREE.Vector3();
-  const beforeY = new THREE.Vector3();
-  const afterY = new THREE.Vector3();
-  const tangentX = new THREE.Vector3();
-  const tangentY = new THREE.Vector3();
-  const normal = new THREE.Vector3();
-  const xStep = PAGE_W / widthSegments;
-  const yStep = PAGE_H / heightSegments;
-
-  const sample = (target: THREE.Vector3, x: number, y: number, progress: number) => {
-    const deformed = deformPageVertex(x, y, progress, PAGE_W, PAGE_H);
-    target.set(deformed.x, deformed.y, deformed.z);
-  };
-
-  const update = (progress: number) => {
-    for (let index = 0; index < surfaceVertexCount; index += 1) {
-      const x = base[index * 2];
-      const y = base[index * 2 + 1];
-      sample(point, x, y, progress);
-      sample(beforeX, Math.max(-PAGE_W / 2, x - xStep), y, progress);
-      sample(afterX, Math.min(PAGE_W / 2, x + xStep), y, progress);
-      sample(beforeY, x, Math.max(-PAGE_H / 2, y - yStep), progress);
-      sample(afterY, x, Math.min(PAGE_H / 2, y + yStep), progress);
-      tangentX.subVectors(afterX, beforeX);
-      tangentY.subVectors(afterY, beforeY);
-      normal.crossVectors(tangentX, tangentY).normalize();
-
-      const frontOffset = index * 3;
-      const backOffset = (surfaceVertexCount + index) * 3;
-      positions[frontOffset] = point.x + normal.x * PAGE_THICKNESS / 2;
-      positions[frontOffset + 1] = point.y + normal.y * PAGE_THICKNESS / 2;
-      positions[frontOffset + 2] = point.z + normal.z * PAGE_THICKNESS / 2;
-      positions[backOffset] = point.x - normal.x * PAGE_THICKNESS / 2;
-      positions[backOffset + 1] = point.y - normal.y * PAGE_THICKNESS / 2;
-      positions[backOffset + 2] = point.z - normal.z * PAGE_THICKNESS / 2;
-    }
-    const position = geometry.getAttribute("position") as THREE.BufferAttribute;
-    position.needsUpdate = true;
-    geometry.computeVertexNormals();
-  };
-
-  update(0);
-  return { geometry, update };
-}
-
-/**
- * One renderable scene element. The renderer knows nothing about specific
- * elements: hover, focus and reveal all come from the structured interaction
- * schema attached to the document data.
- */
-type SceneElement = {
-  id: string;
-  root: THREE.Group;
-  /** Leans a pop-up out of the page; unused by flat cutouts. */
-  tilt: THREE.Group;
-  /** Carries hover lean and focus orbit. */
-  yaw: THREE.Group;
-  /** Where the HTML reveal card anchors. */
-  anchor: THREE.Object3D;
-  materials: THREE.MeshStandardMaterial[];
-  frameTextures: THREE.Texture[];
-  loadedFrameIndices: Set<number>;
-  frameIndex: number;
-  hoverAmount: number;
-  focusAmount: number;
-  spin: number;
-  motionKey: string | null;
-  motionStartedAt: number;
-  dispose: () => void;
-};
-
-function buildSceneElement(
-  element: BookElement,
-  textureLoader: THREE.TextureLoader,
-  resolvedAssetUrl = element.assetId,
-  resolvedFrameUrls = element.frameAssetIds ?? [],
-  onTextureError?: (frameIndex: number) => void,
-  onTextureReady?: () => void,
-): SceneElement {
-  const root = new THREE.Group();
-  const tilt = new THREE.Group();
-  const yaw = new THREE.Group();
-  root.add(tilt);
-  tilt.add(yaw);
-  root.userData.elementId = element.id;
-  root.visible = false;
-
-  const anchor = new THREE.Object3D();
-  root.add(anchor);
-
-  if (resolvedAssetUrl.startsWith("procedural:hotspot:")) {
-    const tone = resolvedAssetUrl.split(":").at(-1) ?? "amber";
-    const colors: Record<string, number> = {
-      amber: 0xffc96b,
-      aqua: 0x7fd2df,
-      jade: 0x78c99a,
-      rose: 0xff8f79,
-    };
-    const color = new THREE.Color(colors[tone] ?? colors.amber);
-    const ringGeometry = new THREE.RingGeometry(0.105, 0.17, 40);
-    const coreGeometry = new THREE.CircleGeometry(0.064, 32);
-    const ringMaterial = new THREE.MeshStandardMaterial({
-      color,
-      transparent: true,
-      opacity: 0.88,
-      roughness: 0.44,
-      emissive: color,
-      emissiveIntensity: 0.08,
-      side: THREE.DoubleSide,
-    });
-    const coreMaterial = new THREE.MeshStandardMaterial({
-      color: 0xfffbec,
-      transparent: true,
-      opacity: 0.96,
-      roughness: 0.32,
-      emissive: color,
-      emissiveIntensity: 0.08,
-      side: THREE.DoubleSide,
-    });
-    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-    const core = new THREE.Mesh(coreGeometry, coreMaterial);
-    core.position.z = 0.012;
-    yaw.add(ring, core);
-    anchor.position.set(0, 0.24, 0.05);
-    return {
-      id: element.id,
-      root,
-      tilt,
-      yaw,
-      anchor,
-      materials: [ringMaterial, coreMaterial],
-      frameTextures: [],
-      loadedFrameIndices: new Set([0]),
-      frameIndex: 0,
-      hoverAmount: 0,
-      focusAmount: 0,
-      spin: 0,
-      motionKey: null,
-      motionStartedAt: 0,
-      dispose: () => {
-        ringGeometry.dispose();
-        coreGeometry.dispose();
-        ringMaterial.dispose();
-        coreMaterial.dispose();
-      },
-    };
-  }
-
-  const frameUrls = resolvedFrameUrls.length > 1 ? resolvedFrameUrls : [resolvedAssetUrl];
-  let mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial> | null = null;
-  const fitTextureAspect = (texture: THREE.Texture) => {
-    if (!mesh) return;
-    const image = texture.image as { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number } | undefined;
-    const width = image?.naturalWidth ?? image?.width ?? 1;
-    const height = image?.naturalHeight ?? image?.height ?? 1;
-    const aspect = width / Math.max(1, height);
-    mesh.scale.set(aspect >= 1 ? 1 : aspect, aspect >= 1 ? 1 / aspect : 1, 1);
-  };
-  const loadedFrameIndices = new Set<number>();
-  const frameTextures = frameUrls.map((url, index) => {
-    const frameTexture = textureLoader.load(
-      url,
-      (texture) => {
-        loadedFrameIndices.add(index);
-        if (index === 0) fitTextureAspect(texture);
-        onTextureReady?.();
-      },
-      undefined,
-      () => onTextureError?.(index),
-    );
-    frameTexture.colorSpace = THREE.SRGBColorSpace;
-    return frameTexture;
-  });
-  const material = new THREE.MeshStandardMaterial({
-    map: frameTextures[0],
-    transparent: true,
-    alphaTest: 0.04,
-    roughness: 0.75,
-    side: THREE.DoubleSide,
-    emissive: new THREE.Color(0xffb570),
-    emissiveIntensity: 0,
-  });
-  const size = element.id === "fox" ? 2 : 1.75;
-  const geometry = new THREE.PlaneGeometry(size, size);
-  mesh = new THREE.Mesh(geometry, material);
-  if (frameTextures[0].image) fitTextureAspect(frameTextures[0]);
-  mesh.castShadow = true;
-  yaw.add(mesh);
-  anchor.position.set(0, size * 0.34, 0.05);
-  return {
-    id: element.id,
-    root,
-    tilt,
-    yaw,
-    anchor,
-    materials: [material],
-    frameTextures,
-    loadedFrameIndices,
-    frameIndex: 0,
-    hoverAmount: 0,
-    focusAmount: 0,
-    spin: 0,
-    motionKey: null,
-    motionStartedAt: 0,
-    dispose: () => {
-      geometry.dispose();
-      material.dispose();
-      frameTextures.forEach((frameTexture) => frameTexture.dispose());
-    },
-  };
-}
 
 export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader", workshopDrawing, annotationEnabled = false, readOnly = false, openProgress = STATIC_OPEN, handoffRect = NO_HANDOFF, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -1327,14 +686,6 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     const particles = new THREE.Points(particleGeometry, particleMaterial);
     book.add(particles);
 
-    const raycaster = new THREE.Raycaster();
-    const pageRaycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
-    const stagePointer = new THREE.Vector2();
-    const drag = { elementId: null as string | null, startX: 0, startY: 0, initialX: 0, initialY: 0, moved: false, pageDirection: null as "forward" | "backward" | null, amount: 0 };
-    let annotationDraft: StoryboardPoint[] = [];
-    let annotationPointerId: number | null = null;
-    let hoveredId: string | null = null;
 
     let pagePairs = new Map<string, PagePair>();
     const spreadLoadAttempts = new Map<string, symbol>();
@@ -1532,162 +883,23 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     // stage that mounts hidden would otherwise never have it placed at all.
     applyCamera();
 
-    function setPointer(event: PointerEvent) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      pageRaycaster.setFromCamera(pointer, camera);
-      const pageHit = pageRaycaster.intersectObjects([leftPage, rightPage], false)[0];
-      if (pageHit?.uv) stagePointer.set(pageHit.uv.x * 2 - 1, pageHit.uv.y * 2 - 1);
-      else stagePointer.copy(pointer);
-      return {
-        rect,
-        pagePoint: pageHit?.uv ? { x: pageHit.uv.x, y: 1 - pageHit.uv.y } : null,
-      };
-    }
-
-    function currentSpread() {
-      const current = propsRef.current.snapshot;
-      return current.document.spreads[current.session.currentSpreadIndex];
-    }
-
-    function pickElement() {
-      raycaster.setFromCamera(stagePointer, stageCamera);
-      const roots = currentSpread()
-        .elements.map((element) => sceneElements.get(element.id))
-        .filter((item): item is SceneElement => Boolean(item) && Boolean(item?.root.visible))
-        .map((item) => item.root);
-      const hit = raycaster.intersectObjects(roots, true)[0];
-      if (!hit) return null;
-      let node: THREE.Object3D | null = hit.object;
-      while (node && !node.userData.elementId) node = node.parent;
-      return node ? String(node.userData.elementId) : null;
-    }
-
-    function setHovered(elementId: string | null) {
-      if (hoveredId === elementId) return;
-      hoveredId = elementId;
-      renderer.domElement.style.cursor = propsRef.current.annotationEnabled ? "crosshair" : elementId ? "pointer" : "";
-      propsRef.current.onHover(elementId);
-    }
-
-    function onPointerDown(event: PointerEvent) {
-      const { rect, pagePoint } = setPointer(event);
-      if (propsRef.current.annotationEnabled && pagePoint) {
-        annotationDraft = [pagePoint];
-        annotationPointerId = event.pointerId;
-        setHovered(null);
-        renderer.domElement.setPointerCapture(event.pointerId);
-        scheduleAnimation();
-        return;
-      }
-      const elementId = pickElement();
-      if (elementId) {
-        const element = currentSpread().elements.find((item) => item.id === elementId);
-        propsRef.current.onSelect(elementId);
-        if (element && !element.locked && !propsRef.current.readOnly) {
-          drag.elementId = elementId;
-          drag.startX = event.clientX;
-          drag.startY = event.clientY;
-          drag.initialX = element.transform.x;
-          drag.initialY = element.transform.y;
-          drag.moved = false;
-          renderer.domElement.setPointerCapture(event.pointerId);
-        }
-        return;
-      }
-      const x = (event.clientX - rect.left) / rect.width;
-      const index = propsRef.current.snapshot.session.currentSpreadIndex;
-      const count = propsRef.current.snapshot.document.spreads.length;
-      if (x > 0.74 && index < count - 1) drag.pageDirection = "forward";
-      else if (x < 0.26 && index > 0) drag.pageDirection = "backward";
-      if (drag.pageDirection) {
-        drag.startX = event.clientX;
-        drag.amount = 0;
-        propsRef.current.onPageGesture(drag.pageDirection, "start", 0);
-        renderer.domElement.setPointerCapture(event.pointerId);
-      } else propsRef.current.onSelect(null);
-    }
-
-    function onPointerMove(event: PointerEvent) {
-      const { pagePoint } = setPointer(event);
-      if (annotationPointerId === event.pointerId) {
-        const previous = annotationDraft[annotationDraft.length - 1];
-        if (pagePoint && (!previous || Math.hypot(pagePoint.x - previous.x, pagePoint.y - previous.y) >= 0.003)) {
-          annotationDraft.push(pagePoint);
-          scheduleAnimation();
-        }
-        return;
-      }
-      if (drag.elementId) {
-        const rect = renderer.domElement.getBoundingClientRect();
-        const element = currentSpread().elements.find((item) => item.id === drag.elementId);
-        if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 2) drag.moved = true;
-        const nextX = clamp(drag.initialX + (event.clientX - drag.startX) / (rect.width * 0.5));
-        const nextY = clamp(drag.initialY + (event.clientY - drag.startY) / (rect.height * 0.72));
-        const sceneElement = sceneElements.get(drag.elementId);
-        if (sceneElement && element) {
-          sceneElement.root.position.x = (spreadFraction({ page: element.page, transform: { x: nextX } }) - 0.5) * 2 * PAGE_W;
-          sceneElement.root.position.y = (0.5 - nextY) * PAGE_H;
-        }
-        return;
-      }
-      if (drag.pageDirection) {
-        const rect = renderer.domElement.getBoundingClientRect();
-        const delta = drag.pageDirection === "forward" ? drag.startX - event.clientX : event.clientX - drag.startX;
-        drag.amount = clamp(delta / (rect.width * 0.42));
-        propsRef.current.onPageGesture(drag.pageDirection, "move", drag.amount);
-        return;
-      }
-      setHovered(propsRef.current.turn ? null : pickElement());
-    }
-
-    function onPointerUp(event: PointerEvent) {
-      const { pagePoint } = setPointer(event);
-      if (annotationPointerId === event.pointerId) {
-        const previous = annotationDraft[annotationDraft.length - 1];
-        if (pagePoint && (!previous || Math.hypot(pagePoint.x - previous.x, pagePoint.y - previous.y) >= 0.003)) annotationDraft.push(pagePoint);
-        if (annotationDraft.length >= 2) propsRef.current.onAnnotationStroke?.({ points: annotationDraft });
-        annotationDraft = [];
-        annotationPointerId = null;
-        if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
-        renderer.domElement.style.cursor = propsRef.current.annotationEnabled ? "crosshair" : "";
-        scheduleAnimation();
-        return;
-      }
-      if (drag.elementId) {
-        const rect = renderer.domElement.getBoundingClientRect();
-        const nextX = clamp(drag.initialX + (event.clientX - drag.startX) / (rect.width * 0.5));
-        const nextY = clamp(drag.initialY + (event.clientY - drag.startY) / (rect.height * 0.72));
-        if (drag.moved) propsRef.current.onMoveElement(drag.elementId, nextX, nextY);
-        drag.elementId = null;
-        drag.moved = false;
-      }
-      if (drag.pageDirection) {
-        propsRef.current.onPageGesture(drag.pageDirection, "end", drag.amount);
-        drag.pageDirection = null;
-        drag.amount = 0;
-      }
-      if (renderer.domElement.hasPointerCapture(event.pointerId)) renderer.domElement.releasePointerCapture(event.pointerId);
-    }
-
-    function onPointerLeave() {
-      if (annotationPointerId !== null) return;
-      setHovered(null);
-    }
-
-    renderer.domElement.addEventListener("pointerdown", onPointerDown);
-    renderer.domElement.addEventListener("pointermove", onPointerMove);
-    renderer.domElement.addEventListener("pointerup", onPointerUp);
-    renderer.domElement.addEventListener("pointercancel", onPointerUp);
-    renderer.domElement.addEventListener("pointerleave", onPointerLeave);
+    const bookPointer = createBookPointer({
+      canvas: renderer.domElement,
+      camera,
+      stageCamera,
+      pages: [leftPage, rightPage],
+      sceneElements,
+      props: () => propsRef.current,
+      scheduleAnimation,
+    });
+    bookPointer.attach();
 
     const anchorWorld = new THREE.Vector3();
     let lastFrameTime = performance.now();
     let lastSpreadId = "";
     let lastWorkshopPaintKey = "";
-    let revealedSketchKey = "";
-    let sketchRevealStartedAt = 0;
+    /** When each spread revision first became visible; a revisited spread never replays. */
+    const revealStarts = new Map<string, number>();
     let renderedEvidenceKey = "";
     let renderedEvidenceCandidate = "";
     let renderedEvidenceFrames = 0;
@@ -1778,10 +990,10 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       const night = current.session.sceneThemeId === "midnight-desk";
       const reduced = current.session.quality === "reduced";
       const requestedOpen = propsRef.current.mode === "workshop" ? 1 : propsRef.current.openProgress.current;
-      const lampReveal = smootherstep(clamp((requestedOpen - 0.42) / 0.58));
+      const lampReveal = smootherstep(clamp01((requestedOpen - 0.42) / 0.58));
       const frameTime = performance.now();
       const deltaSeconds = Math.min(0.05, (frameTime - lastFrameTime) / 1000);
-      const delta = clamp(deltaSeconds * 4, 0, 1);
+      const delta = clamp01(deltaSeconds * 4);
       // Presentation state should acknowledge a mobile tap immediately and
       // settle quickly. Keep content/interaction motion on its own cadence.
       const themeDelta = 1 - Math.exp(-deltaSeconds * 13);
@@ -1791,17 +1003,15 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
         renderer.domElement.style.cursor = propsRef.current.annotationEnabled ? "crosshair" : "";
         const drawing = propsRef.current.workshopDrawing;
         const sketchKey = `${current.session.currentSpreadIndex}:${drawing?.spread?.sketchRevision ?? 0}`;
-        if (sketchKey !== revealedSketchKey) {
-          revealedSketchKey = sketchKey;
-          sketchRevealStartedAt = frameTime;
-        }
-        const revealProgress = reduced
+        if (!revealStarts.has(sketchKey)) revealStarts.set(sketchKey, frameTime);
+        const revealMs = Math.min(MAX_REVEAL_MS, (drawing?.spread?.marks.length ?? 0) * MARK_REVEAL_MS);
+        const revealProgress = reduced || revealMs === 0
           ? 1
-          : smootherstep((frameTime - sketchRevealStartedAt) / durationMs.reveal);
-        const paintKey = `${drawing?.revision ?? 0}:${current.session.currentSpreadIndex}:${annotationDraft.length}:${Math.round(revealProgress * 60)}`;
+          : clamp01((frameTime - (revealStarts.get(sketchKey) ?? frameTime)) / revealMs);
+        const paintKey = `${drawing?.revision ?? 0}:${current.session.currentSpreadIndex}:${bookPointer.state.annotationDraft.length}:${Math.round(revealProgress * 60)}`;
         if (paintKey !== lastWorkshopPaintKey) {
           lastWorkshopPaintKey = paintKey;
-          paintWorkshopDrawing(pagePair, drawing?.spread, annotationDraft, revealProgress);
+          paintWorkshopDrawing(pagePair, drawing?.spread, bookPointer.state.annotationDraft, revealProgress);
         }
       }
 
@@ -1874,10 +1084,10 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
         const interaction = resolveInteraction(element);
         const hover = hoverTraits(interaction.hover);
         const focus = focusTraits(interaction.focus);
-        const hovered = hoveredId === id && !current.session.preview && !currentTurn;
+        const hovered = bookPointer.state.hoveredId === id && !current.session.preview && !currentTurn;
         const focused = current.session.selectionId === id && !currentTurn;
-        sceneElement.hoverAmount = THREE.MathUtils.lerp(sceneElement.hoverAmount, hovered ? 1 : 0, clamp(deltaSeconds * 7, 0, 1));
-        sceneElement.focusAmount = THREE.MathUtils.lerp(sceneElement.focusAmount, focused ? 1 : 0, clamp(deltaSeconds * 5, 0, 1));
+        sceneElement.hoverAmount = THREE.MathUtils.lerp(sceneElement.hoverAmount, hovered ? 1 : 0, clamp01(deltaSeconds * 7));
+        sceneElement.focusAmount = THREE.MathUtils.lerp(sceneElement.focusAmount, focused ? 1 : 0, clamp01(deltaSeconds * 5));
 
         let x = (spreadFraction(element) - 0.5) * 2 * PAGE_W;
         let y = (0.5 - element.transform.y) * PAGE_H;
@@ -1910,16 +1120,16 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
         sceneElement.root.scale.set(appliedScale, element.transform.scaleY * (appliedScale / element.transform.scaleX), appliedScale);
 
         // Hover lean follows the live pointer; focus orbit is a named response.
-        const leanTarget = hovered && !reduced ? stagePointer.x * hover.tilt * 2.4 : 0;
-        const pitchTarget = hovered && !reduced ? -stagePointer.y * hover.tilt : 0;
+        const leanTarget = hovered && !reduced ? bookPointer.stagePointer.x * hover.tilt * 2.4 : 0;
+        const pitchTarget = hovered && !reduced ? -bookPointer.stagePointer.y * hover.tilt : 0;
         const spinDelta = focused && !reduced ? focus.spin * deltaSeconds : 0;
         sceneElement.spin += spinDelta;
-        sceneElement.yaw.rotation.y = THREE.MathUtils.lerp(sceneElement.yaw.rotation.y, sceneElement.spin + leanTarget, clamp(deltaSeconds * 6, 0, 1));
-        sceneElement.tilt.rotation.x = THREE.MathUtils.lerp(sceneElement.tilt.rotation.x, pitchTarget * 0.35, clamp(deltaSeconds * 6, 0, 1));
+        sceneElement.yaw.rotation.y = THREE.MathUtils.lerp(sceneElement.yaw.rotation.y, sceneElement.spin + leanTarget, clamp01(deltaSeconds * 6));
+        sceneElement.tilt.rotation.x = THREE.MathUtils.lerp(sceneElement.tilt.rotation.x, pitchTarget * 0.35, clamp01(deltaSeconds * 6));
         // A layer without an authored motion preset stays physically anchored
         // to the paper. Clickability comes from hover light/focus treatment,
         // never from a global idle bob applied to every subject.
-        sceneElement.tilt.position.y = THREE.MathUtils.lerp(sceneElement.tilt.position.y, 0, clamp(deltaSeconds * 8, 0, 1));
+        sceneElement.tilt.position.y = THREE.MathUtils.lerp(sceneElement.tilt.position.y, 0, clamp01(deltaSeconds * 8));
 
         const glow = hover.emissive * sceneElement.hoverAmount + 0.1 * sceneElement.focusAmount;
         if (sceneElement.frameTextures.length > 1) {
@@ -2108,11 +1318,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
       activeElementMounts.clear();
       cancelAnimationFrame(raf);
       resizeObserver.disconnect();
-      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
-      renderer.domElement.removeEventListener("pointermove", onPointerMove);
-      renderer.domElement.removeEventListener("pointerup", onPointerUp);
-      renderer.domElement.removeEventListener("pointercancel", onPointerUp);
-      renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
+      bookPointer.detach();
       renderer.domElement.removeEventListener("webglcontextlost", onContextLost);
       pagePairs.forEach(({ spread, overlay }) => {
         spread.dispose();

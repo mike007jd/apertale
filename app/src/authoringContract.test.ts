@@ -33,6 +33,7 @@ describe("site-native authoring guide contract", () => {
       AUTHORING_GUIDE_DETAIL,
       "creation-readiness",
       "quality-review",
+      "storyboard",
     ]);
 
     expect(guide.phases).toEqual([

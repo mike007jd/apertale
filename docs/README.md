@@ -4,7 +4,7 @@
 
 - [`PRODUCT_ARCHITECTURE.md`](PRODUCT_ARCHITECTURE.md) — Apertale Challenge Final 1.1 product, architecture, tool surface, and acceptance gates.
 - [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md) — current verified/missing release matrix for the live URL, repository, video, Figma, host acceptance, and Devpost.
-- [`SUBMISSION_DRAFT.md`](SUBMISSION_DRAFT.md) — current Apertale Devpost narrative, seven-tool explanation, and under-three-minute demo script.
+- [`SUBMISSION_DRAFT.md`](SUBMISSION_DRAFT.md) — current Apertale Devpost narrative, eight-tool explanation, and under-three-minute demo script.
 - [`ASSET_PROVENANCE.md`](ASSET_PROVENANCE.md) — source and licensing notes for runtime art, models, references, and user imports.
 - [`SITE_TOOLS_ACCEPTANCE.md`](SITE_TOOLS_ACCEPTANCE.md) — deployed HTTP verifier and exact ChatGPT built-in-browser WebMCP acceptance story.
 - [`ELIGIBILITY_AND_BUILD_LOG.md`](ELIGIBILITY_AND_BUILD_LOG.md) — timestamped proof that the repository and challenge implementation were created during the submission period.

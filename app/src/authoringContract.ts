@@ -6,7 +6,7 @@ import siteManifest from "../site-manifest.json";
 export const SITE_TOOL = Object.freeze(siteManifest.webMcp.tools);
 export const SITE_TOOL_NAMES: readonly string[] = Object.freeze(Object.values(SITE_TOOL));
 
-export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", "authoring-guide", "creation-readiness", "quality-review"] as const;
+export const PROJECT_CONTEXT_DETAILS = ["compact", "selected-reveal", "assets", "authoring-guide", "creation-readiness", "quality-review", "storyboard"] as const;
 
 export const AUTHORING_GUIDE_DETAIL = "authoring-guide" as const;
 
@@ -404,7 +404,7 @@ export function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "plan-art",
-      rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Before final art, call sketch_storyboard action replace so the complete rough book appears on the blank 3D pages. Read red annotations from project context and update only marked spreads, clearing applied marks through resolvedAnnotations. Generate illustrated compositions after that visible plan; preserve source-photo geometry for preserved-photo-album.",
+      rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Before final art, call sketch_storyboard action replace so the complete rough book appears on the blank 3D pages: per spread a caption plus labelled rect/ellipse regions, arrows and short text in spread coordinates. Read the reader's red marks from compact project context (each carries page, loop-or-stroke, bounds, and the labels it touches; full geometry only under detail storyboard) and update only marked spreads, clearing applied marks through resolvedAnnotations with the storyboard revision you read. Generate illustrated compositions after that visible plan; preserve source-photo geometry for preserved-photo-album.",
     },
     {
       id: "imagegen-before-create",

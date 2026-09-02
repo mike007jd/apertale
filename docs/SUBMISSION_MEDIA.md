@@ -26,7 +26,7 @@ The final public video must remain under three minutes and include audio. Use th
 
 1. Library — `apertale-library-current.png` establishes the Field Guide plus four independent Sample Books and the explicit Create Your Own path.
 2. Day Atlas — `apertale-atlas-day-current.png` establishes the tactile book and continuous two-page illustration.
-3. Live Site Tools — record the ChatGPT built-in browser's seven-tool list and calls; a static screenshot cannot replace this evidence.
+3. Live Site Tools — record the ChatGPT built-in browser's eight-tool list and calls; a static screenshot cannot replace this evidence.
 4. Human correction — record a manual drag after an Agent patch.
 5. Exact undo — record motion disappearing while the manual transform remains.
 6. Night/Preview — finish with Night, a physical page turn, and click-driven knowledge reveal.

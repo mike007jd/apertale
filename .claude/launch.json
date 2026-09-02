@@ -4,9 +4,26 @@
     {
       "name": "apertale",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "cwd": "app",
       "port": 5173
+    },
+    {
+      "name": "apertale-audit",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5391",
+        "--strictPort"
+      ],
+      "cwd": "app",
+      "port": 5391
     }
   ]
 }
