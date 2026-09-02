@@ -6,7 +6,7 @@ import { recordDiagnostic } from "./diagnostics";
 import { coverBoardMaterials, createCoverEndpaperCanvas, paintCoverEndpaper } from "./endpaper";
 import { BOARD_H, BOARD_T, BOARD_W, BODY_BASE, JOINT, PAGE_H, PAGE_THICKNESS, PAGE_W, buildSceneElement, createTurnLeaf, makeOpenPageGeometry, makePageMaterial, type SceneElement } from "./bookGeometry";
 import { createBookPointer, type BookPointerProps } from "./bookPointer";
-import { MARK_REVEAL_MS, MAX_REVEAL_MS, loadPagePairs, paintSketchFade, paintWorkshopDrawing, snapshotOverlay, type PagePair } from "./pageCanvas";
+import { MARK_REVEAL_MS, MAX_REVEAL_MS, getSketchImageVersion, loadPagePairs, paintSketchFade, paintWorkshopDrawing, snapshotOverlay, type PagePair } from "./pageCanvas";
 import { readerCameraPage, readerSinglePagePresentation, spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, clamp01, resolveTurnContentPlan } from "./pageTurn";
@@ -1012,7 +1012,7 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
         const revealProgress = reduced || revealMs === 0
           ? 1
           : clamp01((frameTime - (revealStarts.get(sketchKey) ?? frameTime)) / revealMs);
-        const paintKey = `${drawing?.revision ?? 0}:${current.session.currentSpreadIndex}:${bookPointer.state.annotationDraft.length}:${Math.round(revealProgress * 60)}`;
+        const paintKey = `${drawing?.revision ?? 0}:${current.session.currentSpreadIndex}:${bookPointer.state.annotationDraft.length}:${Math.round(revealProgress * 60)}:${getSketchImageVersion()}`;
         if (paintKey !== lastWorkshopPaintKey) {
           lastWorkshopPaintKey = paintKey;
           paintWorkshopDrawing(pagePair, drawing?.spread, bookPointer.state.annotationDraft, revealProgress);
