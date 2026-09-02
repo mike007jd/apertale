@@ -1,7 +1,7 @@
-# Apertale 架构加深 · 多 lane 执行 prompt（第三轮）
+# Apertale 架构加深 · 多 lane 执行 prompt（第四轮）
 
 > 用法：新 session 中 `@docs/ARCHITECTURE_LANES_PROMPT.md`。
-> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。第二轮（Lane F–I）与第三轮（Lane J、K）也已合入。本文件是第四轮的 handoff，已内含全部结论，不依赖外部报告。
+> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。第二轮（Lane F–I）、第三轮（Lane J、K）与第四轮（Lane L、M）也已合入。本文件是第五轮的 handoff，已内含全部结论，不依赖外部报告。
 
 ## 你的角色
 
@@ -170,18 +170,62 @@ src/webmcp.ts:333       pick(value.kind, "kind", ["embedded", "lifted", "decorat
 
 证据：workshop `uniqueAssets`（UI 容量规则，`creationWorkshop.ts`）→ brief `normalizeSourceAssets`（抛错，`creationBrief.ts:57`）→ contract `briefAssets` + `isStoredAssetId`（软阻塞，`authoringContract.ts:103`、`:171-180`）。第一层语义不同不动；看二、三层是否同一规则两种表达。若 `assessCreationReadiness` 的软阻塞语义（收集 blocker 而非抛错）必须保留，只共享「合法 source asset」谓词，不合并控制流。拥有：`src/creationBrief.ts`、`src/authoringContract.ts`、两者测试。只读：`src/webmcp.ts`、`src/App.tsx`。先用 `impact({target:"assessCreationReadiness"})`，它在 WebMCP 信任边界上。
 
-## 第四轮候选
+## 第四轮已完成（2026-09-02 合入 main，不要重做）
 
-- **J 遗留**：`webmcp.ts` `creationBriefSchema.sourceAssets.maxItems: 24` 与 `creationBrief.ts` 的 `CREATION_SOURCE_ASSET_LIMIT`、`webmcp.ts:1214` 附近若有 sourceAssets 条数校验，三处同一上限；`CREATION_SOURCE_ASSET_LIMIT` 是真源，schema 改读它。半小时量级，可并入下一个碰 `webmcp.ts` 的 lane。
-- **contract 簇依赖方向图**：G、H、I、K 已合入，现在方向是 types → bookElementGrammar → bookAssetContract，creationBrief → authoringContract。画一次图，决定 `creationBrief.ts` 是否应吸收 `checkSourceAsset` 所在的那段（或反向），再决定要不要开 lane。
+| Lane | 结果 | 关键产物 / 偏差 |
+|---|---|---|
+| L · sourceAssets 上限接真源 | 合并（`890b4b7`，merge `f9d5fbe`） | `creationBrief.ts` 的 `CREATION_SOURCE_ASSET_LIMIT` 改为 `export`；`webmcp.ts` 新增 `import { CREATION_SOURCE_ASSET_LIMIT } from "./creationBrief"`（此前 webmcp 只 import authoringContract，未 import creationBrief；creationBrief 只 import authoringContract + types，无环），`creationBriefSchema.sourceAssets.maxItems` 改读它。`evidence.maxItems: 24`（quality evidence 上限）与 `:787` 的 `creationBrief.sourceAssets` locator 字符串未动。测试里的字面量 24 保留（独立确认常量值）。2 文件 +3/−2 |
+| M · contract 簇依赖方向图 | 只报告，未合并 | 结论：**`checkSourceAsset` 留在 `authoringContract.ts`**。消费者只有 `briefAssets`（同文件）与 `creationBrief.ts` 的 `normalizeSourceAssets`；依赖 `briefString` / `CreationSourceAsset` / `SourceAssetRejection` 全在 authoringContract；移到 creationBrief 会让 authoringContract 反向 import 产生运行时环，移到 types 会把现有 type-only 环升级成运行时环。`assessCreationReadiness` upstream CRITICAL（17 符号 / 8 flow / 5 直接调用者），不做无收益手术。**不开 lane** |
+
+Lane M 的依赖图要点（grep 为准，GitNexus 索引未含第三轮符号）：
+
+- 分层：L0 `types` / `interaction` / `assetId` → L1 `bookElementGrammar` / `authoringContract` → L2 `bookAssetContract` / `creationBrief` / `projectArtifact` / `assetStore` → L3 `qualityContract` → L4 `qualityLifecycle` / `creationWorkshop` / `authoringPresentation` / `publishingClient` → L5 `bookEngine` / `webmcp` / `App` / `workshopControls`。没有 `publishingSchema.ts`，Publishing schema 本体在 `worker/` 与同步脚本生成物里。
+- 唯一的环：`types.ts:1` `import type { CreationBriefPayload, CreationReadinessAssessment } from "./authoringContract"`，type-only，编译期擦除；`types.ts:207/:240` 两个 command-result 类型需要它，反向搬会成运行时环。**保留**，建议在 types.ts 顶部加一行注释说明这是刻意的 type-only 边。
+- **两条真反向边**：`assetStore.ts:6` 与 `bookAssetContract.ts:4` 各自从 `authoringContract` 拿的**唯一一项**是 `MAX_BOOK_PUBLISHABLE_ASSETS`。它与 `MAX_BOOK_SPREADS` / `MAX_SPREAD_ELEMENTS` 同类，第一轮把那两个放进 `types.ts` 时漏了这个。这是第五轮 Lane N（见下）。
+- 单一消费者的文件（locality 好，不动）：`creationBrief`→creationWorkshop；`qualityLifecycle`→bookEngine；`authoringPresentation`→App。
+- 生产代码零外部消费者的导出：`authoringContract.ts` 的 `AUTHORING_HARD_GATE_IDS` / `PHOTO_TRUTH_REQUIREMENT` / `authoringHardGates`（`:290/:306/:412`，只为测试可见）与 `SourceAssetRejection`（`:103`）。
+
+第四轮总计 2 文件 +3/−2；测试 361 → 361；`verify:release` 退出码 0。无行为差异。
+
+---
+
+## 第五轮候选
+
+### Lane N · `MAX_BOOK_PUBLISHABLE_ASSETS` 下沉到 `types.ts`（Lane M 建议，值得开）
+
+**目标**：把 `MAX_BOOK_PUBLISHABLE_ASSETS` 从 `src/authoringContract.ts` 下沉到 `src/types.ts`，与 `MAX_BOOK_SPREADS` / `MAX_SPREAD_ELEMENTS` 并列；删除 `assetStore.ts → authoringContract.ts` 与 `bookAssetContract.ts → authoringContract.ts` 这两条只为一个常量存在的反向边。顺带删 `authoringContract.ts:103` `SourceAssetRejection` 的 `export`（外部零引用，`checkSourceAsset` 返回类型是结构化推导的）。
+
+**拥有的文件**：`src/types.ts`、`src/authoringContract.ts`、`src/assetStore.ts`、`src/bookAssetContract.ts`、`src/creationBrief.ts`、`src/qualityContract.ts`、`src/bookEngine.ts`、`src/webmcp.ts`、`src/App.tsx` 中**仅限 import 语句与该常量的引用行**，及对应 `*.test.ts` 的 import 行（`qualityContract.test.ts`、`authoringContract.test.ts` 有引用）。
+
+**只读**：`worker/`、`scripts/`、`site-manifest.json`，上述文件的其它逻辑。
+
+**证据**（main `f9d5fbe`）：`grep -rln MAX_BOOK_PUBLISHABLE_ASSETS app/src` → App.tsx、assetStore.ts、webmcp.ts、qualityContract(.test).ts、authoringContract(.test).ts、bookEngine.ts、bookAssetContract.ts、creationBrief.ts；`app/scripts` 与 `app/worker` 零引用。
+
+**步骤**
+1. 第 0 步。`impact({target: "MAX_BOOK_PUBLISHABLE_ASSETS", direction: "upstream"})`，索引落后以 grep 为准。
+2. 常量定义（含 doc comment，与 `MAX_BOOK_SPREADS` 同风格）移到 `types.ts`；`authoringContract.ts` 改为从 `./types` import（它已从 types 取 `MOTION_PRESETS`，不新增边）。
+3. `assetStore.ts:6`、`bookAssetContract.ts:4` **整行删除**并改从 `./types` 取；其余消费者并入各自已有的 `./types` import。
+4. **不要**在 `authoringContract.ts` re-export，否则边留在原地。
+5. 删 `SourceAssetRejection` 的 `export`。
+6. `npm run typecheck && npm test`；不改 worker/scripts 时跳过 `test:sites`。
+
+**停止条件**：`grep -n "from \"./authoringContract\"" app/src/assetStore.ts app/src/bookAssetContract.ts` 为空；typecheck + test 全绿，用例数 ≥ 361；一次提交。若 typecheck 暴露 `types.ts` 因此出现新的运行时环，停下报告，不要强行绕。
+
+### 其它候选（Lane M 顺带发现，每条一行，无新证据默认不启动）
+
+- `types.ts:1` type-only 环：加注释说明刻意保留，可并入 Lane N。
+- `authoringContract.ts:290/:306/:412` 三个只为测试 export 的符号：改为通过 `buildAuthoringGuide()` 输出断言后去掉 export。
+- `authoringContract.ts:387` `creationReportRequirements` 唯一生产消费者是 `creationBrief.ts`，可下沉，但会带走 `AuthoringCountSpec`，先评估。
+- `assetStore.ts:2` 从 `bookElementGrammar` 取 `SUPPORTED_IMAGE_TYPES`：Asset registry 依赖 Book element grammar，该常量本质是封闭词汇，可与 Lane N 合并评估是否下沉到 types。
+- 「above the publishable limit of N」文案 5 处重复（`qualityContract.ts:266-272`、`bookEngine.ts:1425/1656/1764`、`webmcp.ts:1060`、`bookAssetContract.ts:411`），措辞已分叉，可收成一个消息构造器。
+- 同一条去重/上限规则四段近似自然语言（`authoringContract.ts:266/:377/:444`、`creationBrief.ts:186`），prompt 文案层重复，可单独一个 lane 统一。
 
 ### 仍待定（无新证据，默认不启动）
 
 - **候选 4(b)** ThreeBook 命令式 scene controller：拥有 `src/ThreeBook.tsx` 与 `src/readerShell.ts`，只读 `bookEngine.ts`。先 `impact` 看 `ThreeBook` props 上游。
 - **候选 8** Asset registry keyed lease set：只在 lease 泄漏真的出现时做。
-- **contract 簇**方向整理：G、H、I 已合入，可以画一次依赖方向图（types → bookElementGrammar → bookAssetContract；creationBrief → authoringContract？）再决定。
 - Lane F 留下的 Switch marker 亚像素差（`offsetLeft` 整数 vs 原 `inset:0` 的 77.47）：视觉不可见，不追。
 
 ## 最终汇报
 
-按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第四轮起点 33 / 361，`test:sites` 46）；任何刻意的行为差异单列。
+按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第五轮起点 33 / 361，`test:sites` 46）；任何刻意的行为差异单列。
