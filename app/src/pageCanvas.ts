@@ -5,7 +5,7 @@
  * React, so it runs under a stubbed 2D context in tests.
  */
 import * as THREE from "three";
-import { acquireAssetUrl } from "./assetStore";
+import { acquireAssetPreviewUrl, acquireAssetUrl } from "./assetStore";
 import { PAGE_H, PAGE_W } from "./bookGeometry";
 import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
 import type { StoryboardMark, StoryboardPoint, StoryboardSpread } from "./storyboard";
@@ -27,6 +27,27 @@ const LABEL_PX = { s: 36, m: 48, l: 64 } as const;
 const MARK_LABEL_PX = 34;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+/** Reader photos ghosted into storyboard boxes; `null` while loading or after a silent failure. */
+const sketchImages = new Map<string, HTMLImageElement | null>();
+let sketchImageVersion = 0;
+/** Bumps once per ghost that finishes loading, so a paint keyed on it repaints once more. */
+export const getSketchImageVersion = () => sketchImageVersion;
+
+function sketchImage(assetId: string) {
+  if (sketchImages.has(assetId)) return sketchImages.get(assetId);
+  sketchImages.set(assetId, null);
+  // ponytail: leases live for the page; bounded by the reader's source photos, release on storyboard reset if it ever matters.
+  acquireAssetPreviewUrl(assetId).then(async (lease) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.src = lease.url;
+    await image.decode();
+    sketchImages.set(assetId, image);
+    sketchImageVersion += 1;
+  }).catch(() => undefined);
+  return null;
+}
 
 /** A deterministic wobble so a pencil line never reads as a vector rule, and never jitters between frames. */
 const wobble = (seed: number, index: number) => Math.sin(seed * 12.9898 + index * 1.7) * 1.4;
@@ -92,6 +113,16 @@ function paintMark(context: CanvasRenderingContext2D, mark: StoryboardMark, widt
     return;
   }
   const path = markPath(mark, width, height);
+  const ghost = mark.kind === "rect" && mark.assetId ? sketchImage(mark.assetId) : null;
+  if (ghost && mark.kind === "rect") {
+    const l = mark.x * width; const t = mark.y * height; const w = mark.w * width; const h = mark.h * height;
+    const crop = centeredCoverCrop(ghost.naturalWidth, ghost.naturalHeight, w / h);
+    context.save();
+    context.globalAlpha = 0.4 * progress;
+    context.filter = "grayscale(1) contrast(1.35)";
+    context.drawImage(ghost, crop.x, crop.y, crop.width, crop.height, l, t, w, h);
+    context.restore();
+  }
   tracePath(context, path, progress, seed);
   if (progress < 1) return;
   if (mark.kind === "arrow") paintArrowHead(context, path[1], path[2]);

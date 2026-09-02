@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { paintSketchFade, paintWorkshopDrawing, sampleCanvasLuminance, wrapText } from "./pageCanvas";
+import { describe, expect, it, vi } from "vitest";
+import { getSketchImageVersion, paintSketchFade, paintWorkshopDrawing, sampleCanvasLuminance, wrapText } from "./pageCanvas";
 import type { StoryboardSpread } from "./storyboard";
+
+/** Preview leases resolve for `photo-*` ids and reject for anything else; full-size leases are untouched. */
+vi.mock("./assetStore", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./assetStore")>()),
+  acquireAssetPreviewUrl: (assetId: string) => assetId.startsWith("photo-")
+    ? Promise.resolve({ assetId, url: `blob:${assetId}`, release: () => undefined })
+    : Promise.reject(new Error("missing")),
+}));
+globalThis.Image = class { decoding = ""; src = ""; naturalWidth = 400; naturalHeight = 300; decode = () => Promise.resolve(); } as unknown as typeof Image;
 
 /** A measuring context: every character is 10px wide. */
 const measuring = { measureText: (text: string) => ({ width: text.length * 10 }) } as unknown as CanvasRenderingContext2D;
@@ -37,21 +46,22 @@ describe("paintWorkshopDrawing", () => {
     const strokes: { color: string; width: number; segments: number; alpha: number }[] = [];
     const texts: { text: string; alpha: number }[] = [];
     const drawn: unknown[] = [];
+    const order: string[] = [];
     let segments = 0;
     const context = {
-      strokeStyle: "", fillStyle: "", lineWidth: 0, lineCap: "", lineJoin: "", font: "", textBaseline: "", globalAlpha: 1,
+      strokeStyle: "", fillStyle: "", lineWidth: 0, lineCap: "", lineJoin: "", font: "", textBaseline: "", globalAlpha: 1, filter: "none",
       clearRect: () => undefined,
-      drawImage: (image: unknown) => { drawn.push(image); },
+      drawImage(image: unknown) { drawn.push(image); order.push(`image:${this.globalAlpha}:${this.filter}`); },
       save: () => undefined,
-      restore() { this.globalAlpha = 1; },
+      restore() { this.globalAlpha = 1; this.filter = "none"; },
       beginPath: () => { segments = 0; },
       moveTo: () => undefined,
       lineTo: () => { segments += 1; },
-      stroke() { strokes.push({ color: String(this.strokeStyle), width: Number(this.lineWidth), segments, alpha: Number(this.globalAlpha) }); },
+      stroke() { order.push("stroke"); strokes.push({ color: String(this.strokeStyle), width: Number(this.lineWidth), segments, alpha: Number(this.globalAlpha) }); },
       fillText(text: string) { texts.push({ text, alpha: Number(this.globalAlpha) }); },
     };
     const canvas = { width: 200, height: 100, getContext: () => context };
-    return { strokes, texts, drawn, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
+    return { strokes, texts, drawn, order, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
   }
   const line = (n: number) => ({ kind: "line" as const, points: Array.from({ length: n }, (_, index) => ({ x: index / (n - 1), y: 0.5 })) });
   const spread = (marks: StoryboardSpread["marks"], annotations: StoryboardSpread["annotations"] = []): StoryboardSpread => ({ index: 0, caption: "", sketchRevision: 1, marks, annotations });
@@ -90,6 +100,31 @@ describe("paintWorkshopDrawing", () => {
     paintWorkshopDrawing(pair, undefined, [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }, { x: 0.3, y: 0.1 }], 1);
     expect(strokes).toHaveLength(1);
     expect(strokes[0].segments).toBe(2);
+  });
+
+  it("ghosts a reader photo under a box once its preview loads, and repaints on the version bump", async () => {
+    const { drawn, order, pair } = recordingCanvas();
+    const marks: StoryboardSpread["marks"] = [{ kind: "rect", x: 0.1, y: 0.1, w: 0.4, h: 0.3, assetId: "photo-1", label: "boat" }];
+    const before = getSketchImageVersion();
+    paintWorkshopDrawing(pair, spread(marks), [], 1);
+    expect(drawn).toEqual([]);
+    await vi.waitFor(() => expect(getSketchImageVersion()).toBe(before + 1));
+    paintWorkshopDrawing(pair, spread(marks), [], 1);
+    expect(drawn).toHaveLength(1);
+    expect((drawn[0] as HTMLImageElement).naturalWidth).toBe(400);
+    expect(order).toEqual(["stroke", "image:0.4:grayscale(1) contrast(1.35)", "stroke"]);
+  });
+
+  it("leaves the plain pencil box when the photo lease fails", async () => {
+    const { drawn, strokes, pair } = recordingCanvas();
+    const marks: StoryboardSpread["marks"] = [{ kind: "rect", x: 0.1, y: 0.1, w: 0.4, h: 0.3, assetId: "gone" }];
+    const before = getSketchImageVersion();
+    paintWorkshopDrawing(pair, spread(marks), [], 1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    paintWorkshopDrawing(pair, spread(marks), [], 1);
+    expect(getSketchImageVersion()).toBe(before);
+    expect(drawn).toEqual([]);
+    expect(strokes).toHaveLength(2);
   });
 
   it("fades the finished plan over the loaded overlay and leaves the overlay alone at alpha 0", () => {
