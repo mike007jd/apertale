@@ -1918,7 +1918,11 @@ export function App() {
                 ? authoringSurfaceRequest.renderEvidenceToken
                 : undefined}
               mode={showCreateGuide ? "workshop" : "reader"}
-              workshopDrawing={showCreateGuide ? { revision: storyboard.revision, spread: currentStoryboardSpread } : undefined}
+              workshopDrawing={showCreateGuide
+                ? { revision: storyboard.revision, spread: currentStoryboardSpread }
+                : storyboard.createdDocumentId === snapshot.document.id
+                  ? { revision: storyboard.revision, spread: storyboard.spreads.find((item) => item.index === snapshot.session.currentSpreadIndex) }
+                  : undefined}
               annotationEnabled={showCreateGuide && storyPencilActive}
               // Preview is a reader's view, and the workshop book is a prop.
               // Neither may be dragged, and on a phone the canvas is the only

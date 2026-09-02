@@ -997,6 +997,11 @@ describe("WebMCP registration", () => {
     };
 
     const booksBefore = bookEngine.getLibrary().books.map((book) => book.id);
+    await tool("sketch_storyboard").execute({
+      requestId: "plan-before-create",
+      action: "replace",
+      spreads: [{ index: 0, caption: "Open", marks: [{ kind: "rect", x: 0.1, y: 0.1, w: 0.3, h: 0.3, label: "book" }] }],
+    }, signal);
     const pending = JSON.parse(String(await tool("manage_book").execute(input, signal)));
     expect(pending).toMatchObject({
       ok: true,
@@ -1005,6 +1010,8 @@ describe("WebMCP registration", () => {
     });
     const createdDocumentId = presented.mock.calls[0][0].documentId;
     expect(createdDocumentId).toMatch(/^book-the-presentation-retry-/);
+    // The plan outlives create until the created book has actually been shown.
+    expect(getStoryboardSnapshot()).toMatchObject({ createdDocumentId, spreads: [{ index: 0, marks: [{ kind: "rect" }] }] });
     expect(bookEngine.getLibrary().books.filter((book) => book.id === createdDocumentId)).toHaveLength(1);
     expect(bookEngine.openBook("apertale-atlas-of-wonders", "human")).toBe(true);
     expect(bookEngine.getSnapshot().document.id).toBe("apertale-atlas-of-wonders");
@@ -1017,6 +1024,7 @@ describe("WebMCP registration", () => {
       undoToken: pending.undoToken,
     });
     expect(retried).not.toHaveProperty("presentation");
+    expect(getStoryboardSnapshot()).toEqual({ revision: 0, spreads: [] });
     expect(presented).toHaveBeenCalledTimes(2);
     expect(presented.mock.calls[1][0]).toMatchObject({
       requestId: input.requestId,

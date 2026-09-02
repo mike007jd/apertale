@@ -6,7 +6,7 @@ import { recordDiagnostic } from "./diagnostics";
 import { coverBoardMaterials, createCoverEndpaperCanvas, paintCoverEndpaper } from "./endpaper";
 import { BOARD_H, BOARD_T, BOARD_W, BODY_BASE, JOINT, PAGE_H, PAGE_THICKNESS, PAGE_W, buildSceneElement, createTurnLeaf, makeOpenPageGeometry, makePageMaterial, type SceneElement } from "./bookGeometry";
 import { createBookPointer, type BookPointerProps } from "./bookPointer";
-import { MARK_REVEAL_MS, MAX_REVEAL_MS, loadPagePairs, paintWorkshopDrawing, type PagePair } from "./pageCanvas";
+import { MARK_REVEAL_MS, MAX_REVEAL_MS, loadPagePairs, paintSketchFade, paintWorkshopDrawing, snapshotOverlay, type PagePair } from "./pageCanvas";
 import { readerCameraPage, readerSinglePagePresentation, spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, clamp01, resolveTurnContentPlan } from "./pageTurn";
@@ -900,6 +900,10 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     let lastWorkshopPaintKey = "";
     /** When each spread revision first became visible; a revisited spread never replays. */
     const revealStarts = new Map<string, number>();
+    /** The pencil plan fading off the created book's first spread; plays once per book. */
+    const SKETCH_FADE_MS = 600;
+    const sketchFadedDocuments = new Set<string>();
+    let sketchFade: { spreadId: string; spread: StoryboardSpread; base: HTMLCanvasElement; start: number; step: number } | null = null;
     let renderedEvidenceKey = "";
     let renderedEvidenceCandidate = "";
     let renderedEvidenceFrames = 0;
@@ -1012,6 +1016,30 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
         if (paintKey !== lastWorkshopPaintKey) {
           lastWorkshopPaintKey = paintKey;
           paintWorkshopDrawing(pagePair, drawing?.spread, bookPointer.state.annotationDraft, revealProgress);
+        }
+      } else if (pagePair) {
+        // The book Codex just created opens wearing its own pencil plan for a
+        // moment, so the reader sees the sketch become the art.
+        if (sketchFade && sketchFade.spreadId !== spread.id) {
+          const left = pagePairs.get(sketchFade.spreadId);
+          if (left) paintSketchFade(left, sketchFade.spread, sketchFade.base, 0);
+          sketchFade = null;
+        }
+        const plan = propsRef.current.workshopDrawing?.spread;
+        // Not before the loading curtain lifts, or the fade plays to nobody.
+        if (plan?.marks.length && readySent && !sketchFadedDocuments.has(current.document.id)) {
+          sketchFadedDocuments.add(current.document.id);
+          const base = reduced ? null : snapshotOverlay(pagePair);
+          if (base) sketchFade = { spreadId: spread.id, spread: plan, base, start: frameTime, step: -1 };
+        }
+        if (sketchFade) {
+          const progress = clamp01((frameTime - sketchFade.start) / SKETCH_FADE_MS);
+          const step = Math.round(progress * 30);
+          if (step !== sketchFade.step) {
+            sketchFade.step = step;
+            paintSketchFade(pagePair, sketchFade.spread, sketchFade.base, 1 - progress);
+          }
+          if (progress >= 1) sketchFade = null;
         }
       }
 

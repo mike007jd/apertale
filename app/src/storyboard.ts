@@ -32,6 +32,8 @@ export type StoryboardSpread = {
 export type StoryboardSnapshot = {
   revision: number;
   spreads: StoryboardSpread[];
+  /** Set once the plan became this book; the reader fades the sketch over its first spread, then the plan is reset. */
+  createdDocumentId?: string;
 };
 
 export type StoryboardSketchInput = {
@@ -284,6 +286,13 @@ export function clearStoryboardAnnotations(index: number) {
   const spread = snapshot.spreads.find((candidate) => candidate.index === index);
   if (!spread?.annotations.length) return snapshot;
   return publish(snapshot.spreads.map((candidate) => candidate.index === index ? { ...candidate, annotations: [] } : candidate));
+}
+
+/** The plan stays readable until the created book's first frame has shown it fading into the final art. */
+export function retireStoryboard(documentId: string) {
+  snapshot = { ...snapshot, createdDocumentId: documentId };
+  persist(snapshot);
+  listeners.forEach((listener) => listener());
 }
 
 export function resetStoryboard() {

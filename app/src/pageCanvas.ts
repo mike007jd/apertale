@@ -8,7 +8,7 @@ import * as THREE from "three";
 import { acquireAssetUrl } from "./assetStore";
 import { PAGE_H, PAGE_W } from "./bookGeometry";
 import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
-import type { StoryboardMark, StoryboardPoint, StoryboardSpread, StoryboardStroke } from "./storyboard";
+import type { StoryboardMark, StoryboardPoint, StoryboardSpread } from "./storyboard";
 import { spreadArtworkFit, spreadBaseAssetId, type Spread } from "./types";
 
 export type PagePair = {
@@ -120,6 +120,16 @@ export function paintWorkshopDrawing(
   if (!canvas || !context) return;
   const { width, height } = canvas;
   context.clearRect(0, 0, width, height);
+  paintSketch(context, spread, width, height, sketchProgress);
+  if (draft.length >= 2) {
+    context.strokeStyle = RED_PENCIL;
+    context.lineWidth = 8;
+    tracePath(context, draft.map((point) => px(point, width, height)));
+  }
+  pair.overlay.needsUpdate = true;
+}
+
+function paintSketch(context: CanvasRenderingContext2D, spread: StoryboardSpread | undefined, width: number, height: number, sketchProgress: number) {
   context.lineCap = "round";
   context.lineJoin = "round";
   context.strokeStyle = PENCIL;
@@ -129,10 +139,39 @@ export function paintWorkshopDrawing(
   marks.forEach((mark, index) => paintMark(context, mark, width, height, clamp01(sketchProgress * marks.length - index), index + 1));
   context.strokeStyle = RED_PENCIL;
   context.lineWidth = 8;
-  const red = (stroke: StoryboardStroke) => tracePath(context, stroke.points.map((point) => px(point, width, height)));
-  spread?.annotations.forEach(red);
-  if (draft.length >= 2) red({ points: [...draft] });
+  spread?.annotations.forEach((stroke) => tracePath(context, stroke.points.map((point) => px(point, width, height))));
+}
+
+/**
+ * The created book's first spread wears its own pencil plan for a moment:
+ * the finished overlay (typeset text) is restored from `base`, then the
+ * sketch is drawn over it at `alpha`. Alpha 0 leaves the overlay as loaded.
+ */
+export function paintSketchFade(pair: PagePair, spread: StoryboardSpread, base: HTMLCanvasElement, alpha: number) {
+  const canvas = pair.overlay.image as HTMLCanvasElement | undefined;
+  const context = canvas?.getContext("2d");
+  if (!canvas || !context) return;
+  const { width, height } = canvas;
+  context.clearRect(0, 0, width, height);
+  context.drawImage(base, 0, 0);
+  if (alpha > 0) {
+    context.save();
+    context.globalAlpha = alpha;
+    paintSketch(context, spread, width, height, 1);
+    context.restore();
+  }
   pair.overlay.needsUpdate = true;
+}
+
+/** A copy of the overlay as loaded, so the fade can put it back untouched. */
+export function snapshotOverlay(pair: PagePair): HTMLCanvasElement | null {
+  const source = pair.overlay.image as HTMLCanvasElement | undefined;
+  if (!source) return null;
+  const copy = document.createElement("canvas");
+  copy.width = source.width;
+  copy.height = source.height;
+  copy.getContext("2d")?.drawImage(source, 0, 0);
+  return copy;
 }
 
 /**
