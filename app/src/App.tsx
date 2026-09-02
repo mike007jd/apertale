@@ -59,12 +59,9 @@ import { PortraitOrientationGate } from "./PortraitOrientationGate";
 import { completeImageHandoff, currentImageHandoff, describePartialImageHandoff, dismissImageHandoff, subscribeToImageHandoff, type ImageHandoffRequest } from "./imageHandoff";
 import { recordDiagnostic } from "./diagnostics";
 import {
-  dedicatedCoverRendered,
-  readerRenderMatches,
   readerSceneStructureKey,
   sceneFailureMatches,
   resolvedCoverAsset,
-  shelfCoverMatches,
   shelfCoverTarget,
   type ReaderRenderEvidence,
   type ResolvedCoverAsset,
@@ -84,7 +81,12 @@ import { deletePublication, getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
 import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
-import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
+import {
+  createAuthoringPresentation,
+  type ActiveAuthoringSurfaceRequest,
+  type AuthoringPresentationAdapter,
+  type AuthoringSurfaceState,
+} from "./authoringPresentation";
 import { MAX_ANNOTATIONS_PER_SPREAD, addStoryboardAnnotation, clearStoryboardAnnotations, describeAnnotation, getStoryboardSnapshot, subscribeToStoryboard, undoStoryboardAnnotation } from "./storyboard";
 import { registerWebMcpTools, type ToolActivity } from "./webmcp";
 import { StoryPencilControls, WorkshopPickers } from "./workshopControls";
@@ -160,24 +162,6 @@ export function readerSceneShouldMount(state: {
     || state.openingBookMatchesDocument
     || state.libraryMotion !== "idle";
 }
-
-type PendingAuthoringSurface = {
-  request: AuthoringSurfaceRequest;
-  signal: AbortSignal;
-  settling: boolean;
-  resolve: () => void;
-  reject: (error: Error) => void;
-  cleanup: () => void;
-};
-
-type ActiveAuthoringSurfaceRequest = AuthoringSurfaceRequest & {
-  renderEvidenceToken: string;
-};
-
-// The in-app Browser may throttle a background WebGL tab to only a few rAFs
-// per second. This remains a bounded failure, but leaves enough time for the
-// eight stable frames required by the renderer instead of racing them.
-const AUTHORING_SURFACE_TIMEOUT_MS = 10_000;
 
 /**
  * A book belongs to the reader unless the samples set claims it, so `sample`
@@ -341,7 +325,6 @@ export function App() {
   const destructiveActionOpener = useRef<HTMLElement | null>(null);
   const activeDocumentIdRef = useRef(snapshot.document.id);
   activeDocumentIdRef.current = snapshot.document.id;
-  const pendingAuthoringSurface = useRef<PendingAuthoringSurface | null>(null);
   const lastPrewarm = useRef<{ key: string; entry: { renderer: Promise<unknown>; media: Promise<unknown> } } | null>(null);
   const coverAssetLeases = useRef(new Map<string, { assetId: string; lease: AssetUrlLease }>());
   const workshopAssetLeases = useRef(new Map<string, AssetUrlLease>());
@@ -1112,59 +1095,40 @@ export function App() {
     });
   }, [advanceLoadStage, beginOpenTransition, library.books, prewarmReader, readyBookId, snapshot.document.id]);
 
-  const presentAuthoringSurface = useCallback((request: AuthoringSurfaceRequest, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
-    const current = bookEngine.getSnapshot();
-    if (request.documentId !== current.document.id || request.revision !== current.document.revision) {
-      reject(new Error("The requested authoring surface no longer matches the active book revision."));
-      return;
-    }
-    if (signal.aborted) {
-      reject(new DOMException("Authoring surface request was cancelled.", "AbortError"));
-      return;
-    }
-    const previous = pendingAuthoringSurface.current;
-    if (previous) {
-      previous.cleanup();
-      previous.reject(new DOMException("Superseded by a newer authoring surface request.", "AbortError"));
-    }
-    let timeout = 0;
-    const finishWithError = (error: Error) => {
-      if (pendingAuthoringSurface.current?.request.requestId !== request.requestId) return;
-      pendingAuthoringSurface.current.cleanup();
-      pendingAuthoringSurface.current = null;
-      setAuthoringSurfaceRequest(null);
-      reject(error);
-    };
-    const onAbort = () => finishWithError(new DOMException("Authoring surface request was cancelled.", "AbortError"));
-    signal.addEventListener("abort", onAbort, { once: true });
-    pendingAuthoringSurface.current = {
-      request,
-      signal,
-      settling: false,
-      resolve,
-      reject,
-      cleanup: () => {
-        signal.removeEventListener("abort", onAbort);
-        window.clearTimeout(timeout);
-      },
-    };
-    timeout = window.setTimeout(() => finishWithError(new Error("The requested authoring surface did not become visible.")), AUTHORING_SURFACE_TIMEOUT_MS);
-    setAuthoringSurfaceRequest({ ...request, renderEvidenceToken: crypto.randomUUID() });
-    dispatchCreationNavigation({ type: "hide-immediately" });
-    setShowElementAgentGuide(false);
-    setShowPublication(false);
-    setTurn(null);
-    setHoveredId(null);
-    setShowMore(false);
-    setShowOutline(false);
-    if (request.surface === "shelf") {
-      const activeBook = bookEngine.getLibrary().books.find((book) => book.id === request.documentId);
-      setLibraryTab(activeBook?.sample ? "explore" : "yours");
-      settleLibraryToShelf();
-      return;
-    }
-    settleLibraryToReader();
-  }), [settleLibraryToReader, settleLibraryToShelf]);
+  // The protocol owns the pending request, its evidence token, the timeout and
+  // the evidence write; the App is only the surface it drives. Handlers live in
+  // a ref so a re-created closure never orphans an in-flight presentation.
+  const surfaceAdapter = useRef<Pick<AuthoringPresentationAdapter, "onPresent" | "onSettled">>({
+    onPresent: () => undefined,
+    onSettled: () => undefined,
+  });
+  surfaceAdapter.current = {
+    onPresent: (request) => {
+      setAuthoringSurfaceRequest(request);
+      dispatchCreationNavigation({ type: "hide-immediately" });
+      setShowElementAgentGuide(false);
+      setShowPublication(false);
+      setTurn(null);
+      setHoveredId(null);
+      setShowMore(false);
+      setShowOutline(false);
+      if (request.surface === "shelf") {
+        const activeBook = bookEngine.getLibrary().books.find((book) => book.id === request.documentId);
+        setLibraryTab(activeBook?.sample ? "explore" : "yours");
+        settleLibraryToShelf();
+        return;
+      }
+      settleLibraryToReader();
+    },
+    onSettled: () => setAuthoringSurfaceRequest(null),
+  };
+  const [presentation] = useState(() => createAuthoringPresentation({
+    currentDocument: () => bookEngine.getSnapshot().document,
+    recordEvidence: (input, signal) => bookEngine.recordRenderEvidenceCoordinated(input, signal),
+    onPresent: (request) => surfaceAdapter.current.onPresent(request),
+    onSettled: () => surfaceAdapter.current.onSettled(),
+  }));
+  const presentAuthoringSurface = presentation.present;
 
   useLayoutEffect(() => {
     if (
@@ -1178,102 +1142,33 @@ export function App() {
     targetCard?.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
   }, [activeLibraryTab, authoringSurfaceRequest, libraryMotion, showCreateGuide, showLibrary]);
 
-  useEffect(() => {
-    if (!authoringSurfaceRequest) return undefined;
-    const activeSpreadId = snapshot.document.spreads[snapshot.session.currentSpreadIndex]?.id ?? "";
-    const visibleShelfIds = shelfBooks.map((book) => book.id);
-    const requestedSpreadId = authoringSurfaceRequest.spreadId ?? activeSpreadId;
-    const requestedShelfBook = shelfBooks.find((book) => book.id === authoringSurfaceRequest.documentId);
-    const requestedCover = requestedShelfBook
-      ? shelfCoverTarget(requestedShelfBook, resolvedCoverUrls)
-      : undefined;
-    const viewportBounds = { top: 0, right: window.innerWidth, bottom: window.innerHeight, left: 0 };
-    const contentRendered = authoringSurfaceRequest.surface === "reader"
-      ? readerRenderMatches(lastReaderRender, {
-        sceneKey: readerSceneKey,
-        renderEvidenceToken: authoringSurfaceRequest.renderEvidenceToken,
-        documentId: authoringSurfaceRequest.documentId,
-        revision: authoringSurfaceRequest.revision,
-        spreadId: requestedSpreadId,
-        theme: authoringSurfaceRequest.theme,
-        surface: renderWebGl ? "webgl" : "fallback",
-      })
-      : shelfCoverMatches(
-        renderedShelfCovers[authoringSurfaceRequest.documentId],
-        requestedCover,
-        viewportBounds,
-      );
-    const ready = authoringSurfaceReady(authoringSurfaceRequest, {
-      documentId: snapshot.document.id,
-      revision: snapshot.document.revision,
-      spreadId: activeSpreadId,
-      theme: snapshot.session.sceneThemeId,
-      preview: snapshot.session.preview,
-      workshopOpen: showCreateGuide,
-      libraryOpen: showLibrary,
-      libraryMotion,
-      transitionPending: openingFrame.current !== null || libraryFrame.current !== null || openCleanup.current !== null,
-      blockingOverlayOpen: showElementAgentGuide || showPublication || showOutline || Boolean(openingBook) || Boolean(pendingDestructiveAction),
-      contentRendered,
-      shelfBookIds: visibleShelfIds,
-    });
-    if (!ready) return undefined;
-    const pending = pendingAuthoringSurface.current;
-    if (pending?.request.requestId !== authoringSurfaceRequest.requestId) return undefined;
-    if (pending.settling) return undefined;
-    pending.settling = true;
-    const libraryBook = library.books.find((book) => book.id === authoringSurfaceRequest.documentId);
-    const recordVisibleEvidence = async () => {
-      if (!libraryBook || libraryBook.sample) return;
-      const input = authoringSurfaceRequest.surface === "reader"
-        ? lastReaderRender && {
-          documentId: lastReaderRender.documentId,
-          revision: lastReaderRender.revision,
-          spreadId: lastReaderRender.spreadId,
-          theme: lastReaderRender.theme,
-          surface: lastReaderRender.surface,
-          locator: lastReaderRender.locator,
-          scope: "spread" as const,
-        }
-        : requestedShelfBook
-          && requestedCover
-          && dedicatedCoverRendered(requestedShelfBook, resolvedCoverAsset(requestedShelfBook, resolvedCoverUrls))
-          ? {
-              documentId: requestedCover.documentId,
-              revision: requestedCover.revision,
-              theme: authoringSurfaceRequest.theme,
-              surface: "shelf" as const,
-              locator: `[data-book-id="${requestedCover.documentId}"] .library-cover-frame img`,
-              scope: "cover" as const,
-            }
-          : null;
-      if (!input || !await bookEngine.recordRenderEvidenceCoordinated(input, pending.signal)) {
-        throw new Error("The visible authoring frame could not be recorded for quality review.");
-      }
-    };
-    void recordVisibleEvidence().then(() => {
-      if (pendingAuthoringSurface.current !== pending) return;
-      pending.cleanup();
-      pendingAuthoringSurface.current = null;
-      setAuthoringSurfaceRequest(null);
-      pending.resolve();
-    }, (error: unknown) => {
-      if (pendingAuthoringSurface.current !== pending) return;
-      pending.cleanup();
-      pendingAuthoringSurface.current = null;
-      setAuthoringSurfaceRequest(null);
-      pending.reject(error instanceof Error ? error : new Error("The visible authoring frame could not be recorded."));
-    });
-    return undefined;
-  }, [authoringSurfaceRequest, lastReaderRender, library.books, libraryMotion, openingBook, pendingDestructiveAction, readerSceneKey, renderWebGl, renderedShelfCovers, resolvedCoverUrls, shelfBooks, showCreateGuide, showElementAgentGuide, showLibrary, showOutline, showPublication, snapshot.document.id, snapshot.document.revision, snapshot.document.spreads, snapshot.session.currentSpreadIndex, snapshot.session.preview, snapshot.session.sceneThemeId]);
+  // Pushed whole, so the readiness decision stays in the protocol Module and
+  // the App does not re-subscribe to each of its two dozen inputs.
+  const authoringSurfaceState: AuthoringSurfaceState = {
+    documentId: snapshot.document.id,
+    revision: snapshot.document.revision,
+    spreadId: snapshot.document.spreads[snapshot.session.currentSpreadIndex]?.id ?? "",
+    theme: snapshot.session.sceneThemeId,
+    preview: snapshot.session.preview,
+    workshopOpen: showCreateGuide,
+    libraryOpen: showLibrary,
+    libraryMotion,
+    transitionPending: openingFrame.current !== null || libraryFrame.current !== null || openCleanup.current !== null,
+    blockingOverlayOpen: showElementAgentGuide || showPublication || showOutline || Boolean(openingBook) || Boolean(pendingDestructiveAction),
+    shelfBooks,
+    libraryBooks: library.books,
+    resolvedCoverUrls,
+    renderedShelfCovers,
+    lastReaderRender,
+    readerSceneKey,
+    readerSurface: renderWebGl ? "webgl" : "fallback",
+  };
 
-  useEffect(() => () => {
-    const pending = pendingAuthoringSurface.current;
-    if (!pending) return;
-    pending.cleanup();
-    pending.reject(new DOMException("Authoring surface unmounted.", "AbortError"));
-    pendingAuthoringSurface.current = null;
-  }, []);
+  useEffect(() => {
+    presentation.observe(authoringSurfaceState);
+  }, [authoringSurfaceState, presentation]);
+
+  useEffect(() => () => presentation.dispose(), [presentation]);
 
   useEffect(() => registerWebMcpTools(
     setWebMcpAvailable,
