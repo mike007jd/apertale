@@ -1,7 +1,7 @@
-# Apertale 架构加深 · 多 lane 执行 prompt（第五轮）
+# Apertale 架构加深 · 多 lane 执行 prompt（第六轮）
 
 > 用法：新 session 中 `@docs/ARCHITECTURE_LANES_PROMPT.md`。
-> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。第二轮（Lane F–I）、第三轮（Lane J、K）、第四轮（Lane L、M）与第五轮（Lane N）也已合入。本文件是第六轮的 handoff，已内含全部结论，不依赖外部报告。
+> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。第二轮（Lane F–I）、第三轮（Lane J、K）、第四轮（Lane L、M）与第五轮（Lane N）也已合入；第六轮 Lane O（只报告）已完成。本文件是第六轮实作 lane 的 handoff，已内含全部结论，不依赖外部报告。
 
 ## 你的角色
 
@@ -223,14 +223,40 @@ Lane M 的依赖图要点（grep 为准，GitNexus 索引未含第三轮符号�
 
 **停止条件**：`grep -n "from \"./authoringContract\"" app/src/assetStore.ts app/src/bookAssetContract.ts` 为空；typecheck + test 全绿，用例数 ≥ 361；一次提交。若 typecheck 暴露 `types.ts` 因此出现新的运行时环，停下报告，不要强行绕。
 
-## 第六轮候选
+## 第六轮 · Lane O 评估已完成（2026-09-02，只报告，未改代码）
 
-### 其它候选（Lane M 顺带发现，每条一行，无新证据默认不启动）
+对 Lane M 顺带发现的四条候选逐条取证（HEAD `b972e00`，行号以此为准；判定标准沿用 Lane N：(a) 逐字文本不变、(b) 净行数减少、(c) 不新增跨 module 边，三条全满足才开）。
 
-- `authoringContract.ts:290/:306/:412` 三个只为测试 export 的符号：改为通过 `buildAuthoringGuide()` 输出断言后去掉 export。
-- `authoringContract.ts:387` `creationReportRequirements` 唯一生产消费者是 `creationBrief.ts`，可下沉，但会带走 `AuthoringCountSpec`，先评估。
-- `assetStore.ts:2` 从 `bookElementGrammar` 取 `SUPPORTED_IMAGE_TYPES`：Asset registry 依赖 Book element grammar，该常量本质是封闭词汇，可与 Lane N 合并评估是否下沉到 types。
-- 同一条去重/上限规则四段近似自然语言（`authoringContract.ts:266/:377/:444`、`creationBrief.ts:186`），prompt 文案层重复，可单独一个 lane 统一。
+| # | 候选 | 结论 | 关键证据 |
+|---|---|---|---|
+| 1 | `authoringContract.ts:288/:304/:410` 三个只为测试 export 的符号（`AUTHORING_HARD_GATE_IDS` / `PHOTO_TRUTH_REQUIREMENT` / `authoringHardGates`） | **开** | 生产侧零跨文件消费者（`:302` 派生类型、`:370/:434` 文案、`:474/:475` `buildAuthoringGuide` 内部调用与自校验 throw）。测试引用只在 `authoringContract.test.ts`：`:6/:9/:14` import；`:224` `guide.hardGates` id 序列 vs 常量；`:225` `authoringHardGates()` id 序列 vs 常量（与 `:224` 重复，`guide.hardGates` 就是它的返回值）；`:236` `byId["photo-truth"]` toBe 常量；`:297` `guide.gates` 里 photo-truth requirement toBe 常量（与 `:236` 同一不变式）。改法：`:224` 内联 12 个 id 字面量（断言反而变强，现状与 `:475` 的运行时自校验近乎重言式）；`:225`、`:297` 删除；`:236` 改为断言 hardGates 与 gates 两个公共输出的文本一致（`:237-239` 三条正则已钉住关键片段，覆盖不变）。三条都满足：文案零改动；单行内联时净约 −5 行；import 边只减不增，公共接口收窄 3 个符号 |
+| 2 | `creationReportRequirements` 下沉到 `creationBrief.ts` | **不开** | 前提「唯一生产消费者是 creationBrief」被证伪：`authoringContract.ts:531` `buildAuthoringGuide` 自己就消费它（GitNexus `impact` direct 2 / HIGH，与 grep 一致）。下沉后 authoringContract 须反向 import creationBrief，形成 L1 ↔ L2 **运行时**环（不是 `types.ts:1` 那种 type-only 环）；闭包里 `spreadAssetMode`（`:327`）与 `AuthoringCountSpec`（`:312`）在 `creationCompletionGates` 另有消费者，须留下并新增 export。(c) 不满足，(b) 亦为净 +2 行 |
+| 3 | `SUPPORTED_IMAGE_TYPES` 下沉到 `types.ts` | **不开（边收益成立、行数持平；若放宽 (b) 为「不增加」则可开）** | `assetStore.ts:2` 与 `bookAssetContract.ts:3` 从 `bookElementGrammar` 各自只取这一个符号，下沉可删 2 条边、新增 0 条；`publishingClient.ts:2-6` 另取 2 个 pattern，边保留。定义在 `bookElementGrammar.ts:65` `new Set(G.imageTypes)`，`imageTypes` 进 `worker/bookElementGrammar.json:113` 被 `bookShareApi.js:14` 读，故下沉后 grammar 字面量仍须从 types 取值填入（grammar 已 import types，JSON 产物逐字不变）。无派生类型别名。`types.ts` 已有 `THEME_IDS` / `BOOK_ELEMENT_KINDS` / `BOOK_PAGES` / `BOOK_PROVENANCE` / `MOTION_PRESETS` 同类封闭词汇。行数：types +2（列表 + `ReadonlySet`，三处消费者都用 `.has()`），grammar 0，assetStore −1，bookAssetContract −1，publishingClient 0（type-only import types 需补一条值 import）→ **净 ±0**。GitNexus 对该符号索引落后（解析到 bookAssetContract 的 import 别名，impactedCount 0），以 grep 为准 |
+| 4 | 四段去重/上限 prompt 文案统一 | **不开** | 四段原文：A `authoringContract.ts:264`（`assessCreationReadiness` 的 `recommended.assetNeeds`，规划期数量建议，无动作动词）；B `:375`（`creationCompletionGates` layout gate requirement，含 create 时序 + interactionDensity 展开）；C `:442`（`authoringHardGates` layout hard gate rule，额外承载 never text-only shell / 不覆盖 curated sample）；D `creationBrief.ts:185`（brief Phase 2 bullet，「may be uploaded」指上传动作）。是**相关但语义不同的四条规则**，共享内核只有「reader-visible cover / final base / layer / frame 去重且 ≤ 50，author-only provenance 不计入」，而该上限已由 `MAX_BOOK_PUBLISHABLE_ASSETS` 单点共享。措辞两两不同（"at most 50 distinct" / "stay at or below 50" / "at or below 50" / "At most 50 may be uploaded"），统一后至少三段 prompt 逐字改变，违反 (a)；保留四种措辞的构造器参数比消除的重复还多，净 +3~+6 行，违反 (b)。测试逐字断言 3 处会动：`authoringContract.test.ts:80`（钉 A）、`:241`（钉 C）、`creationBrief.test.ts:62`（钉 D） |
+
+Lane O 起始 `npm test`：33 文件 / 361 用例；`git status --short` 为空；未产生分支合并。
+
+### 第六轮实作 lane（待用户决定开哪几条）
+
+#### Lane P · 去掉三个只为测试 export 的符号（候选 1，建议开）
+
+**目标**：`authoringContract.ts` 的 `AUTHORING_HARD_GATE_IDS` / `PHOTO_TRUTH_REQUIREMENT` / `authoringHardGates` 去掉 `export`；`authoringContract.test.ts` 改为通过 `buildAuthoringGuide()` 的公共输出断言。
+
+**拥有的文件**：`src/authoringContract.ts`（仅限这三个声明的 `export` 关键字）、`src/authoringContract.test.ts`。只读：其余一切。
+
+**步骤**：第 0 步；`impact` 三个符号（索引若落后以 grep 为准）；`:224` 把 12 个 hard gate id 内联为字面量数组（单行，文件已有 200+ 字符长行先例）；删 `:225`、`:297`；`:236` 改为 `expect(byId["photo-truth"]).toBe(guide.gates.find((g) => g.id === "photo-truth")?.requirement)`；删 `:6/:9/:14` 三行 import；去掉三个 `export`。`npm run typecheck && npm test`。
+
+**停止条件**：`grep -rn "AUTHORING_HARD_GATE_IDS\|PHOTO_TRUTH_REQUIREMENT\|authoringHardGates" app/src --include=*.test.ts` 为空；typecheck + test 全绿，用例数 ≥ 361（删的是重复断言不是用例，用例数应不变）；任何 prompt 文案字符串零改动；一次提交。
+
+#### Lane Q · `SUPPORTED_IMAGE_TYPES` 下沉到 `types.ts`（候选 3，仅当用户放宽 (b) 为「不增加」时开）
+
+**目标**：删 `assetStore.ts:2` 与 `bookAssetContract.ts:3` 两条只为一个常量存在的 `→ bookElementGrammar` 边；`types.ts` 新增 `SUPPORTED_IMAGE_TYPES`（列表 + `ReadonlySet`），紧挨 `BOOK_PROVENANCE`；`bookElementGrammar.ts` 字面量的 `imageTypes` 改从 types 取值，`:65` 删除并 **不 re-export**；`publishingClient.ts` 改从 `./types` 取值（补一条值 import）。
+
+**拥有的文件**：`src/types.ts`、`src/bookElementGrammar.ts`（仅 `imageTypes` 与 `:65`）、`src/assetStore.ts`、`src/bookAssetContract.ts`、`src/publishingClient.ts` 的 import 行。只读：`worker/`、`scripts/`。
+
+**停止条件**：`grep -n "bookElementGrammar\"" app/src/assetStore.ts app/src/bookAssetContract.ts` 为空；`git diff` 后 `worker/bookElementGrammar.json` 无变化（build 时新鲜度校验通过）；`npm run typecheck && npm test && npm run test:sites` 全绿（碰了 grammar 产物来源，追加 test:sites）；净行数 ≤ 0。
+
+#### 已评估、不开：候选 2（`creationReportRequirements` 下沉，成运行时环）、候选 4（四段 prompt 文案统一，逐字文本必变）。
 
 ### 仍待定（无新证据，默认不启动）
 
@@ -240,4 +266,4 @@ Lane M 的依赖图要点（grep 为准，GitNexus 索引未含第三轮符号�
 
 ## 最终汇报
 
-按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第六轮起点 33 / 361，`test:sites` 46）；任何刻意的行为差异单列。
+按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第六轮起点 33 / 361，`test:sites` 46；Lane O 未改代码，仍为 33 / 361）；任何刻意的行为差异单列。
