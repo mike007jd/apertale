@@ -9,6 +9,17 @@ suppression, and disposal. The editor and shared reader adapt their navigation
 and renderer-readiness policy to this shared module; page content and Three.js
 geometry remain separate concerns.
 
+## Book element grammar
+
+The Book element grammar is the single source of truth for every field bound and
+closed vocabulary a book element may carry: transform ranges, depth, label
+length, frame-sequence count, motion presets and duration, reveal shape, hover
+and focus responses, and the element-id, share-token, book-id, and image-type
+patterns. The WebMCP tool catalog derives its parsers and JSON Schema from it,
+the command engine validates against it, and `worker/bookElementGrammar.json` is
+generated from it so the publish boundary keeps its own validators while sharing
+one set of constants.
+
 ## WebMCP tool catalog
 
 The WebMCP tool catalog is the authoritative ordered set of Agent-discoverable

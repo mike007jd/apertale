@@ -1,5 +1,10 @@
 import { getStoredAssetBlob, isStoredAssetId } from "./assetStore";
 import {
+  PUBLICATION_BOOK_ID_PATTERN as BOOK_ID_PATTERN,
+  SUPPORTED_IMAGE_TYPES as ALLOWED_IMAGE_TYPES,
+  PUBLICATION_TOKEN_PATTERN as TOKEN_PATTERN,
+} from "./bookElementGrammar";
+import {
   bookLifecycleLockManager,
   bookLifecycleLockName,
   storedLibraryDocumentMatches,
@@ -27,9 +32,6 @@ export type PublicationProgress = {
 };
 
 const STORAGE_PREFIX = "apertale.publication.v1:";
-const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f-]{27,35}$/i;
-const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const STATUSES = new Set<PublicationStatus>(["draft", "publishing", "published", "revoked", "deleting"]);
 const REMOTE_STATUSES = new Set<RemotePublicationStatus>([...STATUSES, "deleted"]);
 

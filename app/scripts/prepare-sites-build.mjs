@@ -23,7 +23,7 @@ for (const entry of readdirSync(workerDirectory, { withFileTypes: true })) {
   }
 }
 
-const jsonModules = ["bundledAssetCatalog", "qualityRubric"];
+const jsonModules = ["bundledAssetCatalog", "bookElementGrammar", "qualityRubric"];
 for (const moduleName of jsonModules) {
   const json = readFileSync(path.join(workerDirectory, `${moduleName}.json`), "utf8").trim();
   writeFileSync(path.join(dist, "server", `${moduleName}.js`), `export default ${json};\n`);

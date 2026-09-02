@@ -1,4 +1,5 @@
 import { isStoredAssetId } from "./assetId";
+import { SUPPORTED_IMAGE_TYPES as SUPPORTED_SOURCE_TYPES } from "./bookElementGrammar";
 import { IMAGE_ANALYSIS_VERSION, MAX_SOURCE_IMAGE_BYTES, analyzeStoredImage, optimizeImportedImage } from "./imageOptimizer";
 import type { ImageContentAnalysis } from "./imageOptimizer";
 import type { ImageHandoffAssetUse } from "./imageHandoff";
@@ -11,7 +12,6 @@ const DATABASE_NAME = "apertale-assets";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "assets";
 const ASSET_PREFIX = "asset:";
-const SUPPORTED_SOURCE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const SHELF_PREVIEW_VERSION = 1;
 const SHELF_PREVIEW_MAX_WIDTH = 384;
 const SHELF_PREVIEW_MAX_HEIGHT = 576;

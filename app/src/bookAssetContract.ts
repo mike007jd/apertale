@@ -1,12 +1,12 @@
 import type { StoredAssetMetadata } from "./assetStore";
 import { isStoredAssetId } from "./assetId";
+import { SUPPORTED_IMAGE_TYPES } from "./bookElementGrammar";
 import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import { isProceduralElement, renderedElementAssetIds } from "./types";
 import type { DocumentState, PreparedBookBackground, PreparedBookLayer } from "./types";
 
 const COVER_ASPECT = { min: 0.58, max: 0.78 };
 const SPREAD_ASPECT = { min: 1.45, max: 2.1 };
-const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const ALPHA_IMAGE_TYPES = new Set(["image/png", "image/webp"]);
 
 type PreparedAssetManifest = {

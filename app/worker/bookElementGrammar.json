@@ -1,0 +1,93 @@
+{
+  "label": {
+    "max": 64
+  },
+  "transform": {
+    "x": {
+      "min": 0,
+      "max": 1
+    },
+    "y": {
+      "min": 0,
+      "max": 1
+    },
+    "scaleX": {
+      "min": 0.3,
+      "max": 1.8
+    },
+    "scaleY": {
+      "min": 0.3,
+      "max": 1.8
+    },
+    "rotationDeg": {
+      "min": -180,
+      "max": 180
+    }
+  },
+  "depth": {
+    "min": 0,
+    "max": 0.5
+  },
+  "frameAssetIds": {
+    "min": 2,
+    "max": 6
+  },
+  "motion": {
+    "presets": [
+      "gentle-float",
+      "fly-across",
+      "water-bob",
+      "soft-pulse",
+      "slow-orbit"
+    ],
+    "durationMs": {
+      "min": 400,
+      "max": 20000
+    }
+  },
+  "reveal": {
+    "kinds": [
+      "none",
+      "caption",
+      "fact-card"
+    ],
+    "title": {
+      "max": 100
+    },
+    "summary": {
+      "max": 500
+    },
+    "source": {
+      "max": 200
+    },
+    "facts": {
+      "max": 8
+    },
+    "factLabel": {
+      "max": 64
+    },
+    "factValue": {
+      "max": 160
+    }
+  },
+  "hoverResponses": [
+    "none",
+    "lift-glow",
+    "tilt-toward-pointer",
+    "warm-rim"
+  ],
+  "focusResponses": [
+    "none",
+    "spotlight",
+    "rise-and-center",
+    "orbit-inspect"
+  ],
+  "elementIdPatternSource": "^[a-z0-9][a-z0-9-]{0,63}$",
+  "tokenPatternSource": "^[A-Za-z0-9_-]{43}$",
+  "bookIdPatternSource": "^[0-9a-f]{8}-[0-9a-f-]{27,35}$",
+  "imageTypes": [
+    "image/png",
+    "image/jpeg",
+    "image/webp"
+  ]
+}
