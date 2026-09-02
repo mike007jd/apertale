@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { acquireAssetUrl, acquireAssetUrls, isStoredAssetId, type AssetUrlLease } from "./assetStore";
-import { smootherstep } from "./design/curves";
+import { clamp01, smootherstep } from "./design/curves";
 import { recordDiagnostic } from "./diagnostics";
 import { coverBoardMaterials, createCoverEndpaperCanvas, paintCoverEndpaper } from "./endpaper";
 import { BOARD_H, BOARD_T, BOARD_W, BODY_BASE, JOINT, PAGE_H, PAGE_THICKNESS, PAGE_W, buildSceneElement, createTurnLeaf, makeOpenPageGeometry, makePageMaterial, type SceneElement } from "./bookGeometry";
@@ -9,7 +9,7 @@ import { createBookPointer, type BookPointerProps } from "./bookPointer";
 import { MARK_REVEAL_MS, MAX_REVEAL_MS, loadPagePairs, paintSketchFade, paintWorkshopDrawing, snapshotOverlay, type PagePair } from "./pageCanvas";
 import { readerCameraPage, readerSinglePagePresentation, spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
-import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, clamp01, resolveTurnContentPlan } from "./pageTurn";
+import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, resolveTurnContentPlan } from "./pageDeformation";
 import { readerSceneStructureKey, resourceAttemptIsCurrent, sceneAssetsReadyForEvidence, spreadResourceIndexes, type ReaderRenderEvidence } from "./renderEvidence";
 import type { StoryboardSpread } from "./storyboard";
 import { renderedElementAssetIds, type BookElement, type Spread } from "./types";

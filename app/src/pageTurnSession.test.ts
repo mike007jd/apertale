@@ -1,40 +1,31 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   canTurnPage,
   createPageTurnSession,
   pageTurnNavDisabled,
   pageTurnWaitState,
-  skipsPageTurnAnimation,
-} from "./pageTurn";
+} from "./pageTurnSession";
 import type { TurnState } from "./types";
 
 type Harness = ReturnType<typeof makeHarness>;
 
+/**
+ * The session drives real `requestAnimationFrame` and `performance.now`, so
+ * the test owns the clock instead of a dependency seam. jsdom supplies both;
+ * fake timers make them steppable.
+ */
+beforeEach(() => vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance", "Date"] }));
+afterEach(() => vi.useRealTimers());
+
 function makeHarness(options: { spreadCount?: number; reducedMotion?: boolean } = {}) {
   const commits: Array<"forward" | "backward"> = [];
   const turns: TurnState[] = [];
-  const canceled: number[] = [];
-  let pending: { handle: number; callback: (now: number) => void } | null = null;
-  let stale: { handle: number; callback: (now: number) => void } | null = null;
-  let handle = 0;
-  let clock = 0;
   let index = 0;
   const count = options.spreadCount ?? 4;
   let reducedMotion = options.reducedMotion ?? false;
 
   const controller = createPageTurnSession({
-    surface: "shared",
-    now: () => clock,
-    requestFrame: (callback) => {
-      handle += 1;
-      pending = { handle, callback };
-      stale = pending;
-      return handle;
-    },
-    cancelFrame: (value) => {
-      canceled.push(value);
-      if (pending?.handle === value) pending = null;
-    },
     setTurn: (turn) => turns.push(turn),
     commit: (direction) => {
       commits.push(direction);
@@ -45,29 +36,16 @@ function makeHarness(options: { spreadCount?: number; reducedMotion?: boolean } 
     canTurn: (direction) => (direction === "forward" ? index < count - 1 : index > 0),
   });
 
-  const advance = (ms: number) => {
-    clock += ms;
-    const frame = pending;
-    if (!frame) return;
-    pending = null;
-    frame.callback(clock);
-  };
-
   return {
     controller,
     commits,
     turns,
-    canceled,
-    advance,
-    hasPendingFrame: () => pending !== null,
+    advance: (ms: number) => vi.advanceTimersByTime(ms),
+    hasPendingFrame: () => vi.getTimerCount() > 0,
     currentIndex: () => index,
     setIndex: (value: number) => { index = value; },
     setReducedMotion: (value: boolean) => { reducedMotion = value; },
     liveTurn: () => turns[turns.length - 1],
-    fireLateFrame: (ms = 0) => {
-      clock += ms;
-      stale?.callback(clock);
-    },
   };
 }
 
@@ -77,12 +55,6 @@ function settle(harness: Harness) {
 }
 
 describe("page-turn session lifecycle", () => {
-  it("skips delayed animation for reduced motion and static fallback readers", () => {
-    expect(skipsPageTurnAnimation(false, true)).toBe(false);
-    expect(skipsPageTurnAnimation(true, true)).toBe(true);
-    expect(skipsPageTurnAnimation(false, false)).toBe(true);
-  });
-
   it("locks navigation until the animated reader has a complete frame", () => {
     expect(pageTurnNavDisabled(null, 1, 4, { backward: true, forward: true })).toEqual({
       previous: true,
@@ -306,10 +278,9 @@ describe("page-turn session lifecycle", () => {
     const harness = makeHarness();
     harness.controller.turnPage("forward");
     harness.controller.dispose();
-    expect(harness.canceled.length).toBeGreaterThan(0);
     expect(harness.hasPendingFrame()).toBe(false);
 
-    harness.fireLateFrame(800);
+    harness.advance(800);
     expect(harness.commits).toEqual([]);
     expect(harness.currentIndex()).toBe(0);
 

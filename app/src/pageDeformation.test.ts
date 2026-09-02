@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageTurn";
+import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, deformPageVertex, resolveTurnContentPlan, restingPageDepth } from "./pageDeformation";
 
 const PAGE_WIDTH = 4.2;
 const PAGE_HEIGHT = 5.18;

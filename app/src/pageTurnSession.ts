@@ -1,17 +1,12 @@
 import { recordDiagnostic } from "./diagnostics";
 import { durationMs } from "./design/tokens";
+import type { TurnDirection } from "./pageDeformation";
 import type { TurnState } from "./types";
 
-export type TurnDirection = "forward" | "backward";
 export type TurnWaitState = Record<TurnDirection, boolean>;
 export type TurnReadiness = TurnWaitState & { navigationKey: string };
-type PageTurnSurface = "editor" | "shared";
 
 type PageTurnSessionDeps = {
-  surface: PageTurnSurface;
-  now: () => number;
-  requestFrame: (callback: (now: number) => void) => number;
-  cancelFrame: (handle: number) => void;
   /** Publishes the live leaf state to the renderer. The object is mutated in place between frames. */
   setTurn: (turn: TurnState) => void;
   /** Advances the document index once, after the turn reaches its terminal state. */
@@ -21,65 +16,6 @@ type PageTurnSessionDeps = {
   reducedMotion: () => boolean;
   canTurn: (direction: TurnDirection) => boolean;
 };
-
-type DeformedPageVertex = {
-  x: number;
-  y: number;
-  z: number;
-};
-
-type TurnContentPlan = {
-  destinationIndex: number;
-  turningSpreadIndex: number;
-  underlaySpreadIndex: number;
-};
-
-export const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
-
-/**
- * The cover and illustrated front matter share one physical opening arc. Their
- * local x axes point in opposite directions, so the cover uses a negative
- * rotation and the matter a positive one: both must rise toward the camera at
- * mid-swing instead of diving through the static page block.
- */
-export function bookCaseMatterPose(openProgress: number, flatPhi: number) {
-  const openness = clamp01(openProgress);
-  const phi = flatPhi + (1 - openness) * (Math.PI - flatPhi);
-  return {
-    coverY: openness === 0 ? 0 : -(Math.PI - flatPhi) * openness,
-    foldY: openness === 1 ? 0 : Math.PI * (1 - openness),
-    reliefZ: 0.08 + 0.92 * openness,
-    closure: (1 - Math.cos(phi)) / 2,
-  };
-}
-
-/** Keeps the flexible spine between the fixed rear hinge and moving front hinge. */
-export function bookSpinePose(
-  rear: { x: number; z: number },
-  front: { x: number; z: number },
-  openWidth: number,
-) {
-  const dx = rear.x - front.x;
-  const dz = rear.z - front.z;
-  return {
-    x: (rear.x + front.x) / 2,
-    z: (rear.z + front.z) / 2,
-    rotationY: -Math.atan2(dz, dx),
-    scale: Math.hypot(dx, dz) / openWidth,
-  };
-}
-
-/** Places the book group while its front-cover center travels between shelf and reader. */
-export function caseHandoffGroupX(
-  anchorCenterX: number,
-  scale: number,
-  coverCenterX: number,
-  settledCoverCenterX: number,
-  travel: number,
-) {
-  const desiredCoverCenterX = anchorCenterX + (settledCoverCenterX - anchorCenterX) * travel;
-  return desiredCoverCenterX - scale * coverCenterX;
-}
 
 /** A turn is available only when its destination exists and its rendering boundary is ready. */
 export function canTurnPage(
@@ -118,14 +54,11 @@ export function pageTurnWaitState(
   };
 }
 
-export function skipsPageTurnAnimation(reducedMotion: boolean, pageTurnVisible: boolean) {
-  return reducedMotion || !pageTurnVisible;
-}
-
 /**
  * Owns one page-turn lifecycle from input through animation to a single spread
- * commit. UI surfaces supply timing, navigation, and renderer-readiness policy
- * through the dependency seam and share the same locking and cleanup rules.
+ * commit. The reader shell supplies navigation and renderer-readiness policy
+ * through the dependency seam; locking, stale-frame suppression and cleanup
+ * rules are the same for every surface.
  */
 export function createPageTurnSession(deps: PageTurnSessionDeps) {
   let frame: number | null = null;
@@ -140,7 +73,7 @@ export function createPageTurnSession(deps: PageTurnSessionDeps) {
   const progressFor = (direction: TurnDirection, amount: number) => (direction === "forward" ? amount : 1 - amount);
 
   const stopFrame = () => {
-    if (frame !== null) deps.cancelFrame(frame);
+    if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
   };
 
@@ -159,7 +92,6 @@ export function createPageTurnSession(deps: PageTurnSessionDeps) {
     const durationMs = Math.max(1, now - started);
     recordDiagnostic("page-turn:summary", {
       direction,
-      surface: deps.surface,
       durationMs: Math.round(durationMs),
       frames,
       fps: Math.round((frames / durationMs) * 1000),
@@ -180,7 +112,7 @@ export function createPageTurnSession(deps: PageTurnSessionDeps) {
     turn.progress = from;
     active = turn;
     deps.setTurn(turn);
-    const started = deps.now();
+    const started = performance.now();
     const duration = Math.max(240, durationMs.navigation * Math.abs(to - from));
     const animationGeneration = generation;
     let frameCount = 0;
@@ -202,7 +134,7 @@ export function createPageTurnSession(deps: PageTurnSessionDeps) {
       const eased = 0.5 - Math.cos(Math.PI * linear) / 2;
       turn.progress = from + (to - from) * eased;
       if (linear < 1) {
-        frame = deps.requestFrame(tick);
+        frame = requestAnimationFrame(tick);
         return;
       }
 
@@ -210,7 +142,7 @@ export function createPageTurnSession(deps: PageTurnSessionDeps) {
       settleTurn(direction, commit);
     };
 
-    frame = deps.requestFrame(tick);
+    frame = requestAnimationFrame(tick);
   };
 
   const turnPage = (direction: TurnDirection) => {
@@ -267,78 +199,4 @@ export function createPageTurnSession(deps: PageTurnSessionDeps) {
   };
 
   return { turnPage, onPageGesture, activate, dispose };
-}
-
-/**
- * Resolves which spread is painted onto the moving leaf and which spread stays
- * physically underneath it. Keeping this explicit prevents the renderer from
- * dropping illustrated content while the document index is still unchanged.
- */
-export function resolveTurnContentPlan(
-  currentIndex: number,
-  direction: TurnDirection,
-  spreadCount: number,
-): TurnContentPlan | null {
-  const destinationIndex = currentIndex + (direction === "forward" ? 1 : -1);
-  if (destinationIndex < 0 || destinationIndex >= spreadCount) return null;
-  return {
-    destinationIndex,
-    turningSpreadIndex: direction === "forward" ? currentIndex : destinationIndex,
-    underlaySpreadIndex: direction === "forward" ? destinationIndex : currentIndex,
-  };
-}
-
-/**
- * Shared resting profile for both the open paper and a leaf at either end of a
- * turn. Keeping this in one place prevents the first animation frame from
- * snapping from a curved page to a flat sheet.
- */
-export function restingPageDepth(baseX: number, baseY: number, pageWidth: number, pageHeight: number) {
-  const u = clamp01((baseX + pageWidth / 2) / pageWidth);
-  const arch = Math.sin(Math.PI * u) * 0.17;
-  const outerLift = Math.pow(u, 5) * 0.055;
-  const cornerLift = Math.pow(Math.abs(baseY) / (pageHeight / 2), 7) * 0.025;
-  return arch + outerLift + cornerLift;
-}
-
-/**
- * Keeps the active leaf inside the physical scale of the open book.
- *
- * Rotating every vertex around the spine by its full distance produces a
- * physically literal sheet, but it also sends the outer edge several world
- * units toward a perspective camera. The page then balloons beyond the cover
- * at mid-turn. This curve preserves the horizontal fold while using a bounded
- * paper arch for depth, which reads like a cinematic page curl from the fixed
- * editor camera.
- */
-export function deformPageVertex(
-  baseX: number,
-  baseY: number,
-  progress: number,
-  pageWidth: number,
-  pageHeight = pageWidth * (5.18 / 4.2),
-): DeformedPageVertex {
-  const t = clamp01(progress);
-  const distanceFromSpine = baseX + pageWidth / 2;
-  const u = clamp01(distanceFromSpine / pageWidth);
-  const turnAngle = Math.PI * t;
-  const turnLift = Math.sin(turnAngle);
-  const curl = Math.sin(Math.PI * u);
-  const projectedDistance = Math.cos(turnAngle) * distanceFromSpine;
-  const restingDepth = restingPageDepth(baseX, baseY, pageWidth, pageHeight);
-  // Preserve a readable crescent at the midpoint. Returning the outer edge to
-  // the spine collapsed the projected page into a razor-thin strip and made
-  // its triangles and shadow read as a torn sheet.
-  const sidewaysCurl = turnLift * pageWidth * (0.11 * u + 0.1 * curl);
-  const boundedArch = turnLift * (
-    0.12
-    + 0.94 * curl
-    + 0.2 * u
-  );
-
-  return {
-    x: -pageWidth / 2 + projectedDistance + sidewaysCurl,
-    y: baseY,
-    z: restingDepth + boundedArch,
-  };
 }

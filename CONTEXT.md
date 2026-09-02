@@ -5,9 +5,20 @@
 A page-turn session is the runtime lifecycle of one physical leaf turn, from
 arrow or drag intent through animation to one settled spread commit. It owns
 direction, progress, navigation locking, reduced-motion resolution, stale-frame
-suppression, and disposal. The editor and shared reader adapt their navigation
-and renderer-readiness policy to this shared module; page content and Three.js
-geometry remain separate concerns.
+suppression, and disposal (`app/src/pageTurnSession.ts`). The page shapes that
+turn animates — resting depth, vertex deformation, case and spine poses, and
+which spread is painted on the moving leaf — are separate pure geometry
+(`app/src/pageDeformation.ts`).
+
+## Reader shell
+
+The reader shell is the page-turn half of a reader surface: it owns the
+Page-turn session, renderer readiness per turn direction, scene failure, the
+WebGL/fallback choice, and the rule that a spread commit re-arms the wait state
+and drops readiness before the index moves (`app/src/readerShell.ts`). The
+editor and the shared reader differ only in where the spread index lives — the
+book engine or local state — and express that difference as the shell's
+`commit` adapter.
 
 ## WebMCP tool catalog
 

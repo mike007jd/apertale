@@ -44,7 +44,7 @@ import {
 import { AnimatePresence, MotionConfig } from "motion/react";
 import { smootherstep } from "./design/curves";
 import { durationMs } from "./design/tokens";
-import { announce, supportsWebGl2 } from "./readerShell";
+import { announce, supportsWebGl2, useReaderShell } from "./readerShell";
 import { spreadFraction } from "./stageGeometry";
 import { Panel, Toast, WorkspaceTransition } from "./design/primitives";
 import {
@@ -62,7 +62,6 @@ import {
   dedicatedCoverRendered,
   readerRenderMatches,
   readerSceneStructureKey,
-  sceneFailureMatches,
   resolvedCoverAsset,
   shelfCoverMatches,
   shelfCoverTarget,
@@ -78,12 +77,11 @@ import {
   hasReveal,
   resolveInteraction,
 } from "./interaction";
-import { canTurnPage, createPageTurnSession, pageTurnNavDisabled, pageTurnWaitState, type TurnDirection, type TurnReadiness, type TurnWaitState } from "./pageTurn";
 import { PublicationPanel, commitPublicationRecordIfCurrent, publicationLauncherPresentation, publicationRecordForDocument } from "./PublicationPanel";
 import { deletePublication, getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
 import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
-import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
+import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId } from "./types";
 import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
 import { MAX_ANNOTATIONS_PER_SPREAD, addStoryboardAnnotation, clearStoryboardAnnotations, describeAnnotation, getStoryboardSnapshot, subscribeToStoryboard, undoStoryboardAnnotation } from "./storyboard";
 import { registerWebMcpTools, type ToolActivity } from "./webmcp";
@@ -94,26 +92,6 @@ const runtimeParams = new URLSearchParams(window.location.search);
 const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
 const forceReducedMotion = runtimeParams.get("reducedMotion") === "1";
 const forceFallback = runtimeParams.get("fallback") === "1";
-const motionAuditSeconds = (() => {
-  if (!import.meta.env.DEV) return null;
-  const value = Number(runtimeParams.get("motionAudit"));
-  return Number.isFinite(value) && value >= 0.5 && value <= 30 ? value : null;
-})();
-const bookHandoffDurationMs = motionAuditSeconds === null ? durationMs.book : motionAuditSeconds * 1000;
-/**
- * Freezes the case at a fixed openness so a mid-swing pose can be captured for
- * the visual QA record in app/qa. 0 is closed, 1 is open; anything outside that
- * range is ignored.
- */
-const forcedOpenProgress = (() => {
-  // URLSearchParams.get returns null when the parameter is absent, and
-  // Number(null) is 0 - not NaN - so a missing parameter used to read as a
-  // valid "freeze the book shut", which froze it for every visitor.
-  const raw = runtimeParams.get("openProgress");
-  if (raw === null) return null;
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
-})();
 let threeBookRendererPromise: Promise<typeof import("./ThreeBook")> | null = null;
 
 /** Shares one retryable renderer import across React.lazy, idle warmup, and reader intent. */
@@ -251,7 +229,6 @@ function BookLoadingFeedback({ title, placement, stage, reducedMotion }: {
 export function App() {
   const snapshot = useSyncExternalStore(bookEngine.subscribe, bookEngine.getSnapshot, bookEngine.getSnapshot);
   const pageTurnNavigationKey = `${snapshot.document.id}:${snapshot.document.revision}:${snapshot.session.currentSpreadIndex}`;
-  const [turn, setTurn] = useState<TurnState>(null);
   const [webMcpAvailable, setWebMcpAvailable] = useState(false);
   const [codexFoundPage, setCodexFoundPage] = useState(false);
   const [agentActivity, setAgentActivity] = useState<ToolActivity | null>(null);
@@ -299,7 +276,6 @@ export function App() {
   const [sceneLoadingBookId, setSceneLoadingBookId] = useState<string | null>(null);
   const [reducedMotion, setReducedMotion] = useState(() => forceReducedMotion || motionPreference.matches);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [failedSceneKey, setFailedSceneKey] = useState<string | null>(null);
   const [resolvedCoverUrls, setResolvedCoverUrls] = useState<Record<string, ResolvedCoverAsset>>({});
   const [loadStage, setLoadStage] = useState<LoadStage>("warming");
   const [workshopImportError, setWorkshopImportError] = useState<string | null>(null);
@@ -308,11 +284,6 @@ export function App() {
   const [authoringSurfaceRequest, setAuthoringSurfaceRequest] = useState<ActiveAuthoringSurfaceRequest | null>(null);
   const [lastReaderRender, setLastReaderRender] = useState<ReaderRenderEvidence | null>(null);
   const [renderedShelfCovers, setRenderedShelfCovers] = useState<Record<string, ShelfCoverEvidence>>({});
-  const [pageTurnReadiness, setPageTurnReadiness] = useState<TurnReadiness>(() => ({
-    navigationKey: pageTurnNavigationKey,
-    backward: false,
-    forward: false,
-  }));
   const creationSpreadCount = creationWorkshop.spreadCount;
   const creationStyle = creationWorkshop.visualDirection;
   const creationInteractionDensity = creationWorkshop.interactionDensity;
@@ -321,12 +292,7 @@ export function App() {
   const activeWorkshopSpreadIndex = Math.min(workshopSpreadIndex, creationSpreadCount - 1);
   const currentStoryboardSpread = storyboard.spreads.find((item) => item.index === activeWorkshopSpreadIndex);
   const storyboardVisible = storyboard.spreads.some((item) => item.marks.length > 0);
-  const pageTurnIndexRef = useRef(snapshot.session.currentSpreadIndex);
-  const pageTurnCountRef = useRef(snapshot.document.spreads.length);
-  const pageTurnDocumentRef = useRef(snapshot.document.id);
   const reducedMotionRef = useRef(reducedMotion);
-  const rendererAvailableRef = useRef(false);
-  const waitingForRendererRef = useRef<TurnWaitState>({ backward: true, forward: true });
   const fileInput = useRef<HTMLInputElement | null>(null);
   const addPhotoButton = useRef<HTMLButtonElement | null>(null);
   const stage = useRef<HTMLElement | null>(null);
@@ -351,43 +317,11 @@ export function App() {
   const openingBookRef = useRef<OpeningBook | null>(null);
   const openingFrame = useRef<number | null>(null);
   const libraryFrame = useRef<number | null>(null);
-  pageTurnIndexRef.current = snapshot.session.currentSpreadIndex;
-  pageTurnCountRef.current = snapshot.document.spreads.length;
-  pageTurnDocumentRef.current = snapshot.document.id;
   reducedMotionRef.current = reducedMotion;
 
   useLayoutEffect(() => {
     workshopAssetsRef.current = workshopAssets;
   }, [workshopAssets]);
-
-  const commitSpread = useCallback((direction: TurnDirection) => {
-    const waitsForRenderer = rendererAvailableRef.current;
-    waitingForRendererRef.current = { backward: waitsForRenderer, forward: waitsForRenderer };
-    setPageTurnReadiness({ navigationKey: "", backward: false, forward: false });
-    bookEngine.setSpread(pageTurnIndexRef.current + (direction === "forward" ? 1 : -1));
-  }, []);
-
-  const turnController = useMemo(() => createPageTurnSession({
-    surface: "editor",
-    now: () => performance.now(),
-    requestFrame: (callback) => requestAnimationFrame(callback),
-    cancelFrame: (handle) => cancelAnimationFrame(handle),
-    setTurn,
-    commit: commitSpread,
-    navigationKey: () => `${pageTurnDocumentRef.current}:${pageTurnIndexRef.current}`,
-    reducedMotion: () => reducedMotionRef.current,
-    canTurn: (direction) => canTurnPage(
-      direction,
-      pageTurnIndexRef.current,
-      pageTurnCountRef.current,
-      waitingForRendererRef.current[direction],
-    ),
-  }), [commitSpread]);
-
-  useEffect(() => {
-    turnController.activate();
-    return () => turnController.dispose();
-  }, [turnController]);
 
   useEffect(() => {
     setWorkshopSpreadIndex((current) => Math.min(current, creationSpreadCount - 1));
@@ -435,8 +369,6 @@ export function App() {
     showStoryboardNotice(action.summary);
   }, [showCreateGuide, showStoryboardNotice, snapshot.lastAction]);
 
-  const turnPage = turnController.turnPage;
-  const onPageGesture = turnController.onPageGesture;
   const workshopSnapshot = useMemo<BookSnapshot>(() => ({
     document: {
       id: "apertale-new-book-workshop",
@@ -462,7 +394,6 @@ export function App() {
   const webGlAvailable = useMemo(() => supportsWebGl2(forceFallback), []);
   const readerSceneKey = readerSceneStructureKey(snapshot, "reader");
   const activeSceneKey = showCreateGuide ? readerSceneStructureKey(workshopSnapshot, "workshop") : readerSceneKey;
-  const renderWebGl = webGlAvailable && !sceneFailureMatches(activeSceneKey, failedSceneKey);
   const shouldMountReaderScene = readerSceneShouldMount({
     showLibrary,
     showCreateGuide,
@@ -470,26 +401,31 @@ export function App() {
     readerReady: readyBookId === snapshot.document.id,
     libraryMotion,
   });
-  const readerRendererAvailable = shouldMountReaderScene && renderWebGl;
-  rendererAvailableRef.current = readerRendererAvailable;
-  const waitingForRenderer = pageTurnWaitState(readerRendererAvailable, pageTurnNavigationKey, pageTurnReadiness);
-  waitingForRendererRef.current = waitingForRenderer;
+  const reader = useReaderShell({
+    navigationKey: pageTurnNavigationKey,
+    spreadIndex: snapshot.session.currentSpreadIndex,
+    spreadCount: snapshot.document.spreads.length,
+    sceneKey: activeSceneKey,
+    webGlAvailable,
+    rendererMounted: shouldMountReaderScene,
+    reducedMotion,
+    commit: (index) => bookEngine.setSpread(index),
+  });
+  const { turn, setTurn, turnPage, onPageGesture, renderWebGl } = reader;
 
   /**
    * 1 is a fully open book, 0 is the closed case facing the reader. The library
    * shows a closed book behind it; opening animates this to 1 while the shelf
    * fades, so the cover the reader clicked is the cover that swings.
    */
-  const openProgress = useRef(forcedOpenProgress ?? (showLibrary ? 0 : 1));
+  const openProgress = useRef(showLibrary ? 0 : 1);
   const openFrame = useRef<number | null>(null);
   const openCleanup = useRef<(() => void) | null>(null);
-  const setOpenProgress = (value: number) => { openProgress.current = forcedOpenProgress ?? value; };
+  const setOpenProgress = (value: number) => { openProgress.current = value; };
 
   const animateCase = useCallback((to: 0 | 1, done?: () => void) => {
     openCleanup.current?.();
-    // A frozen case is a capture aid, not an animation: settle immediately so
-    // the surrounding state machine still completes.
-    if (reducedMotion || forcedOpenProgress !== null) {
+    if (reducedMotion) {
       setOpenProgress(to);
       done?.();
       return;
@@ -497,7 +433,7 @@ export function App() {
     // A whole book changing place needs more readable time than one page
     // turning. The shelf and case still share this one clock in both
     // directions, but no longer borrow the shorter page-navigation token.
-    const duration = bookHandoffDurationMs;
+    const duration = durationMs.book;
 
     /*
      * One curve, end to end. This was three self-terminating power segments
@@ -593,12 +529,6 @@ export function App() {
   }, [workshopAssets, workshopHydrated]);
 
   useEffect(() => {
-    if (motionAuditSeconds === null) return undefined;
-    document.documentElement.style.setProperty("--motion-book", `${motionAuditSeconds}s`);
-    return () => { document.documentElement.style.removeProperty("--motion-book"); };
-  }, []);
-
-  useEffect(() => {
     let canceled = false;
     const plannedAssets = shelfCoverAssetPlan(
       showLibrary && !snapshot.session.preview && !showCreateGuide,
@@ -691,12 +621,7 @@ export function App() {
     };
   }, [renderWebGl, selected]);
   const isNight = snapshot.session.sceneThemeId === "midnight-desk";
-  const pageTurnNav = pageTurnNavDisabled(
-    turn,
-    snapshot.session.currentSpreadIndex,
-    snapshot.document.spreads.length,
-    waitingForRenderer,
-  );
+  const pageTurnNav = reader.navDisabled;
   const stageIsLoading = readyBookId !== snapshot.document.id || sceneLoadingBookId === snapshot.document.id;
   const libraryBusy = Boolean(openingBook || deletingBookId || pendingDestructiveAction || libraryMotion !== "idle");
 
@@ -1303,8 +1228,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!renderWebGl) recordDiagnostic("fallback:activated", { forced: forceFallback, initializationFailed: sceneFailureMatches(activeSceneKey, failedSceneKey) });
-  }, [activeSceneKey, failedSceneKey, renderWebGl]);
+    if (!renderWebGl) recordDiagnostic("fallback:activated", { forced: forceFallback, initializationFailed: reader.sceneFailed });
+  }, [reader.sceneFailed, renderWebGl]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = isNight ? "night" : "day";
@@ -1976,19 +1901,11 @@ export function App() {
                   lastMarkTimeout.current = window.setTimeout(() => setLastMark(null), 3000);
                 }
                 : undefined}
-              onPageTurnReady={showCreateGuide ? undefined : (direction, ready) => setPageTurnReadiness((current) => (
-                current.navigationKey === pageTurnNavigationKey
-                  ? current[direction] === ready ? current : { ...current, [direction]: ready }
-                  : { navigationKey: pageTurnNavigationKey, backward: false, forward: false, [direction]: ready }
-              ))}
+              onPageTurnReady={showCreateGuide ? undefined : reader.onPageTurnReady}
               onLoading={showCreateGuide ? () => undefined : handleBookLoading}
               onReady={showCreateGuide ? () => undefined : handleBookReady}
               onRendered={showCreateGuide ? undefined : setLastReaderRender}
-              onFailure={(failureSceneKey) => {
-                if (!sceneFailureMatches(activeSceneKey, failureSceneKey)) return;
-                setPageTurnReadiness({ navigationKey: pageTurnNavigationKey, backward: false, forward: false });
-                setFailedSceneKey(failureSceneKey);
-              }}
+              onFailure={reader.onSceneFailure}
             />
           </Suspense>
         ) : showCreateGuide ? (

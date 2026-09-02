@@ -10,6 +10,8 @@
  * with freehand red strokes, which come back to Codex already interpreted:
  * which page, what they enclose, which labelled mark they sit on.
  */
+import { clamp01 } from "./design/curves";
+
 export type StoryboardPoint = { x: number; y: number };
 export type StoryboardStroke = { points: StoryboardPoint[] };
 export type StoryboardBox = { x: number; y: number; w: number; h: number };
@@ -97,7 +99,7 @@ function persist(next: StoryboardSnapshot) {
 let snapshot: StoryboardSnapshot = restore();
 
 /** Three decimals is below one texel on the 2048px overlay and halves the JSON. */
-const unit = (value: number) => Math.round(Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0)) * 1000) / 1000;
+const unit = (value: number) => Math.round(clamp01(Number.isFinite(value) ? value : 0) * 1000) / 1000;
 const point = (source: StoryboardPoint): StoryboardPoint => ({ x: unit(source.x), y: unit(source.y) });
 const text = (value: string | undefined) => value?.trim().slice(0, MAX_LABEL_LENGTH) || undefined;
 
