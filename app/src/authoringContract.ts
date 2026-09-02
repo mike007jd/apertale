@@ -285,7 +285,7 @@ export const GENERATED_COVER_COUNT = 1 as const;
 export const REQUIRED_GATE_IDS = ["inspect", "story", "plan", "art", "photo-truth", "layout", "evidence"] as const;
 type RequiredGateId = (typeof REQUIRED_GATE_IDS)[number];
 
-export const AUTHORING_HARD_GATE_IDS = [
+const AUTHORING_HARD_GATE_IDS = [
   "inspect",
   "story",
   "plan-art",
@@ -301,7 +301,7 @@ export const AUTHORING_HARD_GATE_IDS = [
 ] as const;
 type AuthoringHardGateId = (typeof AUTHORING_HARD_GATE_IDS)[number];
 
-export const PHOTO_TRUTH_REQUIREMENT =
+const PHOTO_TRUTH_REQUIREMENT =
   "Use source photos as references and story truth. Do not use a raw uploaded photo as finished interior or right-page artwork unless the user explicitly requested a literal photo album.";
 
 export type CreationCompletionGate = {
@@ -407,7 +407,7 @@ export function creationReportRequirements(input: Pick<AuthoringCountSpec, "gene
   ];
 }
 
-export function authoringHardGates(): AuthoringHardGate[] {
+function authoringHardGates(): AuthoringHardGate[] {
   return [
     {
       id: "inspect",

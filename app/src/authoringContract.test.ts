@@ -3,15 +3,12 @@ import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { MAX_BOOK_PUBLISHABLE_ASSETS, MOTION_PRESETS } from "./types";
 import {
   AUTHORING_GUIDE_DETAIL,
-  AUTHORING_HARD_GATE_IDS,
   CREATION_READINESS_VERSION,
   GENERATED_COVER_COUNT,
-  PHOTO_TRUTH_REQUIREMENT,
   PROJECT_CONTEXT_DETAILS,
   REQUIRED_GATE_IDS,
   SITE_TOOL_NAMES,
   assessCreationReadiness,
-  authoringHardGates,
   buildAuthoringGuide,
   creationCompletionGates,
 } from "./authoringContract";
@@ -221,8 +218,7 @@ describe("site-native authoring guide contract", () => {
   it("encodes the hard authoring gates any Site Tools conversation must obey", () => {
     const guide = buildAuthoringGuide();
     const byId = Object.fromEntries(guide.hardGates.map((gate) => [gate.id, gate.rule]));
-    expect(guide.hardGates.map((gate) => gate.id)).toEqual([...AUTHORING_HARD_GATE_IDS]);
-    expect(authoringHardGates().map((gate) => gate.id)).toEqual([...AUTHORING_HARD_GATE_IDS]);
+    expect(guide.hardGates.map((gate) => gate.id)).toEqual(["inspect", "story", "plan-art", "readiness-before-create", "imagegen-before-create", "photo-truth", "handoff-before-refer", "layout", "interaction", "cutouts", "provenance-revision", "verify"]);
 
     expect(byId.inspect).toMatch(/Inspect source assets and the user prompt/i);
     expect(byId.story).toMatch(/coherent complete story arc/i);
@@ -233,7 +229,7 @@ describe("site-native authoring guide contract", () => {
     expect(byId["imagegen-before-create"]).toMatch(/host ImageGen/i);
     expect(byId["imagegen-before-create"]).toMatch(/before manage_book create/i);
     expect(byId["imagegen-before-create"]).toMatch(/do not reillustrate preserved-photo-album/i);
-    expect(byId["photo-truth"]).toBe(PHOTO_TRUTH_REQUIREMENT);
+    expect(byId["photo-truth"]).toBe(guide.gates.find((gate) => gate.id === "photo-truth")?.requirement);
     expect(byId["photo-truth"]).toMatch(/raw uploaded photo/i);
     expect(byId["photo-truth"]).toMatch(/finished interior/i);
     expect(byId["photo-truth"]).toMatch(/literal photo album/i);
@@ -294,7 +290,6 @@ describe("site-native authoring guide contract", () => {
 
     expect(guide.gates.map((gate) => gate.id)).toEqual(sharedGates.map((gate) => gate.id));
     expect(guide.gates.map((gate) => gate.token)).toEqual(sharedGates.map((gate) => gate.token));
-    expect(guide.gates.find((gate) => gate.id === "photo-truth")?.requirement).toBe(PHOTO_TRUTH_REQUIREMENT);
     for (const token of REQUIRED_GATE_IDS.map((id) => `[GATE:${id}]`)) {
       expect(brief.prompt).toContain(token);
     }
