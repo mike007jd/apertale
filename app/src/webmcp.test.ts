@@ -220,6 +220,7 @@ describe("WebMCP registration", () => {
     expect(result).toMatchObject({ ok: true, storyboard: { revision: 1, spreads: [{ index: 0, marks: [{ kind: "rect", label: "guide" }, { kind: "arrow" }, { kind: "label", label: "Dawn" }, { kind: "line" }] }] } });
     expect(JSON.stringify(result.storyboard)).not.toContain("points");
     expect(result.next).toMatch(/end your turn now.*circle changes in red/);
+    expect(result.next).toMatch(/that spread alone/);
     expect(revealStoryboard).toHaveBeenCalledOnce();
 
     addStoryboardAnnotation(0, { points: [{ x: 0.6, y: 0.45 }, { x: 0.7, y: 0.5 }] });

@@ -223,6 +223,7 @@ describe("site-native authoring guide contract", () => {
     expect(byId.inspect).toMatch(/Inspect source assets and the user prompt/i);
     expect(byId.story).toMatch(/coherent complete story arc/i);
     expect(byId["plan-art"]).toMatch(/one dedicated portrait cover/i);
+    expect(byId["plan-art"]).toMatch(/that spread alone/);
     expect(byId["plan-art"]).toMatch(/approximately 1\.62:1 stage per spread/i);
     expect(byId["plan-art"]).toMatch(/1\.45–2\.10 is only the compatible input range/i);
     expect(byId["plan-art"]).toMatch(/preserve source-photo geometry/i);

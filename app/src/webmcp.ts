@@ -1506,8 +1506,8 @@ export function registerWebMcpTools(
             storyboard: summarizeStoryboard(applied.storyboard),
             summary: action === "replace" ? "The complete rough storyboard is visible on the book." : "The marked spreads were revised in place.",
             next: action === "replace"
-              ? "Stop and end your turn now: tell the reader the pencil book is on the pages and ask them to circle changes in red or say continue. Next turn, read storyboard.spreads[].annotations from get_project_context, revise only the marked spreads, then generate art."
-              : "Continue working. If the reader adds red marks, refresh get_project_context: a loop around a label means change that thing; a stroke across it means remove or move it. Revise only those spreads.",
+              ? "Stop and end your turn now: tell the reader the pencil book is on the pages and ask them to circle changes in red or say continue. Next turn, read storyboard.spreads[].annotations from get_project_context, revise only the marked spreads, then generate art. A mark adds or changes something on that spread alone: keep it out of the character bible, the cover and every other quadrant unless the reader says otherwise."
+              : "Continue working. If the reader adds red marks, refresh get_project_context: a loop around a label means change that thing; a stroke across it means remove or move it. Revise only those spreads; what a mark adds stays on that spread, not in the character bible, cover or other quadrants.",
           });
         }),
       },
