@@ -1,7 +1,7 @@
-# Apertale 架构加深 · 多 lane 执行 prompt（第四轮）
+# Apertale 架构加深 · 多 lane 执行 prompt（第五轮）
 
 > 用法：新 session 中 `@docs/ARCHITECTURE_LANES_PROMPT.md`。
-> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。第二轮（Lane F–I）、第三轮（Lane J、K）与第四轮（Lane L、M）也已合入。本文件是第五轮的 handoff，已内含全部结论，不依赖外部报告。
+> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。第二轮（Lane F–I）、第三轮（Lane J、K）、第四轮（Lane L、M）与第五轮（Lane N）也已合入。本文件是第六轮的 handoff，已内含全部结论，不依赖外部报告。
 
 ## 你的角色
 
@@ -189,7 +189,19 @@ Lane M 的依赖图要点（grep 为准，GitNexus 索引未含第三轮符号�
 
 ---
 
-## 第五轮候选
+## 第五轮已完成（2026-09-02 合入 main，不要重做）
+
+| Lane | 结果 | 关键产物 / 偏差 |
+|---|---|---|
+| N · `MAX_BOOK_PUBLISHABLE_ASSETS` 下沉 | 合并（`25b2059`） | 常量定义（含 doc comment）移到 `types.ts`，紧挨 `MAX_BOOK_SPREADS`；`authoringContract.ts` 改从 `./types` 取，**未 re-export**；`assetStore.ts:6` 与 `bookAssetContract.ts:4` 两条反向边整行删除，其余 7 个消费者（含两个测试）并入各自已有的 `./types` import；`SourceAssetRejection` 去掉 `export`；`types.ts:1` 上方加两行注释说明 type-only 边是刻意保留的。GitNexus `impact` 对常量引用边返回 0，以 grep 为准。11 文件 +17/−20 |
+
+**顺带评估、决定不做**：「above the publishable limit of N」文案实为 6 处（`bookAssetContract.ts:411`、`qualityContract.ts:271`、`bookEngine.ts:1426/1657/1765`、`webmcp.ts:1066`），共享后缀但主语各异。构造器能保住逐字文本，但 helper 本体 + 4 条新 import 大于 5 处各省的不到一行，净行数增加；且 helper 放任何 module 都给四个消费者引入新的跨 module 边，正好抵消本 lane 删掉的两条。**不开 lane**。
+
+第五轮总计 11 文件 +17/−20；测试 361 → 361；`verify:release` 退出码 0。无行为差异。
+
+---
+
+## 第五轮（已完成，保留作记录）
 
 ### Lane N · `MAX_BOOK_PUBLISHABLE_ASSETS` 下沉到 `types.ts`（Lane M 建议，值得开）
 
@@ -211,13 +223,13 @@ Lane M 的依赖图要点（grep 为准，GitNexus 索引未含第三轮符号�
 
 **停止条件**：`grep -n "from \"./authoringContract\"" app/src/assetStore.ts app/src/bookAssetContract.ts` 为空；typecheck + test 全绿，用例数 ≥ 361；一次提交。若 typecheck 暴露 `types.ts` 因此出现新的运行时环，停下报告，不要强行绕。
 
+## 第六轮候选
+
 ### 其它候选（Lane M 顺带发现，每条一行，无新证据默认不启动）
 
-- `types.ts:1` type-only 环：加注释说明刻意保留，可并入 Lane N。
 - `authoringContract.ts:290/:306/:412` 三个只为测试 export 的符号：改为通过 `buildAuthoringGuide()` 输出断言后去掉 export。
 - `authoringContract.ts:387` `creationReportRequirements` 唯一生产消费者是 `creationBrief.ts`，可下沉，但会带走 `AuthoringCountSpec`，先评估。
 - `assetStore.ts:2` 从 `bookElementGrammar` 取 `SUPPORTED_IMAGE_TYPES`：Asset registry 依赖 Book element grammar，该常量本质是封闭词汇，可与 Lane N 合并评估是否下沉到 types。
-- 「above the publishable limit of N」文案 5 处重复（`qualityContract.ts:266-272`、`bookEngine.ts:1425/1656/1764`、`webmcp.ts:1060`、`bookAssetContract.ts:411`），措辞已分叉，可收成一个消息构造器。
 - 同一条去重/上限规则四段近似自然语言（`authoringContract.ts:266/:377/:444`、`creationBrief.ts:186`），prompt 文案层重复，可单独一个 lane 统一。
 
 ### 仍待定（无新证据，默认不启动）
@@ -228,4 +240,4 @@ Lane M 的依赖图要点（grep 为准，GitNexus 索引未含第三轮符号�
 
 ## 最终汇报
 
-按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第五轮起点 33 / 361，`test:sites` 46）；任何刻意的行为差异单列。
+按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第六轮起点 33 / 361，`test:sites` 46）；任何刻意的行为差异单列。
