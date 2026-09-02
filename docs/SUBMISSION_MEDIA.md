@@ -25,11 +25,11 @@ Use only the source-true captures below for repository, Devpost, and video mater
 The final public video must remain under three minutes and include audio. Use these source-true visual beats:
 
 1. Library — `apertale-library-current.png` establishes the Field Guide plus four independent Sample Books and the explicit Create Your Own path.
-2. Day Atlas — `apertale-atlas-day-current.png` establishes the tactile book and continuous two-page illustration.
-3. Live Site Tools — record the ChatGPT built-in browser's eight-tool list and calls; a static screenshot cannot replace this evidence.
-4. Human correction — record a manual drag after an Agent patch.
-5. Exact undo — record motion disappearing while the manual transform remains.
-6. Night/Preview — finish with Night, a physical page turn, and click-driven knowledge reveal.
+2. Pencil storyboard — record the blank 3D book in the workshop while `sketch_storyboard` reveals labelled boxes, ellipses, arrows, and text stroke by stroke, with the Site tools activity indicator and the "Codex sketched N spreads" receipt in frame; a static screenshot cannot replace this evidence.
+3. Red pencil — record the reader circling one labelled mark and striking through another, then Codex reading the marks (`get_project_context`), redrawing only that spread (`sketch_storyboard` update), the red marks vanishing, and the "Codex applied your marks on spread N" receipt.
+4. Live Site Tools — record the ChatGPT desktop built-in browser's eight-tool list and the `request_image_handoff` → `manage_book` create sequence that turns the pencil plan into the finished book.
+5. Human correction and exact undo — record a manual drag after an Agent `apply_scene_patch`, then `undo_project_change` removing the motion while the manual transform remains.
+6. Night/Preview — finish with Night through `set_presentation`, a physical page turn, a click-driven knowledge reveal, and the read-only share link.
 
 Follow the prompts and evidence requirements in [`SITE_TOOLS_ACCEPTANCE.md`](SITE_TOOLS_ACCEPTANCE.md). Do not show Chrome, development flags, localhost, private URLs, API keys, personal notifications, or unrelated browser tabs in the final recording.
 
