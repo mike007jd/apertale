@@ -6,7 +6,7 @@
  */
 import * as THREE from "three";
 import { PAGE_H, PAGE_W, type SceneElement } from "./bookGeometry";
-import { clamp01 } from "./pageTurn";
+import { clamp01 } from "./design/curves";
 import { spreadFraction } from "./stageGeometry";
 import type { StoryboardPoint, StoryboardStroke } from "./storyboard";
 import type { BookSnapshot, TurnState } from "./types";

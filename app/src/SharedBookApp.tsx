@@ -1,20 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, X } from "@phosphor-icons/react";
 import { MotionConfig } from "motion/react";
+import { clamp } from "./design/curves";
 import { ThemeSwitch } from "./design/ThemeSwitch";
 import { FallbackBook } from "./FallbackBook";
 import { PortraitOrientationGate } from "./PortraitOrientationGate";
 import { hasReveal, resolveInteraction } from "./interaction";
-import { announce, supportsWebGl2 } from "./readerShell";
-import { readerSceneStructureKey, sceneFailureMatches } from "./renderEvidence";
-import {
-  canTurnPage,
-  createPageTurnSession,
-  pageTurnNavDisabled,
-  skipsPageTurnAnimation,
-} from "./pageTurn";
-import type { TurnDirection, TurnWaitState } from "./pageTurn";
-import { type BookSnapshot, type DocumentState, type ThemeId, type TurnState } from "./types";
+import { announce, supportsWebGl2, useReaderShell } from "./readerShell";
+import { readerSceneStructureKey } from "./renderEvidence";
+import { type BookSnapshot, type DocumentState, type ThemeId } from "./types";
 
 const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: module.ThreeBook })));
 
@@ -35,10 +29,6 @@ export function SharedBookApp() {
   const [spreadIndex, setSpreadIndex] = useState(0);
   const [selectionId, setSelectionId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeId>("paper-atelier");
-  const [failedSceneKey, setFailedSceneKey] = useState<string | null>(null);
-  const [sceneReady, setSceneReady] = useState(false);
-  const [pageTurnReady, setPageTurnReady] = useState<Record<TurnDirection, boolean>>({ backward: false, forward: false });
-  const [turn, setTurn] = useState<TurnState>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const forceFallback = new URLSearchParams(window.location.search).get("fallback") === "1";
   const webGlAvailable = useMemo(() => supportsWebGl2(forceFallback), [forceFallback]);
@@ -54,24 +44,20 @@ export function SharedBookApp() {
     lastAction: null,
   } : null, [documentState, reducedMotion, selectionId, spreadIndex, theme]);
   const activeSceneKey = snapshot ? readerSceneStructureKey(snapshot, "reader") : null;
-  const sceneFailed = sceneFailureMatches(activeSceneKey, failedSceneKey);
-  const spreadIndexRef = useRef(0);
-  const spreadCountRef = useRef(0);
-  const documentIdRef = useRef<string | null>(null);
-  const reducedMotionRef = useRef(false);
-  const pageTurnVisibleRef = useRef(webGlAvailable);
-  const rendererAvailableRef = useRef(webGlAvailable);
-  const waitingForRendererRef = useRef<TurnWaitState>({ backward: webGlAvailable, forward: webGlAvailable });
-  spreadIndexRef.current = spreadIndex;
-  spreadCountRef.current = documentState?.spreads.length ?? 0;
-  documentIdRef.current = documentState?.id ?? null;
-  reducedMotionRef.current = reducedMotion;
-  rendererAvailableRef.current = webGlAvailable && !sceneFailed;
-  pageTurnVisibleRef.current = webGlAvailable && !sceneFailed && sceneReady;
-  waitingForRendererRef.current = {
-    backward: webGlAvailable && !sceneFailed && (!sceneReady || !pageTurnReady.backward),
-    forward: webGlAvailable && !sceneFailed && (!sceneReady || !pageTurnReady.forward),
-  };
+  const spreadCount = documentState?.spreads.length ?? 0;
+
+  const reader = useReaderShell({
+    navigationKey: `${documentState?.id}:${spreadIndex}`,
+    spreadIndex,
+    spreadCount,
+    sceneKey: activeSceneKey,
+    webGlAvailable,
+    reducedMotion,
+    commit: (index) => {
+      setSelectionId(null);
+      setSpreadIndex(clamp(index, 0, spreadCount - 1));
+    },
+  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -103,44 +89,6 @@ export function SharedBookApp() {
     return () => preference.removeEventListener("change", update);
   }, []);
 
-  const commitSpread = useCallback((direction: "forward" | "backward") => {
-    const rendererWait = rendererAvailableRef.current;
-    waitingForRendererRef.current = { backward: rendererWait, forward: rendererWait };
-    setPageTurnReady({ backward: false, forward: false });
-    setSelectionId(null);
-    setSpreadIndex((current) => Math.max(0, Math.min(spreadCountRef.current - 1, current + (direction === "forward" ? 1 : -1))));
-  }, []);
-
-  const turnController = useMemo(() => createPageTurnSession({
-    surface: "shared",
-    now: () => performance.now(),
-    requestFrame: (callback) => requestAnimationFrame(callback),
-    cancelFrame: (handle) => cancelAnimationFrame(handle),
-    setTurn,
-    commit: commitSpread,
-    navigationKey: () => `${documentIdRef.current}:${spreadIndexRef.current}`,
-    // A delayed commit only makes sense while ThreeBook can render the leaf.
-    // Static fallback readers and reduced-motion users navigate immediately.
-    reducedMotion: () => skipsPageTurnAnimation(reducedMotionRef.current, pageTurnVisibleRef.current),
-    canTurn: (direction) => canTurnPage(
-      direction,
-      spreadIndexRef.current,
-      spreadCountRef.current,
-      waitingForRendererRef.current[direction],
-    ),
-  }), [commitSpread]);
-
-  useEffect(() => {
-    // Strict Mode intentionally runs an effect setup/cleanup/setup cycle in
-    // development. Reactivate the stable controller after that probe while
-    // keeping callbacks from the disposed generation unable to commit.
-    turnController.activate();
-    return () => turnController.dispose();
-  }, [turnController]);
-
-  const turnPage = turnController.turnPage;
-  const onPageGesture = turnController.onPageGesture;
-
   /**
    * The mobile reader sheet scrolls its own copy, so a page turn has to return
    * the anonymous reader to the top of the new spread rather than leaving them
@@ -161,12 +109,7 @@ export function SharedBookApp() {
   const spread = snapshot.document.spreads[spreadIndex];
   const selected = selectionId ? spread.elements.find((element) => element.id === selectionId) ?? null : null;
   const selectedInteraction = selected ? resolveInteraction(selected) : null;
-  const showWebGl = webGlAvailable && !sceneFailed;
-  const waitingForRenderer: TurnWaitState = {
-    backward: showWebGl && (!sceneReady || !pageTurnReady.backward),
-    forward: showWebGl && (!sceneReady || !pageTurnReady.forward),
-  };
-  const nav = pageTurnNavDisabled(turn, spreadIndex, snapshot.document.spreads.length, waitingForRenderer);
+  const nav = reader.navDisabled;
 
   return (
     <MotionConfig reducedMotion={reducedMotion ? "always" : "never"}>
@@ -181,38 +124,28 @@ export function SharedBookApp() {
       </header>
 
       <section className="stage" aria-label={`${spread.title}. Spread ${spreadIndex + 1} of ${snapshot.document.spreads.length}`}>
-        {showWebGl ? (
+        {reader.renderWebGl ? (
           <Suspense fallback={<div className="fallback-book is-loading" />}>
             <ThreeBook
               snapshot={snapshot}
-              turn={turn}
+              turn={reader.turn}
               readOnly
               onSelect={setSelectionId}
               onHover={() => undefined}
               onMoveElement={() => undefined}
-              onPageGesture={onPageGesture}
-              onPageTurnReady={(direction, ready) => setPageTurnReady((current) => (
-                current[direction] === ready ? current : { ...current, [direction]: ready }
-              ))}
-              onLoading={() => {
-                setSceneReady(false);
-                setPageTurnReady({ backward: false, forward: false });
-              }}
-              onReady={() => setSceneReady(true)}
-              onFailure={(failureSceneKey) => {
-                if (!sceneFailureMatches(activeSceneKey, failureSceneKey)) return;
-                setSceneReady(false);
-                setPageTurnReady({ backward: false, forward: false });
-                setFailedSceneKey(failureSceneKey);
-              }}
+              onPageGesture={reader.onPageGesture}
+              onPageTurnReady={reader.onPageTurnReady}
+              onLoading={reader.onSceneLoading}
+              onReady={() => undefined}
+              onFailure={reader.onSceneFailure}
             />
           </Suspense>
         ) : (
           <FallbackBook snapshot={snapshot} spread={spread} audience="reader" onSelect={setSelectionId} />
         )}
 
-        <button className="page-arrow page-arrow-left" onClick={() => turnPage("backward")} disabled={nav.previous} aria-label="Previous spread"><ArrowLeft size={22} /></button>
-        <button className="page-arrow page-arrow-right" onClick={() => turnPage("forward")} disabled={nav.next} aria-label="Next spread"><ArrowRight size={22} /></button>
+        <button className="page-arrow page-arrow-left" onClick={() => reader.turnPage("backward")} disabled={nav.previous} aria-label="Previous spread"><ArrowLeft size={22} /></button>
+        <button className="page-arrow page-arrow-right" onClick={() => reader.turnPage("forward")} disabled={nav.next} aria-label="Next spread"><ArrowRight size={22} /></button>
 
         <aside className="reader-sheet" aria-label="Reading panel">
           <div className="reader-sheet-copy" ref={readerCopy}>
@@ -221,9 +154,9 @@ export function SharedBookApp() {
             <p>{spread.body}</p>
           </div>
           <div className="reader-sheet-controls">
-            <button onClick={() => turnPage("backward")} disabled={nav.previous} aria-label="Previous spread"><ArrowLeft size={24} /></button>
+            <button onClick={() => reader.turnPage("backward")} disabled={nav.previous} aria-label="Previous spread"><ArrowLeft size={24} /></button>
             <span className="reader-sheet-progress"><strong>{spreadIndex + 1}</strong> / {snapshot.document.spreads.length}</span>
-            <button onClick={() => turnPage("forward")} disabled={nav.next} aria-label="Next spread"><ArrowRight size={24} /></button>
+            <button onClick={() => reader.turnPage("forward")} disabled={nav.next} aria-label="Next spread"><ArrowRight size={24} /></button>
           </div>
         </aside>
 

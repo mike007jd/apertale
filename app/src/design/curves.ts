@@ -1,3 +1,10 @@
+/** One bound for every ratio, progress and normalised coordinate in the app. */
+export function clamp(value: number, min: number, max: number) {
+  return value < min ? min : value > max ? max : value;
+}
+
+export const clamp01 = (value: number) => clamp(value, 0, 1);
+
 /**
  * Smootherstep, in one place.
  *
@@ -12,6 +19,6 @@
  * mid-swing, which is precisely the jank the curve was chosen to remove.
  */
 export function smootherstep(t: number) {
-  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
+  const clamped = clamp01(t);
   return clamped * clamped * clamped * (clamped * (clamped * 6 - 15) + 10);
 }

@@ -5,7 +5,7 @@
  * counts, UV halves and disposal can be asserted in node.
  */
 import * as THREE from "three";
-import { deformPageVertex, restingPageDepth } from "./pageTurn";
+import { deformPageVertex, restingPageDepth } from "./pageDeformation";
 import type { BookElement } from "./types";
 
 export const PAGE_W = 4.2;

@@ -6,6 +6,7 @@
  */
 import * as THREE from "three";
 import { acquireAssetPreviewUrl, acquireAssetUrl } from "./assetStore";
+import { clamp01 } from "./design/curves";
 import { PAGE_H, PAGE_W } from "./bookGeometry";
 import { centeredContainPlacement, centeredCoverCrop } from "./imageCrop";
 import type { StoryboardMark, StoryboardPoint, StoryboardSpread } from "./storyboard";
@@ -25,8 +26,6 @@ const RED_PENCIL = "rgba(230, 74, 61, .94)";
 const HAND_FONT = "\"Marker Felt\", \"Chalkboard SE\", \"Bradley Hand\", \"Segoe Print\", \"Comic Sans MS\", cursive";
 const LABEL_PX = { s: 36, m: 48, l: 64 } as const;
 const MARK_LABEL_PX = 34;
-
-const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
 /** Reader photos ghosted into storyboard boxes; `null` while loading or after a silent failure. */
 const sketchImages = new Map<string, HTMLImageElement | null>();

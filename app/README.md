@@ -79,7 +79,9 @@ The production build is emitted as a host-portable bundle:
 - `src/qualityLifecycle.ts` — pure creation-brief adoption, render-evidence, and bounded critique-round decisions over the persisted lifecycle store; `bookEngine` persists what it reports as changed.
 - `src/storyboard.ts` — Codex pencil storyboard and reader red-mark state, resampled strokes, sessionStorage persistence, and the compact summary returned by project context.
 - `src/workshopControls.tsx` and `src/ElementAgentCard.tsx` — presentational creation-workshop pickers, storyboard pencil controls, and the element handoff card, rendered and tested apart from `App.tsx`.
-- `src/pageTurn.ts` — shared editor/reader page-turn session lifecycle and physical-page geometry helpers.
+- `src/pageTurnSession.ts` — page-turn session lifecycle and the navigation-locking predicates around it.
+- `src/pageDeformation.ts` — pure physical-page geometry: resting depth, vertex deformation, case/spine poses, turn content plan.
+- `src/readerShell.ts` — the page-turn shell both the editor and the shared reader mount their renderer inside.
 - `src/creationWorkshop.ts` — creation setup state, ordered local-asset restoration, and brief materialization.
 - `src/authoringContract.ts` and `src/creationBrief.ts` — versioned readiness ownership, direct questions, and site-native Agent instructions.
 - `src/qualityContract.ts` and `worker/qualityRubric.json` — advisory quality rubric, deterministic/visual boundary, render manifest, and report validation.
