@@ -58,6 +58,9 @@ contract owns blocking fields, concise user questions, recommendations, asset
 needs, and photo/identity boundaries. Both context inspection and the create
 command consume the same assessment; source-asset existence and identity risk
 are derived from the actual source list rather than trusted book-type labels.
+The Creation workshop session decides the book type and photo policy once,
+from the chosen photo use; the brief builder validates that decision against
+the supported book types and renders it instead of inferring it a second time.
 
 ## Authoring presentation protocol
 

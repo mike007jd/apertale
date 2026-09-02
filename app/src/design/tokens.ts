@@ -1,24 +1,7 @@
 /**
- * The two spring families consumed by Motion. Durations and easing points are
- * emitted separately below in the numeric forms their consumers require.
- */
-export const motion = {
-  "springObject": {
-    "stiffness": 180,
-    "damping": 26,
-    "mass": 1
-  },
-  "springSurface": {
-    "stiffness": 120,
-    "damping": 24,
-    "mass": 1.1
-  }
-} as const;
-
-/**
- * The same two scales in the units Motion takes. Derived here rather than
- * retyped at the call sites, which is what the CSS strings above were quietly
- * forcing every JS animation to do.
+ * Durations and easing points in the numeric forms their JS consumers
+ * (Element.animate, the Page-turn session) require. Every CSS scale lives in
+ * tokens.css.
  */
 export const durationMs = {
   "feedback": 120,

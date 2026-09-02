@@ -25,7 +25,7 @@
 - 验证命令固定为 `npm run typecheck && npm test`。改到 worker 或 scripts 时追加 `npm run test:sites`。`npm run audit:cutouts` 有 41 个已知样本资产失败，不作为门槛。
 - 行为不变：所有 lane 都是纯重构。结束时必须能说「测试数量 ≥ 开始时」或明确列出删掉了哪些测试以及为什么它们是重复的。
 - 只改本 lane「拥有」的文件与区域。需要改「只读」文件时停下，在返回报告里写出需要的改动，由编排者决定。
-- 词汇：module / interface / seam / adapter / depth / locality / leverage。域名用 CONTEXT.md 的：Page-turn session、Reader shell、WebMCP tool catalog、Asset registry、Creation workshop session、Creation brief readiness、Authoring quality lifecycle、Authoring presentation、Book element grammar、Project artifact、Publishing schema。
+- 词汇：module / interface / seam / adapter / depth / locality / leverage。域名用根目录 `CONTEXT.md` 的：Page-turn session、Reader shell、WebMCP tool catalog、Asset registry、Creation workshop session、Creation brief readiness、Authoring quality lifecycle、Authoring presentation、Book element grammar、Project artifact、Publishing schema。
 - 每个 lane 一次提交（或少量语义提交），提交信息用祈使句描述行为不变的重构，末尾附
   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`。
 - 返回报告格式：改了什么（文件 + 行数增减）、验证命令输出的最后 5 行、跳过了什么以及原因、需要编排者处理的跨 lane 事项、分支名与提交 hash。
@@ -49,7 +49,19 @@
 
 ---
 
-## 第二轮 · 第一波（三个 lane 并行，文件互不重叠）
+## 第二轮第一波已完成（2026-09-02 合入 main，不要重做）
+
+| Lane | 结果 | 关键产物 / 偏差 |
+|---|---|---|
+| F · 卸掉 motion | 合并 | `motion` 依赖已移除；Panel/Toast 常驻 + `data-open` + `@starting-style` / `allow-discrete`；Switch marker 用测量式 `left/width` 过渡；`WorkspaceTransition` 用 `Element.animate`。Reduced Motion 沿用既有 `data-motion="reduced"` 与媒体查询。jsdom / testing-library **保留**（两个组件测试断言的是行为，不是包装标记）。源码净 +1 行，减法在 lock（−67）。`tokens.ts` 的死 `motion` 导出已由编排者删除 |
+| G · Creation brief readiness | 合并 | `workshopBookContract(state)` + `PHOTO_USE_CONTRACT` 表是 bookType/photoPolicy 唯一决定点；`buildCreationBrief` 只校验（新增 `supportedBookType` 硬校验）与渲染。`webmcp.ts` 未动：它走的是 `assessCreationReadiness`，不是 `buildCreationBrief` |
+| H · Publishing grammar 进 worker | 合并 | 前提修正：worker 侧本无角色 → use 表（那些规则依赖发布边界拿不到的 `StoredAssetMetadata`）。真正重复的是七条 asset-reference 规则的 separation 词汇与消息文本，现为 `BOOK_ASSET_REFERENCE_RULES` → `worker/bookAssetReferenceRules.json`（同步脚本已泛化为双产物）。resting-frame-mismatch 检查从 `validateElement` 移到 `validateBookAssetReferences`，同时违反多条规则时报错顺序可能不同，状态码不变 |
+
+**H 留下的线索**：`worker/bookShareApi.js` 仍手抄 `ELEMENT_KINDS`、`PAGES`、`PROVENANCE`、`PROCEDURAL_ASSET_PATTERN`（worker 的 `^procedural:hotspot:(amber|aqua|jade|rose)$` 比 src 的 `procedural:` 前缀更严，是真实分歧）以及 12 spread / 24 element 上限；真源在 `src/types.ts`，应并入 Book element grammar 产物。可作为第二波候选。
+
+---
+
+## 第二轮 · 第一波（已完成，保留作记录）
 
 ### Lane F · 卸掉 `motion`（审计 9、10 项，第一轮因跨文件而搁置）
 
@@ -75,7 +87,7 @@
 
 **目标**：`creationWorkshop.ts` 里的 bookType / photoPolicy 推断与 `creationBrief.ts` 的重复校验合成一处，Creation brief readiness 只有一个真源。
 
-**拥有的文件**：`src/creationWorkshop.ts`、`src/creationBrief.ts`、两者的测试、`docs/CONTEXT.md`（Creation brief readiness 条目）。`src/App.tsx` 与 `src/webmcp.ts` 里对这两个 module 的调用点只改 import 与调用形式，先 grep 定位并在报告里列出行号。
+**拥有的文件**：`src/creationWorkshop.ts`、`src/creationBrief.ts`、两者的测试、`CONTEXT.md`（仓库根目录）（Creation brief readiness 条目）。`src/App.tsx` 与 `src/webmcp.ts` 里对这两个 module 的调用点只改 import 与调用形式，先 grep 定位并在报告里列出行号。
 
 **只读**：`src/authoringContract.ts`、`src/types.ts`、其余一切。
 
@@ -94,7 +106,7 @@
 
 **目标**：asset-reference 的规则集从 `bookAssetContract.ts` 与 `bookShareApi.js` 两处手抄收成一处，沿 Lane A 的做法用构建时 JSON 产物送进 worker；worker 自己的校验函数保留（信任边界），只共享规则表。
 
-**拥有的文件**：`src/bookAssetContract.ts`（`bookAssetReferenceFindings` :270 起、`bookAssetReferenceIssues` :338、各 `*AssetRoleIssues` :99-245）、`worker/bookShareApi.js`（`validateBookAssetReferences` :259-305、`assertAssetReference` :93）、`scripts/sync-book-element-grammar.mjs`（可扩展成同一脚本产出第二个 JSON，或新建一个仿它）、`scripts/prepare-sites-build.mjs` 的 `jsonModules`、`src/bookAssetContract.test.ts`、`tests/book-sharing.test.mjs`、`docs/CONTEXT.md`。
+**拥有的文件**：`src/bookAssetContract.ts`（`bookAssetReferenceFindings` :270 起、`bookAssetReferenceIssues` :338、各 `*AssetRoleIssues` :99-245）、`worker/bookShareApi.js`（`validateBookAssetReferences` :259-305、`assertAssetReference` :93）、`scripts/sync-book-element-grammar.mjs`（可扩展成同一脚本产出第二个 JSON，或新建一个仿它）、`scripts/prepare-sites-build.mjs` 的 `jsonModules`、`src/bookAssetContract.test.ts`、`tests/book-sharing.test.mjs`、`CONTEXT.md`（仓库根目录）。
 
 **只读**：`src/bookElementGrammar.ts`（可以 import，不改）、其余一切。
 
@@ -112,7 +124,7 @@
 
 ## 第二轮第一波合并
 
-顺序：F → G → H。F 最少与他人重叠；G 与 H 都可能碰 `docs/CONTEXT.md`，手动合并那一个文件。每合一个跑 `npm run typecheck && npm test`；合完 H 跑 `npm run test:sites`。
+顺序：F → G → H。F 最少与他人重叠；G 与 H 都可能碰 `CONTEXT.md`（仓库根目录），手动合并那一个文件。每合一个跑 `npm run typecheck && npm test`；合完 H 跑 `npm run test:sites`。
 
 ---
 
