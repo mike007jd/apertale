@@ -100,4 +100,8 @@ record for durable book and asset storage. The unbundled Worker keeps the
 equivalent migration-0001 statements at its runtime boundary so a fresh binding
 can serve safely; later schema changes add migrations instead of rewriting that
 baseline. Sites contract tests keep the initial representations aligned and
-prove the migrations are packaged.
+prove the migrations are packaged. The cross-resource asset-reference rules —
+the artwork separation vocabulary and one message per finding code — are stated
+once in the Project artifact's contract Module and generated into
+`worker/bookAssetReferenceRules.json`, so the publish boundary re-checks them
+with its own traversal instead of a second hand-copied rule set.

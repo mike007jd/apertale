@@ -4,6 +4,9 @@ import bundledAssetCatalog from "./bundledAssetCatalog.json" with { type: "json"
 // This boundary keeps its own validators and only shares the grammar's bounds,
 // vocabularies, and patterns.
 import grammar from "./bookElementGrammar.json" with { type: "json" };
+// Generated from src/bookAssetContract.ts by the same script: the cross-resource
+// asset-reference rules this boundary re-checks with its own traversal.
+import assetReferenceRules from "./bookAssetReferenceRules.json" with { type: "json" };
 
 const ASSET_ID_PATTERN = /^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = new RegExp(grammar.tokenPatternSource);
@@ -28,6 +31,12 @@ const REVEAL_KINDS = new Set(grammar.reveal.kinds);
 const PROCEDURAL_ASSET_PATTERN = /^procedural:hotspot:(amber|aqua|jade|rose)$/u;
 const BUNDLED_ASSET_PATTERN = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._/-]{0,503}$/u;
 const BUNDLED_ASSETS = new Set(bundledAssetCatalog.assets);
+
+/** Raises the shared asset-reference rule as this boundary's rejection. */
+function assetReferenceError(code, values) {
+  const message = assetReferenceRules.messages[code].replace(/\{(\w+)\}/gu, (_, key) => String(values[key]));
+  return new HttpError(400, "invalid_manifest", message);
+}
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -193,9 +202,6 @@ function validateElement(element, spreadNumber, references, elementIds) {
     if (PROCEDURAL_ASSET_PATTERN.test(element.assetId)) {
       throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} procedural markers cannot carry image sequences.`);
     }
-    if (element.frameAssetIds[0] !== element.assetId) {
-      throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} must use each sequence's resting frame as assetId.`);
-    }
     element.frameAssetIds.forEach((assetId) => {
       if (typeof assetId !== "string") throw new HttpError(400, "invalid_manifest", message);
       if (PROCEDURAL_ASSET_PATTERN.test(assetId)) {
@@ -241,7 +247,7 @@ function validateManifest(manifest) {
     if (typeof spread.artwork !== "undefined") {
       if (!isRecord(spread.artwork)) throw new HttpError(400, "invalid_manifest", message);
       assertOnly(spread.artwork, ["cleanPlateAssetId", "sourceAssetId", "personalSourceAssetId", "separation"], message);
-      if (!["inpainted-clean-plate", "preserved-photo-layout"].includes(spread.artwork.separation)) {
+      if (!assetReferenceRules.separations.includes(spread.artwork.separation)) {
         throw new HttpError(400, "invalid_manifest", `Spread ${order + 1} has an invalid artwork contract.`);
       }
       if (typeof spread.artwork.cleanPlateAssetId !== "string") throw new HttpError(400, "invalid_manifest", message);
@@ -265,19 +271,17 @@ function validateBookAssetReferences(manifest) {
     if (!spread.artwork) return;
     const spreadNumber = spreadIndex + 1;
     const { sourceAssetId, cleanPlateAssetId, separation } = spread.artwork;
-    if (sourceAssetId && sourceAssetId === cleanPlateAssetId && separation !== "preserved-photo-layout") {
-      throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} must keep its original composite separate from its final clean plate.`);
+    if (sourceAssetId && sourceAssetId === cleanPlateAssetId && separation !== assetReferenceRules.sourceReuseSeparation) {
+      throw assetReferenceError("generated-source-clean-reuse", { spread: spreadNumber });
     }
-    [sourceAssetId, cleanPlateAssetId].filter(Boolean).forEach((assetId) => {
-      if (assetId === coverAssetId) {
-        throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} cannot reuse the dedicated cover as interior artwork.`);
-      }
-      const owner = backgroundOwner.get(assetId);
+    [sourceAssetId, cleanPlateAssetId].filter(Boolean).forEach((asset) => {
+      if (asset === coverAssetId) throw assetReferenceError("cover-interior-reuse", { spread: spreadNumber, asset });
+      const owner = backgroundOwner.get(asset);
       if (typeof owner === "number" && owner !== spreadIndex) {
-        throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} must use purpose-built background artwork.`);
+        throw assetReferenceError("background-cross-spread-reuse", { spread: spreadNumber, asset, owner: owner + 1 });
       }
-      backgroundOwner.set(assetId, spreadIndex);
-      backgroundIds.add(assetId);
+      backgroundOwner.set(asset, spreadIndex);
+      backgroundIds.add(asset);
     });
   });
 
@@ -285,19 +289,18 @@ function validateBookAssetReferences(manifest) {
     const spreadNumber = spreadIndex + 1;
     const foregroundOwner = new Map();
     spread.elements.filter((element) => !PROCEDURAL_ASSET_PATTERN.test(element.assetId)).forEach((element, layerIndex) => {
-      const renderedAssetIds = element.frameAssetIds?.length ? element.frameAssetIds : [element.assetId];
-      new Set(renderedAssetIds).forEach((assetId) => {
-        const owner = foregroundOwner.get(assetId);
+      const layer = layerIndex + 1;
+      if (element.frameAssetIds?.length && element.frameAssetIds[0] !== element.assetId) {
+        throw assetReferenceError("resting-frame-mismatch", { spread: spreadNumber, layer, asset: element.assetId });
+      }
+      new Set(element.frameAssetIds?.length ? element.frameAssetIds : [element.assetId]).forEach((asset) => {
+        const owner = foregroundOwner.get(asset);
         if (typeof owner === "number" && owner !== layerIndex) {
-          throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} foreground layers must use distinct final assets.`);
+          throw assetReferenceError("foreground-cross-layer-reuse", { spread: spreadNumber, layer, asset, owner: owner + 1 });
         }
-        foregroundOwner.set(assetId, layerIndex);
-        if (assetId === coverAssetId) {
-          throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} cannot reuse its cover as a foreground layer.`);
-        }
-        if (backgroundIds.has(assetId)) {
-          throw new HttpError(400, "invalid_manifest", `Spread ${spreadNumber} cannot reuse background artwork as a foreground layer.`);
-        }
+        foregroundOwner.set(asset, layerIndex);
+        if (asset === coverAssetId) throw assetReferenceError("cover-foreground-reuse", { spread: spreadNumber, layer, asset });
+        if (backgroundIds.has(asset)) throw assetReferenceError("background-foreground-reuse", { spread: spreadNumber, layer, asset });
       });
     });
   });
