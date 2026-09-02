@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { paintWorkshopDrawing, sampleCanvasLuminance, wrapText } from "./pageCanvas";
+import { paintSketchFade, paintWorkshopDrawing, sampleCanvasLuminance, wrapText } from "./pageCanvas";
 import type { StoryboardSpread } from "./storyboard";
 
 /** A measuring context: every character is 10px wide. */
@@ -34,22 +34,24 @@ describe("sampleCanvasLuminance", () => {
 describe("paintWorkshopDrawing", () => {
   /** A recording 2D context: remembers every stroke with its colour, and every text it set. */
   function recordingCanvas() {
-    const strokes: { color: string; width: number; segments: number }[] = [];
+    const strokes: { color: string; width: number; segments: number; alpha: number }[] = [];
     const texts: { text: string; alpha: number }[] = [];
+    const drawn: unknown[] = [];
     let segments = 0;
     const context = {
       strokeStyle: "", fillStyle: "", lineWidth: 0, lineCap: "", lineJoin: "", font: "", textBaseline: "", globalAlpha: 1,
       clearRect: () => undefined,
+      drawImage: (image: unknown) => { drawn.push(image); },
       save: () => undefined,
       restore() { this.globalAlpha = 1; },
       beginPath: () => { segments = 0; },
       moveTo: () => undefined,
       lineTo: () => { segments += 1; },
-      stroke() { strokes.push({ color: String(this.strokeStyle), width: Number(this.lineWidth), segments }); },
+      stroke() { strokes.push({ color: String(this.strokeStyle), width: Number(this.lineWidth), segments, alpha: Number(this.globalAlpha) }); },
       fillText(text: string) { texts.push({ text, alpha: Number(this.globalAlpha) }); },
     };
     const canvas = { width: 200, height: 100, getContext: () => context };
-    return { strokes, texts, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
+    return { strokes, texts, drawn, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
   }
   const line = (n: number) => ({ kind: "line" as const, points: Array.from({ length: n }, (_, index) => ({ x: index / (n - 1), y: 0.5 })) });
   const spread = (marks: StoryboardSpread["marks"], annotations: StoryboardSpread["annotations"] = []): StoryboardSpread => ({ index: 0, caption: "", sketchRevision: 1, marks, annotations });
@@ -88,5 +90,16 @@ describe("paintWorkshopDrawing", () => {
     paintWorkshopDrawing(pair, undefined, [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }, { x: 0.3, y: 0.1 }], 1);
     expect(strokes).toHaveLength(1);
     expect(strokes[0].segments).toBe(2);
+  });
+
+  it("fades the finished plan over the loaded overlay and leaves the overlay alone at alpha 0", () => {
+    const { strokes, drawn, pair } = recordingCanvas();
+    const base = { width: 200, height: 100 } as unknown as HTMLCanvasElement;
+    paintSketchFade(pair, spread([line(4)], [line(3)]), base, 0.4);
+    expect(drawn).toEqual([base]);
+    expect(strokes.map((stroke) => stroke.alpha)).toEqual([0.4, 0.4]);
+    paintSketchFade(pair, spread([line(4)]), base, 0);
+    expect(drawn).toEqual([base, base]);
+    expect(strokes).toHaveLength(2);
   });
 });

@@ -18,7 +18,7 @@ import type { AuthoringSurfaceRequest } from "./authoringSurface";
 import { recordDiagnostic } from "./diagnostics";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { listProjectAssetReferences } from "./projectArtifact";
-import { MAX_LABEL_LENGTH, MAX_MARKS_PER_SPREAD, MAX_STROKE_POINTS, applyStoryboardSketches, getStoryboardSnapshot, resetStoryboard, summarizeStoryboard, type StoryboardMark, type StoryboardPoint, type StoryboardSketchInput } from "./storyboard";
+import { MAX_LABEL_LENGTH, MAX_MARKS_PER_SPREAD, MAX_STROKE_POINTS, applyStoryboardSketches, getStoryboardSnapshot, resetStoryboard, retireStoryboard, summarizeStoryboard, type StoryboardMark, type StoryboardPoint, type StoryboardSketchInput } from "./storyboard";
 import { BOOK_ELEMENT_ID_PATTERN, BOOK_ELEMENT_ID_PATTERN_SOURCE, MOTION_PRESETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, PreparedBookBackground, PreparedBookLayer, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 import {
@@ -727,6 +727,8 @@ export function registerWebMcpTools(
     }
     pendingPresentations.delete(requestId);
     sessionResults.set(requestId, pending.result);
+    // The created book has rendered, so its pencil plan has had its moment.
+    if (getStoryboardSnapshot().createdDocumentId === pending.target.documentId) resetStoryboard();
     return pending.result;
   };
 
@@ -1128,8 +1130,9 @@ export function registerWebMcpTools(
           }, "agent", options?.signal);
           if (result.ok) {
             if (!result.documentId || !result.changedIds[0]) invalid("create did not return its stable presentation target.");
-            // The rough plan belonged to the book that now exists.
-            resetStoryboard();
+            // The rough plan belonged to the book that now exists. It is kept
+            // until the reader has seen it fade into the first spread.
+            retireStoryboard(result.documentId);
             const session = bookEngine.getSnapshot().session;
             pendingPresentations.set(requestId, {
               result,
