@@ -7,7 +7,7 @@ import {
   type StoredAssetMetadata,
 } from "./assetStore";
 import { buildCreationBrief, type AuthoringMode, type CreationBrief } from "./creationBrief";
-import { type InteractionDensity } from "./authoringContract";
+import { type CreationBookType, type CreationPhotoPolicy, type InteractionDensity } from "./authoringContract";
 
 export const CREATION_STYLES = ["Paper collage", "Watercolor", "Cinematic", "Surprise me"] as const;
 export const CREATION_LENGTHS = [4, 6, 8, 10, 12] as const;
@@ -192,15 +192,31 @@ export async function importCreationWorkshopAssets(files: Iterable<File>, limit:
 /** Photos are in play for every mode except a pure idea brief. */
 export const workshopUsesPhotos = (state: Pick<CreationWorkshopState, "mode">) => state.mode !== "idea";
 
+type WorkshopBookContract = { bookType?: CreationBookType; photoPolicy?: CreationPhotoPolicy };
+
+/** The reader's explicit photo choice, and nothing else, decides the photo book contract. */
+const PHOTO_USE_CONTRACT: Record<CreationPhotoUse, WorkshopBookContract> = {
+  "illustrated-keepsake": {
+    bookType: "photo-led-keepsake",
+    photoPolicy: { sourceUse: "reference-and-compose", preserveIdentity: true, allowFaceChanges: false },
+  },
+  "preserve-originals": {
+    bookType: "preserved-photo-album",
+    photoPolicy: { sourceUse: "preserve-original-layout", preserveIdentity: true, allowFaceChanges: false },
+  },
+};
+
+/**
+ * Single site that turns a workshop session into a book type and photo policy.
+ * `buildCreationBrief` validates and renders what this decides; it never
+ * re-infers either field, so an unanswered photo question stays unanswered.
+ */
+export function workshopBookContract(state: Pick<CreationWorkshopState, "mode" | "photoUse">): WorkshopBookContract {
+  if (!workshopUsesPhotos(state)) return { bookType: "illustrated-storybook" };
+  return state.photoUse ? PHOTO_USE_CONTRACT[state.photoUse] : {};
+}
+
 export function buildCreationWorkshopBrief(state: CreationWorkshopState): CreationBrief {
-  const usesPhotos = workshopUsesPhotos(state);
-  const bookType = !usesPhotos
-    ? "illustrated-storybook"
-    : state.photoUse === "illustrated-keepsake"
-      ? "photo-led-keepsake"
-      : state.photoUse === "preserve-originals"
-        ? "preserved-photo-album"
-        : undefined;
   // Every workshop photo was stored or restored through the trusted asset
   // adapter, so it is already verified: passing the ids as validated stops the
   // readiness gate from asking a false Image-handoff question.
@@ -211,11 +227,6 @@ export function buildCreationWorkshopBrief(state: CreationWorkshopState): Creati
     interactionDensity: state.interactionDensity,
     sourceAssets: (state.mode === "idea" ? [] : state.assets).map(({ id, name }) => ({ id, name })),
     validatedSourceAssetIds: state.assets.map(({ id }) => id),
-    bookType,
-    photoPolicy: state.photoUse === "illustrated-keepsake"
-      ? { sourceUse: "reference-and-compose", preserveIdentity: true, allowFaceChanges: false }
-      : state.photoUse === "preserve-originals"
-        ? { sourceUse: "preserve-original-layout", preserveIdentity: true, allowFaceChanges: false }
-        : undefined,
+    ...workshopBookContract(state),
   });
 }

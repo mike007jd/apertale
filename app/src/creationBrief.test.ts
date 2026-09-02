@@ -121,6 +121,13 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("one original artwork asset id per spread");
   });
 
+  it("never invents a book type the caller did not decide", () => {
+    const undecided = buildCreationBrief({ ...photoBriefInput(), bookType: undefined });
+    expect(undecided.prompt).toContain("Book type: not chosen yet.");
+    expect(undecided.readiness.bookType).toBeNull();
+    expect(undecided.readiness.questions.join(" ")).toMatch(/illustrated storybook, a photo-led keepsake, or an album/);
+  });
+
   it("marks trusted source ids as verified while unknown sources still ask for handoff", () => {
     const uuid = (index: number) => `asset:12345678-1234-4234-8234-${index.toString(16).padStart(12, "0")}`;
     const input: CreationBriefInput = {
@@ -178,6 +185,10 @@ describe("host-side creation brief contract", () => {
     expect(reversed.prompt.indexOf("asset:kitchen-window")).toBeLessThan(reversed.prompt.indexOf("asset:harbor-dawn"));
 
     expect(() => buildCreationBrief({ ...photoBriefInput(), mode: "album" as CreationBriefInput["mode"] })).toThrow(/mode must be idea, photos, or both/);
+    expect(() => buildCreationBrief({
+      ...photoBriefInput(),
+      bookType: "scrapbook" as CreationBriefInput["bookType"],
+    })).toThrow(/bookType must be one of/);
     expect(() => buildCreationBrief({ ...photoBriefInput(), spreadCount: 3.5 })).toThrow(/spreadCount/);
     expect(() => buildCreationBrief({ ...photoBriefInput(), spreadCount: 13 })).toThrow(/spreadCount/);
     expect(() => buildCreationBrief({ ...photoBriefInput(), visualDirection: "   " })).toThrow(/visualDirection/);

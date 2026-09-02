@@ -1,10 +1,12 @@
 import {
+  CREATION_BOOK_TYPES,
   CREATION_READINESS_VERSION,
   GENERATED_COVER_COUNT,
   MAX_BOOK_PUBLISHABLE_ASSETS,
   REQUIRED_GATE_IDS,
   assessCreationReadiness,
   creationCompletionGates,
+  supportedBookType,
   creationReportRequirements,
   interactionLayerTarget,
   type CreationBookType,
@@ -29,6 +31,7 @@ export type CreationBriefInput = {
   visualDirection: string;
   interactionDensity?: InteractionDensity;
   sourceAssets: readonly CreationSourceAsset[];
+  /** Decided by the caller (see `workshopBookContract`); this module never infers one. */
   bookType?: CreationBookType;
   premise?: string;
   audience?: string;
@@ -96,7 +99,11 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
   const interactionTarget = interactionLayerTarget(interactionDensity);
   if (interactionTarget.id === "legacy") invalid("interactionDensity must be none, low, balanced, or rich.");
   const sourceAssets = normalizeSourceAssets(input.sourceAssets);
-  const bookType = input.bookType ?? (input.mode === "idea" ? "illustrated-storybook" : undefined);
+  // The caller decides the book type; this module only validates and renders it.
+  // Re-inferring one here would let a brief that never answered the photo
+  // question look decided in the prompt while readiness still blocks on it.
+  const bookType = input.bookType;
+  if (bookType !== undefined && !supportedBookType(bookType)) invalid(`bookType must be one of ${CREATION_BOOK_TYPES.join(", ")}.`);
   const generatedCoverCount = GENERATED_COVER_COUNT;
   const preservedPhotoSpreadCount = bookType === "preserved-photo-album" ? input.spreadCount : 0;
   const generatedFullSpreadCount = preservedPhotoSpreadCount > 0 ? 0 : input.spreadCount;

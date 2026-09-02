@@ -4,6 +4,7 @@ import {
   MAX_WORKSHOP_ASSETS,
   admitWorkshopAssets,
   buildCreationWorkshopBrief,
+  workshopBookContract,
   readCreationWorkshopAssetOrder,
   reduceCreationWorkshop,
   restoreCreationWorkshopAssets,
@@ -176,6 +177,18 @@ describe("creation workshop session", () => {
     expect(preserved.prompt).toContain("generated full-spread count 0");
     expect(preserved.prompt).toContain("preserved original-photo layout count 6");
     expect(preserved.prompt).not.toContain("purpose-built full-spread artwork for every spread");
+  });
+
+  it("is the only site that decides the book type, and leaves it open until the photo question is answered", () => {
+    expect(workshopBookContract(INITIAL_CREATION_WORKSHOP)).toEqual({ bookType: "illustrated-storybook" });
+    expect(workshopBookContract({ mode: "photos", photoUse: null })).toEqual({});
+
+    const unanswered = buildCreationWorkshopBrief(reduceCreationWorkshop(INITIAL_CREATION_WORKSHOP, {
+      type: "append-assets",
+      assets: [workshopAsset(1)],
+    }));
+    expect(unanswered.prompt).toContain("Book type: not chosen yet.");
+    expect(unanswered.readiness.bookType).toBeNull();
   });
 
   it("keeps restored order when a new import reaches the reducer first", () => {
