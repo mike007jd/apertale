@@ -50,6 +50,11 @@ describe("StoryPencilControls", () => {
     expect(base.onUndo).toHaveBeenCalledOnce();
   });
 
+  it("shows how Codex will read the latest red mark", () => {
+    render(<StoryPencilControls {...base} annotationCount={1} lastMark="Right page · loop · boat" />);
+    expect(screen.getByRole("status").textContent).toBe("Right page · loop · boat");
+  });
+
   it("offers clear-all from the second mark and stops the pencil at the limit", () => {
     const { rerender } = render(<StoryPencilControls {...base} annotationCount={2} />);
     fireEvent.click(button("Clear all red marks on this spread"));

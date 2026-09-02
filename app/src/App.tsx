@@ -85,7 +85,7 @@ import type { PublicationRecord } from "./publishingClient";
 import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
 import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
-import { MAX_ANNOTATIONS_PER_SPREAD, addStoryboardAnnotation, clearStoryboardAnnotations, getStoryboardSnapshot, subscribeToStoryboard, undoStoryboardAnnotation } from "./storyboard";
+import { MAX_ANNOTATIONS_PER_SPREAD, addStoryboardAnnotation, clearStoryboardAnnotations, describeAnnotation, getStoryboardSnapshot, subscribeToStoryboard, undoStoryboardAnnotation } from "./storyboard";
 import { registerWebMcpTools, type ToolActivity } from "./webmcp";
 import { StoryPencilControls, WorkshopPickers } from "./workshopControls";
 import { ElementAgentCard } from "./ElementAgentCard";
@@ -285,6 +285,10 @@ export function App() {
   const [workshopSpreadIndex, setWorkshopSpreadIndex] = useState(0);
   const [storyPencilActive, setStoryPencilActive] = useState(false);
   const [storyboardNotice, setStoryboardNotice] = useState<string | null>(null);
+  // What Codex will read from the stroke just drawn, shown for a moment so the
+  // reader sees the interpretation, not only the red line.
+  const [lastMark, setLastMark] = useState<string | null>(null);
+  const lastMarkTimeout = useRef(0);
   const previousStoryboard = useRef(storyboard);
   const storyboardNoticeTimeout = useRef(0);
   const [workshopHydrated, setWorkshopHydrated] = useState(false);
@@ -1947,7 +1951,14 @@ export function App() {
               onMoveElement={showCreateGuide ? () => undefined : (elementId, x, y) => { void humanEdit(elementId, { x, y }); }}
               onPageGesture={showCreateGuide ? () => undefined : onPageGesture}
               onAnnotationStroke={showCreateGuide
-                ? (stroke) => addStoryboardAnnotation(activeWorkshopSpreadIndex, stroke)
+                ? (stroke) => {
+                  addStoryboardAnnotation(activeWorkshopSpreadIndex, stroke);
+                  const read = describeAnnotation(stroke, currentStoryboardSpread?.marks ?? []);
+                  const page = read.page === "both" ? "Both pages" : `${read.page[0].toUpperCase()}${read.page.slice(1)} page`;
+                  setLastMark(`${page} · ${read.shape} · ${read.near[0] ?? "new element"}`);
+                  window.clearTimeout(lastMarkTimeout.current);
+                  lastMarkTimeout.current = window.setTimeout(() => setLastMark(null), 3000);
+                }
                 : undefined}
               onPageTurnReady={showCreateGuide ? undefined : (direction, ready) => setPageTurnReadiness((current) => (
                 current.navigationKey === pageTurnNavigationKey
@@ -2196,6 +2207,7 @@ export function App() {
                 active={storyPencilActive}
                 annotationCount={currentStoryboardSpread?.annotations.length ?? 0}
                 annotationLimit={MAX_ANNOTATIONS_PER_SPREAD}
+                lastMark={lastMark ?? undefined}
                 onPrevious={() => setWorkshopSpreadIndex((index) => Math.max(0, index - 1))}
                 onNext={() => setWorkshopSpreadIndex((index) => Math.min(creationSpreadCount - 1, index + 1))}
                 onToggle={() => setStoryPencilActive((active) => !active)}
