@@ -15,6 +15,8 @@ export type ImageContentAnalysis = {
   transparentPixelRatio: number;
   transparentBorderRatio: number;
   visiblePixelRatio: number;
+  /** Normalized box around the visible pixels; absent when nothing is visible. */
+  visibleBounds?: { x: number; y: number; w: number; h: number };
 };
 
 type DecodedImage = CanvasImageSource & { width: number; height: number; close?: () => void };
@@ -98,6 +100,7 @@ export function summarizeAlphaPixels(pixels: Uint8ClampedArray, width: number, h
   let transparentBorderPixels = 0;
   let borderPixels = 0;
   let hasTransparency = false;
+  let minX = width; let minY = height; let maxX = -1; let maxY = -1;
   const borderBand = Math.max(1, Math.floor(Math.min(width, height) * 0.02));
   for (let pixel = 0; pixel < pixelCount; pixel += 1) {
     const alpha = pixels[pixel * 4 + 3];
@@ -106,7 +109,10 @@ export function summarizeAlphaPixels(pixels: Uint8ClampedArray, width: number, h
     const border = x < borderBand || y < borderBand || x >= width - borderBand || y >= height - borderBand;
     if (alpha < 255) hasTransparency = true;
     if (alpha <= TRANSPARENT_ALPHA_MAX) transparentPixels += 1;
-    if (alpha >= VISIBLE_ALPHA_MIN) visiblePixels += 1;
+    if (alpha >= VISIBLE_ALPHA_MIN) {
+      visiblePixels += 1;
+      if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
     if (border) {
       borderPixels += 1;
       if (alpha <= TRANSPARENT_ALPHA_MAX) transparentBorderPixels += 1;
@@ -122,7 +128,25 @@ export function summarizeAlphaPixels(pixels: Uint8ClampedArray, width: number, h
     transparentPixelRatio,
     transparentBorderRatio,
     visiblePixelRatio,
+    ...(visiblePixels > 0 ? { visibleBounds: { x: minX / width, y: minY / height, w: (maxX - minX + 1) / width, h: (maxY - minY + 1) / height } } : {}),
   };
+}
+
+/**
+ * The crop that drops a cutout's transparent margins, padded so the alpha
+ * check still sees a clear border. A sheet quadrant leaves a subject floating
+ * in empty space; trimmed, its box is the subject, so a layer scale means the
+ * subject's size and the Agent can place it from the storyboard alone.
+ */
+function cutoutTrim(analysis: ImageContentAnalysis, width: number, height: number) {
+  const bounds = analysis.visibleBounds;
+  if (!analysis.hasMeaningfulAlpha || !bounds || (bounds.w >= 0.92 && bounds.h >= 0.92)) return null;
+  const pad = 0.04;
+  const x = Math.max(0, Math.floor((bounds.x - bounds.w * pad) * width));
+  const y = Math.max(0, Math.floor((bounds.y - bounds.h * pad) * height));
+  const right = Math.min(width, Math.ceil((bounds.x + bounds.w * (1 + pad)) * width));
+  const bottom = Math.min(height, Math.ceil((bounds.y + bounds.h * (1 + pad)) * height));
+  return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
 }
 
 /** Paints `source` (or just `crop` of it) scaled onto a fresh width × height canvas. */
@@ -168,14 +192,20 @@ export async function optimizeImportedImage(file: File): Promise<OptimizedImage>
   const decoded = await decodeImage(file);
   try {
     const sourceDimensions = { sourceWidth: decoded.width, sourceHeight: decoded.height };
-    let dimensions = fitImageDimensions(decoded.width, decoded.height);
-    const analysis = analyzeDecodedImage(decoded);
-    if (dimensions.width === decoded.width && dimensions.height === decoded.height && file.size <= MAX_STORED_IMAGE_BYTES) {
+    let analysis = analyzeDecodedImage(decoded);
+    const trim = cutoutTrim(analysis, decoded.width, decoded.height);
+    let source: DecodedImage = decoded;
+    if (trim) {
+      source = draw(decoded, trim.width, trim.height, trim).canvas;
+      analysis = analyzeDecodedImage(source);
+    }
+    let dimensions = fitImageDimensions(source.width, source.height);
+    if (!trim && dimensions.width === decoded.width && dimensions.height === decoded.height && file.size <= MAX_STORED_IMAGE_BYTES) {
       return { blob: file, name: file.name, ...dimensions, ...sourceDimensions, analysis, originalSize: file.size, optimized: false };
     }
 
     for (let attempt = 0; attempt < 7; attempt += 1) {
-      const { canvas } = draw(decoded, dimensions.width, dimensions.height);
+      const { canvas } = draw(source, dimensions.width, dimensions.height);
       const sourceMayHaveAlpha = file.type !== "image/jpeg";
       const outputType = sourceMayHaveAlpha && analysis.hasTransparency ? "image/png" : "image/jpeg";
       const qualities = outputType === "image/jpeg" ? [0.88, 0.8, 0.72] : [undefined];
@@ -192,7 +222,7 @@ export async function optimizeImportedImage(file: File): Promise<OptimizedImage>
             ...sourceDimensions,
             analysis,
             originalSize: file.size,
-            optimized: candidate.size < file.size || candidate.type !== file.type || dimensions.width !== decoded.width || dimensions.height !== decoded.height,
+            optimized: Boolean(trim) || candidate.size < file.size || candidate.type !== file.type || dimensions.width !== decoded.width || dimensions.height !== decoded.height,
           };
         }
       }

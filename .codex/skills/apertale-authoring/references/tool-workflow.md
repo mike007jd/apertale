@@ -38,7 +38,7 @@ The reader may draw red marks on any spread. Read them from compact `get_project
 
 Generate in sheets, not one request per image: one dedicated portrait cover request; one 2×2 sheet per four consecutive spreads, each quadrant a complete 1.62:1 composition with no gutters, borders, or labels between quadrants; one matching 2×2 sheet of clean plates in the same order; one transparent 2×2 sheet per four cutouts, each subject complete and centred in its quadrant with padding and nothing crossing a quadrant edge. Render every sheet at 2048×1264 px or larger: each tile must be at least 1024×632 or `manage_book create` rejects it as a background. Keep the storyboard's scale in the final art: main characters fill at least a third of the spread height in the foreground, faces readable at thumbnail size. Spread counts are 4, 8, or 12, so every sheet is full.
 
-Then call `request_image_handoff` with a unique `requestId`, an `assetUse`, a concise `reason`, and `images`: one entry per file with `name` and a base64 `dataUrl` (PNG/JPEG/WebP, under 12 MB each). Give every sheet `split: true`; the page cuts it into four tiles in reading order (top-left, top-right, bottom-left, bottom-right), stores them, and returns `assets` with their ids in that order. Send one image per call and pass a long timeout, `siteTools.call("request_image_handoff", input, { timeoutMs: 180000 })`: the bytes travel inside one page evaluation, and a sheet takes several seconds to split and store. Compress before the page, not after: convert every final to WebP first, which keeps alpha for cutout sheets and is several times smaller than PNG, then base64 it. Target under 3 MB per data URL; only fall back to PNG when a WebP encoder is unavailable.
+Then call `request_image_handoff` with a unique `requestId`, an `assetUse`, a concise `reason`, and `images`: one entry per file with `name` and a base64 `dataUrl` (PNG/JPEG/WebP, under 12 MB each). Give every sheet `split: true`; the page cuts it into four tiles in reading order (top-left, top-right, bottom-left, bottom-right), stores them, and returns `assets` with their ids in that order. Send every final in one call (cover plus all sheets is a few megabytes) with a long timeout, `siteTools.call("request_image_handoff", input, { timeoutMs: 180000 })`; each call costs several seconds of host overhead, so one call beats five. The result's `assets` carry `width`, `height`, `hasMeaningfulAlpha`, and `heightAtScale1` per id, so no `detail: "assets"` refresh is needed. Compress before the page, not after: convert every final to WebP first, which keeps alpha for cutout sheets and is several times smaller than PNG, then base64 it. Target under 3 MB per data URL; only fall back to PNG when a WebP encoder is unavailable.
 
 ```python
 from PIL import Image  # Pillow has WebP on this machine; cwebp is the fallback
@@ -46,7 +46,7 @@ import base64, pathlib
 src = pathlib.Path("work/final-assets/spread-sheet-1.png")
 Image.open(src).save(src.with_suffix(".webp"), "WEBP", quality=85, method=6)  # RGBA stays RGBA
 data_url = "data:image/webp;base64," + base64.b64encode(src.with_suffix(".webp").read_bytes()).decode()
-``` Use `source-photo` for reader-supplied reference images; those join the next creation brief and share its 12-photo limit. Use `book-art` for generated covers, spread composites, clean plates, and cutouts; those enter only the reusable asset registry. Bind only the returned ids; refresh `get_project_context(detail: "assets")` to read the alpha analysis before using a tile as a cutout.
+``` Use `source-photo` for reader-supplied reference images; those join the next creation brief and share its 12-photo limit. Use `book-art` for generated covers, spread composites, clean plates, and cutouts; those enter only the reusable asset registry. Bind only the returned ids. Cutout tiles are trimmed to their subject at import, so a layer's scale means the subject's size.
 
 Only when inline bytes are impossible, call without `images`: the drawer and drop target open and the call returns at once. Then use Computer Use or a browser file chooser when available; otherwise open the actual asset directory (normally `work/final-assets`) in the user's file manager and ask the reader once to drag its files onto the visible target. After import, refresh `get_project_context(detail: "assets")`. Do not claim success until those ids appear.
 
@@ -79,7 +79,12 @@ The only supported scene source is a validated browser-local or bundled asset id
 
 Before importing a cutout, inspect the actual pixels rather than trusting the file extension: the subject must be visible, complete, and padded; the background must be genuinely transparent; the edge must not contain a rectangular matte, chroma spill, detached crop fragments, or a baked glow intended to be supplied by the runtime hover effect. Reject and regenerate failed output.
 
-The renderer places illustrated layers in one full-spread stage and maps the composition onto both paper pages. `transform.x` and `transform.y` are stage coordinates, not DOM positions. Compose around the gutter and verify interaction hit targets after placement.
+The renderer places illustrated layers in one full-spread stage and maps the composition onto both paper pages. Place each layer once, from the storyboard body ellipse of that subject (centre `cx, cy`, height `eh` in spread coordinates) and the handoff result:
+
+- `page = cx < 0.5 ? "left" : "right"`, `transform.x = (cx − (page === "right" ? 0.5 : 0)) × 2`, `transform.y = cy`;
+- `scaleX = scaleY = min(1.8, eh ÷ heightAtScale1)` where `heightAtScale1` came back with the cutout's asset id (its longer side is one world unit on a 5.18-unit-tall page).
+
+Cutouts are trimmed to their subject at import, so this lands the subject at the size it was drawn. Do not iterate placement with patches and screenshots; one `set_presentation` per spread is the verification.
 
 Interaction vocabulary:
 

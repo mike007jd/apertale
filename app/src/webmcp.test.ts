@@ -1559,7 +1559,7 @@ describe("WebMCP registration", () => {
       assetIds: [localAssetId(900), localAssetId(901)],
       counts: { accepted: 2, rejected: 0, failed: 0 },
       assets: [
-        { id: localAssetId(900), name: "cover.png" },
+        { id: localAssetId(900), name: "cover.png", hasMeaningfulAlpha: false, heightAtScale1: 0.1931 },
         { id: localAssetId(901), name: "spread-sheet.png" },
       ],
     });

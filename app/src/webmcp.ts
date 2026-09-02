@@ -2,6 +2,7 @@ import { bookEngine } from "./bookEngine";
 import { BoundedMap } from "./boundedMap";
 import { getAssetMetadata, listAssetMetadata, storeLocalImages } from "./assetStore";
 import { dataUrlToFile, splitImageGrid } from "./imageOptimizer";
+import { stageHeightAtScale1 } from "./stageGeometry";
 import {
   backgroundAssetUseIssues,
   backgroundPairAssetRoleIssues,
@@ -1561,8 +1562,15 @@ export function registerWebMcpTools(
             return remember(requestId, {
               ...outcome,
               assetUse,
-              assets: batch.assets.map((asset) => ({ id: asset.id, name: asset.name, width: asset.width, height: asset.height })),
-              after: "Bind only these ids; refresh get_project_context(detail: \"assets\") to see alpha analysis before using a tile as a cutout.",
+              assets: batch.assets.map((asset) => ({
+                id: asset.id,
+                name: asset.name,
+                width: asset.width,
+                height: asset.height,
+                hasMeaningfulAlpha: asset.analysis?.hasMeaningfulAlpha === true,
+                heightAtScale1: asset.width && asset.height ? stageHeightAtScale1(asset.width, asset.height) : null,
+              })),
+              after: "Bind only these ids; no assets refresh is needed. Cutouts are trimmed to their subject: place a layer at the storyboard body ellipse (page from cx < 0.5, x = (cx − pageOffset) × 2, y = cy) with scaleX = scaleY = wanted spread-height fraction ÷ heightAtScale1, at most 1.8.",
             });
           }
           const pendingOutcome = requestImageHandoff({ requestId, assetUse, reason });

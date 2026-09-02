@@ -435,11 +435,11 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "handoff-before-refer",
-      rule: "Hand off reader references with request_image_handoff assetUse source-photo and generated finals with assetUse book-art. Prefer the images argument: compress each final to WebP (alpha kept, under 3 MB) before base64, pass one image per call as a data URL, and give every sheet split: true, so the page stores the four tiles in reading order and returns their ids at once. Only when inline bytes are impossible, call without images to open the drop target. Refresh get_project_context(detail: assets) before referring to those ids.",
+      rule: "Hand off reader references with request_image_handoff assetUse source-photo and generated finals with assetUse book-art. Prefer the images argument: compress each final to WebP (alpha kept, under 3 MB) before base64, pass every final in one call as data URLs (a few megabytes in total), and give every sheet split: true, so the page stores the four tiles in reading order and returns their ids, sizes, hasMeaningfulAlpha, and heightAtScale1 at once; no assets refresh is needed. Only when inline bytes are impossible, call without images to open the drop target, then refresh get_project_context(detail: assets).",
     },
     {
       id: "layout",
-      rule: `Hand off the complete final asset set, keep the deduplicated reader-visible cover, resolved final bases, rendered layers, and frames at or below ${MAX_BOOK_PUBLISHABLE_ASSETS}, then atomically create with coverAssetId, every spread's background, and the layer count selected in creationBrief.interactionDensity. Author-only source provenance stays private unless selected for rendering. Never create a text-only shell or overwrite a curated sample; set-cover and patch are later critique fixes only.`,
+      rule: `Hand off the complete final asset set, keep the deduplicated reader-visible cover, resolved final bases, rendered layers, and frames at or below ${MAX_BOOK_PUBLISHABLE_ASSETS}, then atomically create with coverAssetId, every spread's background, and the layer count selected in creationBrief.interactionDensity. Place each layer once, from the storyboard: cutouts are trimmed to their subject at import, so page = left when the body ellipse centre cx < 0.5 else right, transform.x = (cx − pageOffset) × 2, transform.y = cy, scaleX = scaleY = the ellipse height ÷ the asset's heightAtScale1 (at most 1.8); do not iterate placement with patches and screenshots. Author-only source provenance stays private unless selected for rendering. Never create a text-only shell or overwrite a curated sample; set-cover and patch are later critique fixes only.`,
     },
     {
       id: "interaction",

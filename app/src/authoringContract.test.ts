@@ -237,7 +237,7 @@ describe("site-native authoring guide contract", () => {
     expect(byId.layout).toMatch(/at or below 50/i);
     expect(guide.revisions).toMatch(/presentation pending.*same requestId/i);
     expect(byId["handoff-before-refer"]).toMatch(/assetUse book-art/i);
-    expect(byId["handoff-before-refer"]).toMatch(/before referring/i);
+    expect(byId["handoff-before-refer"]).toMatch(/no assets refresh is needed/i);
     expect(byId.layout).toMatch(/atomically create with coverAssetId/i);
     expect(byId.layout).toMatch(/text-only shell/i);
     expect(byId.interaction).toMatch(/spread-specific/i);
@@ -270,6 +270,8 @@ describe("site-native authoring guide contract", () => {
     expect(byId["plan-art"]).toMatch(/at least 0\.3 of the spread height/);
     expect(byId["imagegen-before-create"]).toMatch(/2048×1264/);
     expect(byId["handoff-before-refer"]).toMatch(/images argument.*split: true/);
+    expect(byId["handoff-before-refer"]).toMatch(/heightAtScale1.*no assets refresh/);
+    expect(byId["layout"]).toMatch(/scaleX = scaleY = the ellipse height ÷ the asset's heightAtScale1/);
     expect(guide.verify).toEqual(expect.arrayContaining([
       expect.stringMatching(/content/i),
       expect.stringMatching(/asset counts/i),

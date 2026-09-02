@@ -40,6 +40,13 @@ describe("image alpha analysis", () => {
     });
   });
 
+  it("reports the box around the visible pixels so a cutout can be trimmed to its subject", () => {
+    const data = new Uint8ClampedArray(4 * 20 * 10);
+    for (let y = 2; y < 6; y += 1) for (let x = 5; x < 15; x += 1) data[(y * 20 + x) * 4 + 3] = 255;
+    expect(summarizeAlphaPixels(data, 20, 10).visibleBounds).toEqual({ x: 0.25, y: 0.2, w: 0.5, h: 0.4 });
+    expect(summarizeAlphaPixels(new Uint8ClampedArray(4 * 20 * 10), 20, 10).visibleBounds).toBeUndefined();
+  });
+
   it("rejects opaque mattes and empty transparent canvases", () => {
     expect(summarizeAlphaPixels(pixels(20, 20, () => 255), 20, 20)).toMatchObject({
       hasTransparency: false,
