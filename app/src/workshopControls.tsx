@@ -94,6 +94,7 @@ export function StoryPencilControls({
   active,
   annotationCount,
   annotationLimit,
+  lastMark,
   onPrevious,
   onNext,
   onToggle,
@@ -106,6 +107,8 @@ export function StoryPencilControls({
   active: boolean;
   annotationCount: number;
   annotationLimit: number;
+  /** How Codex will read the stroke just drawn, e.g. "Right page · loop · boat". */
+  lastMark?: string;
   onPrevious: () => void;
   onNext: () => void;
   onToggle: () => void;
@@ -115,6 +118,8 @@ export function StoryPencilControls({
   // At the limit the pencil stops rather than forgetting the oldest mark.
   const full = annotationCount >= annotationLimit;
   return (
+    <>
+    {lastMark && <span key={lastMark} className="story-pencil-read" role="status">{lastMark}</span>}
     <div className="story-pencil-controls" aria-label="Storyboard pages and correction pencil">
       <button type="button" onClick={onPrevious} disabled={index === 0} aria-label="Previous storyboard spread">
         <ArrowLeft size={18} weight="bold" />
@@ -148,5 +153,6 @@ export function StoryPencilControls({
         </button>
       )}
     </div>
+    </>
   );
 }

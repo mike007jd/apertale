@@ -1427,6 +1427,32 @@ summary:focus-visible {
 .story-pencil-beat small { color: var(--accent); font-size: var(--text-caption); font-weight: var(--weight-strong); letter-spacing: var(--track-caps); text-transform: uppercase; }
 .story-pencil-beat strong { overflow: hidden; font-family: var(--font-display); font-size: var(--text-body); font-weight: var(--weight-text); text-overflow: ellipsis; white-space: nowrap; }
 
+/* The reader's stroke, read back the way Codex will read it. */
+.story-pencil-read {
+  position: absolute;
+  z-index: 5;
+  right: 428px;
+  bottom: 92px;
+  border-radius: var(--radius-pill);
+  padding: 9px 14px;
+  color: #e64a3d;
+  background: color-mix(in srgb, var(--surface-strong) 94%, transparent);
+  box-shadow: var(--elev-2);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-strong);
+  pointer-events: none;
+  animation: story-pencil-read-out 3s linear both;
+}
+
+@keyframes story-pencil-read-out {
+  0%, 80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .story-pencil-read { animation: none; }
+}
+
 .story-pencil-notice {
   position: absolute;
   z-index: 5;
@@ -1940,6 +1966,7 @@ summary:focus-visible {
   .stage.is-creation-workshop.has-storyboard .book-scene { inset: 0 360px 0 0; opacity: 1; }
   .app-shell:has(.stage.has-storyboard) .workshop-sheet { right: 12px; left: auto; width: 340px; margin: 0; }
   .story-pencil-controls { right: 372px; bottom: 16px; left: 16px; }
+  .story-pencil-read { right: 372px; bottom: 80px; }
 }
 
 @media (max-width: 880px) {
@@ -1976,6 +2003,7 @@ summary:focus-visible {
     left: max(10px, env(safe-area-inset-left));
     grid-template-columns: 40px minmax(0, 1fr) 40px 44px auto;
   }
+  .story-pencil-read { right: max(10px, env(safe-area-inset-right)); bottom: 64px; }
   .story-pencil-controls button { min-width: 40px; height: 40px; }
   .story-pencil-controls .story-pencil-toggle { width: 44px; padding: 0; }
   .story-pencil-toggle span { display: none; }
