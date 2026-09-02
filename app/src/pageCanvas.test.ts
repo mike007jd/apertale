@@ -45,6 +45,7 @@ describe("paintWorkshopDrawing", () => {
   function recordingCanvas() {
     const strokes: { color: string; width: number; segments: number; alpha: number }[] = [];
     const texts: { text: string; alpha: number }[] = [];
+    const positions: { text: string; x: number; y: number }[] = [];
     const drawn: unknown[] = [];
     const order: string[] = [];
     const pencils: string[] = [];
@@ -65,11 +66,12 @@ describe("paintWorkshopDrawing", () => {
       moveTo: () => undefined,
       lineTo: () => { segments += 1; },
       stroke() { order.push("stroke"); strokes.push({ color: String(this.strokeStyle), width: Number(this.lineWidth), segments, alpha: Number(this.globalAlpha) }); },
-      fillText(text: string) { texts.push({ text, alpha: Number(this.globalAlpha) }); },
+      fillText(text: string, x: number, y: number) { texts.push({ text, alpha: Number(this.globalAlpha) }); positions.push({ text, x, y }); },
     };
     const canvas = { width: 200, height: 100, getContext: () => context };
-    return { strokes, texts, drawn, order, pencils, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
+    return { strokes, texts, positions, drawn, order, pencils, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
   }
+  const LIGHT = "rgba(64, 58, 50, .36)";
   const line = (n: number) => ({ kind: "line" as const, points: Array.from({ length: n }, (_, index) => ({ x: index / (n - 1), y: 0.5 })) });
   const spread = (marks: StoryboardSpread["marks"], annotations: StoryboardSpread["annotations"] = []): StoryboardSpread => ({ index: 0, caption: "", sketchRevision: 1, marks, annotations });
 
@@ -103,15 +105,60 @@ describe("paintWorkshopDrawing", () => {
       { kind: "label", x: 0.5, y: 0.1, text: "harbour", size: "l" },
     ];
     paintWorkshopDrawing(pair, spread(marks), [], 1);
-    // Box outline, arrow shaft, arrow head: three stroked paths.
-    expect(strokes).toHaveLength(3);
+    // Box outline, its lighter second pass, arrow shaft, arrow head.
+    expect(strokes.map((item) => item.width)).toEqual([6.5, 4, 5.5, 5.5]);
     expect(strokes[0].segments).toBe(7);
+    expect(strokes[1].color).toBe(LIGHT);
     expect(texts.map((item) => item.text)).toEqual(["boat", "harbour"]);
 
     const partial = recordingCanvas();
     paintWorkshopDrawing(partial.pair, spread(marks), [], 2.5 / 3);
     // The label's own turn is half way: it fades in and no box label is skipped.
     expect(partial.texts).toEqual([{ text: "boat", alpha: 1 }, { text: "harbour", alpha: 0.5 }]);
+  });
+
+  it("goes round an ellipse twice and hatches its shadow side only once the outline is complete", () => {
+    const ellipse: StoryboardSpread["marks"][number] = { kind: "ellipse", x: 0.2, y: 0.2, w: 0.4, h: 0.4, label: "sun" };
+    const done = recordingCanvas();
+    paintWorkshopDrawing(done.pair, spread([ellipse]), [], 1);
+    expect(done.strokes.map((item) => item.segments)).toEqual([43, 43, 7]);
+    expect(done.strokes.map((item) => item.color === LIGHT)).toEqual([false, true, true]);
+
+    const half = recordingCanvas();
+    paintWorkshopDrawing(half.pair, spread([ellipse]), [], 0.5);
+    expect(half.strokes.map((item) => item.segments)).toEqual([21]);
+    expect(half.strokes[0].color).not.toBe(LIGHT);
+  });
+
+  it("writes shape labels inside the shape: rect top-left, ellipse centre", () => {
+    const { positions, pair } = recordingCanvas();
+    paintWorkshopDrawing(pair, spread([
+      { kind: "rect", x: 0.1, y: 0.1, w: 0.3, h: 0.3, label: "boat" },
+      { kind: "ellipse", x: 0.2, y: 0.2, w: 0.4, h: 0.4, label: "sun" },
+    ]), [], 1);
+    expect(positions).toEqual([{ text: "boat", x: 30, y: 18 }, { text: "sun", x: 80, y: 40 }]);
+  });
+
+  it("reveals a rich spread back to front without double counting the overdraw", () => {
+    const marks: StoryboardSpread["marks"] = [
+      ...Array.from({ length: 6 }, (_, i) => ({ ...line(5), label: `m${i}` })),
+      ...Array.from({ length: 6 }, (_, i) => ({ kind: "ellipse" as const, x: 0.1 * i, y: 0.3, w: 0.08, h: 0.1, label: `m${6 + i}` })),
+      ...Array.from({ length: 6 }, (_, i) => ({ kind: "rect" as const, x: 0.1 * i, y: 0.5, w: 0.08, h: 0.1, label: `m${12 + i}` })),
+      ...Array.from({ length: 5 }, (_, i) => ({ kind: "arrow" as const, from: { x: 0.1 * i, y: 0.7 }, to: { x: 0.1 * i + 0.05, y: 0.8 }, label: `m${18 + i}` })),
+      { kind: "label", x: 0.6, y: 0.1, text: "m23", size: "l" },
+    ];
+    const mid = recordingCanvas();
+    paintWorkshopDrawing(mid.pair, spread(marks), [], 12.5 / 24);
+    // Marks 0–11 complete (6 lines, 6 ellipses × 3 passes), mark 12 half drawn under the pencil.
+    expect(mid.texts.map((item) => item.text)).toEqual(Array.from({ length: 12 }, (_, i) => `m${i}`));
+    expect(mid.strokes).toHaveLength(6 + 18 + 1);
+    expect(mid.pencils.length).toBeGreaterThan(0);
+
+    const done = recordingCanvas();
+    paintWorkshopDrawing(done.pair, spread(marks), [], 1);
+    expect(done.texts.map((item) => item.text)).toEqual(Array.from({ length: 24 }, (_, i) => `m${i}`));
+    expect(done.strokes).toHaveLength(6 * 1 + 6 * 3 + 6 * 2 + 5 * 2);
+    expect(done.pencils).toEqual([]);
   });
 
   it("draws the in-progress red mark from the live draft", () => {
@@ -131,7 +178,7 @@ describe("paintWorkshopDrawing", () => {
     paintWorkshopDrawing(pair, spread(marks), [], 1);
     expect(drawn).toHaveLength(1);
     expect((drawn[0] as HTMLImageElement).naturalWidth).toBe(400);
-    expect(order).toEqual(["stroke", "image:0.4:grayscale(1) contrast(1.35)", "stroke"]);
+    expect(order).toEqual(["stroke", "stroke", "image:0.4:grayscale(1) contrast(1.35)", "stroke", "stroke"]);
   });
 
   it("leaves the plain pencil box when the photo lease fails", async () => {
@@ -143,7 +190,8 @@ describe("paintWorkshopDrawing", () => {
     paintWorkshopDrawing(pair, spread(marks), [], 1);
     expect(getSketchImageVersion()).toBe(before);
     expect(drawn).toEqual([]);
-    expect(strokes).toHaveLength(2);
+    // Two paints × (outline + lighter second pass).
+    expect(strokes).toHaveLength(4);
   });
 
   it("fades the finished plan over the loaded overlay and leaves the overlay alone at alpha 0", () => {

@@ -266,6 +266,7 @@ describe("site-native authoring guide contract", () => {
     expect(guide.cutouts.oneSubjectPerAsset).toBe(true);
     expect(guide.cutouts.sheet).toMatch(/2x2/);
     expect(byId["imagegen-before-create"]).toMatch(/2×2 sheet per four consecutive spreads/);
+    expect(byId["plan-art"]).toMatch(/16–30 marks.*back to front/);
     expect(byId["handoff-before-refer"]).toMatch(/images argument.*split: true/);
     expect(guide.verify).toEqual(expect.arrayContaining([
       expect.stringMatching(/content/i),

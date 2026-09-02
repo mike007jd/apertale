@@ -482,7 +482,7 @@ const markLabel = { type: "string", maxLength: MAX_LABEL_LENGTH, description: "S
 
 const storyboardMarkSchema = {
   type: "object",
-  description: "One pencil mark. Spread coordinates: x 0 = left page outer edge, 0.5 = gutter, 1 = right page outer edge; y 0 = top, 1 = bottom.",
+  description: "One pencil mark in spread coordinates: x 0 = left edge, 0.5 = gutter, 1 = right edge; y 0 = top, 1 = bottom. Shape labels sit inside the shape.",
   oneOf: [
     {
       properties: {
@@ -539,7 +539,7 @@ const storyboardSpreadSchema = {
       type: "array",
       maxItems: MAX_MARKS_PER_SPREAD,
       items: storyboardMarkSchema,
-      description: "Labelled regions first (rect/ellipse), then arrows and text; freehand lines only for shapes the vocabulary lacks.",
+      description: "16–30 marks back to front: horizon, contours, background masses, props, characters as head + body ellipses with limbs, motion lines, arrow, text rect.",
     },
   },
   required: ["index", "marks"],
@@ -1436,7 +1436,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.storyboard,
         title: "Sketch storyboards",
-        description: "Draw a labelled pencil storyboard on the blank 3D book, then revise only the spreads the reader marked in red and clear the applied marks.",
+        description: "Pencil an illustrator's thumbnail per spread (16–30 marks, back to front) on the blank 3D book, then revise only the spreads the reader marked in red.",
         inputSchema: {
           type: "object",
           properties: {

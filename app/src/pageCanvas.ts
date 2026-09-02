@@ -26,6 +26,9 @@ const PENCIL_WOOD = "#e8b04c";
 const PENCIL_DARK = "rgba(38, 34, 30, .95)";
 const PENCIL_ERASER = "#d8615a";
 const RED_PENCIL = "rgba(230, 74, 61, .94)";
+const PENCIL_LIGHT = "rgba(64, 58, 50, .36)";
+/** Construction lines thin, subjects heavy; a shape's second pass and hatching thinner still. */
+const MARK_WIDTH = { line: 4.5, arrow: 5.5, rect: 6.5, ellipse: 6.5, label: 6.5 } as const;
 const HAND_FONT = "\"Marker Felt\", \"Chalkboard SE\", \"Bradley Hand\", \"Segoe Print\", \"Comic Sans MS\", cursive";
 const LABEL_PX = { s: 36, m: 48, l: 64 } as const;
 const MARK_LABEL_PX = 34;
@@ -95,6 +98,18 @@ function markPath(mark: StoryboardMark, width: number, height: number): Storyboa
   }
 }
 
+/** One zigzag across an ellipse's lower-right quadrant: the shadow side when light comes from the top-left. */
+function hatchPath(mark: Extract<StoryboardMark, { kind: "ellipse" }>, width: number, height: number): StoryboardPoint[] {
+  const cx = (mark.x + mark.w / 2) * width; const cy = (mark.y + mark.h / 2) * height;
+  const rx = mark.w / 2 * width; const ry = mark.h / 2 * height;
+  const at = (angle: number) => ({ x: cx + Math.cos(angle) * rx, y: cy + Math.sin(angle) * ry });
+  return Array.from({ length: 4 }, (_, index) => {
+    const angle = 0.08 + index * 0.15;
+    const pair = [at(angle), at(Math.PI / 2 - angle)];
+    return index % 2 ? pair.reverse() : pair;
+  }).flat();
+}
+
 function paintArrowHead(context: CanvasRenderingContext2D, from: StoryboardPoint, to: StoryboardPoint) {
   const angle = Math.atan2(to.y - from.y, to.x - from.x);
   const size = 22;
@@ -130,15 +145,36 @@ function paintMark(context: CanvasRenderingContext2D, mark: StoryboardMark, widt
     context.drawImage(ghost, crop.x, crop.y, crop.width, crop.height, l, t, w, h);
     context.restore();
   }
+  context.strokeStyle = PENCIL;
+  context.lineWidth = MARK_WIDTH[mark.kind];
   const tip = tracePath(context, path, progress, seed);
   if (progress < 1) return tip;
   if (mark.kind === "arrow") paintArrowHead(context, path[1], path[2]);
+  if (mark.kind === "rect" || mark.kind === "ellipse") {
+    // A rough goes round twice: a lighter pass with its own wobble, then hatching on a mass's shadow side.
+    // ponytail: every ellipse is hatched bottom-right; add an optional shade field if the Agent needs control.
+    context.strokeStyle = PENCIL_LIGHT;
+    context.lineWidth = 4;
+    tracePath(context, path, 1, seed + 37);
+    if (mark.kind === "ellipse") tracePath(context, hatchPath(mark, width, height), 1, seed + 53);
+    context.strokeStyle = PENCIL;
+  }
   if (mark.label) {
-    const anchor = mark.kind === "arrow" ? path[1] : path[0];
+    // Shape labels sit inside the shape, so a box at the page edge never spills its name into the title band.
     context.save();
     context.font = `${MARK_LABEL_PX}px ${HAND_FONT}`;
-    context.textBaseline = "bottom";
-    context.fillText(mark.label, anchor.x + 6, anchor.y - 6);
+    if (mark.kind === "rect") {
+      context.textBaseline = "top";
+      context.fillText(mark.label, mark.x * width + 10, mark.y * height + 8);
+    } else if (mark.kind === "ellipse") {
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(mark.label, (mark.x + mark.w / 2) * width, (mark.y + mark.h / 2) * height);
+    } else {
+      const anchor = mark.kind === "arrow" ? path[1] : path[0];
+      context.textBaseline = "bottom";
+      context.fillText(mark.label, anchor.x + 6, anchor.y - 6);
+    }
     context.restore();
   }
   return null;
@@ -196,7 +232,6 @@ function paintSketch(context: CanvasRenderingContext2D, spread: StoryboardSpread
   context.lineJoin = "round";
   context.strokeStyle = PENCIL;
   context.fillStyle = PENCIL;
-  context.lineWidth = 6.5;
   const marks = spread?.marks ?? [];
   // At most one mark is mid-stroke at a time; the pencil sits on its live end.
   let pencil: StoryboardPoint | null = null;

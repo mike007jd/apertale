@@ -19,14 +19,18 @@ Read the returned capabilities as a runtime contract. In particular, use `full-s
 
 ## 2. Sketch the storyboard before final art
 
-Call `sketch_storyboard(action: "replace")` once with every planned spread: a short `caption` and 4–10 `marks`. Spread coordinates run x 0 → 1 from the left page's outer edge through the gutter at 0.5 to the right page's outer edge, and y 0 → 1 top to bottom. Plan in labelled regions, not freehand:
+Call `sketch_storyboard(action: "replace")` once with every planned spread. Each spread is an illustrator's rough thumbnail, not a diagram: a short `caption` and 16–30 `marks` (hard cap 36; under 12 reads as an empty page). Coordinates run x 0 → 1 from the left page's outer edge through the gutter at 0.5 to the right outer edge, y 0 → 1 top to bottom. The book pencils marks in array order, so list them back to front.
 
-- `{ kind: "rect" | "ellipse", x, y, w, h, label }` for every subject and its place (`"boat"`, `"lighthouse"`, `"title"`);
-- `{ kind: "arrow", from, to, label }` for motion, gaze, or reading order;
-- `{ kind: "label", x, y, text, size }` for words on the page: the working title, a mood note, a caption placeholder;
-- `{ kind: "line", points }` only for a horizon, path, or outline the vocabulary cannot express.
+Build every spread in this order:
 
-Keep each label short and reuse the exact same word when you generate the final art, because the reader's red marks come back addressed to those labels. The blank 3D book draws the marks one after another and the workshop opens on the reader's screen; the call never waits for review.
+1. Ground: one `line` horizon or ground line across both pages (2–6 points; cross the gutter freely) and 1–2 contour `line`s (hill, shore, road, table edge; 4–12 points).
+2. Background masses: 3–5 `ellipse`/`rect` for clouds, sun or moon, trees, buildings, distant props. Label only what the story names.
+3. Midground props: 2–4 labelled `rect`/`ellipse` (`"basket"`, `"door"`).
+4. Foreground characters with gesture: per character a head `ellipse`, a body `ellipse`, and 2–3 limb or tail `line`s (2–4 points each). Label only the body ellipse with the character's name. Overlap freely.
+5. Motion and mood: 2–4 `line`s of 3–6 points (wind, speed, rain, rays, scatter); one `arrow` for the main action or gaze labelled with a verb (`"gust lifts basket"`); optionally one `arrow` labelled `"light"` from the light source.
+6. Text: one `rect` labelled `"text"` for the copy zone (usually the left page, 0.3–0.45 wide) and one `label` (size `"l"`) with the working title inside it, at least 0.06 below that rect's top edge. No other `label` marks; story beats go in `caption`.
+
+Rules: no frame rect around the page, the page is the frame. Shape labels are pencilled inside the shape (rect: top-left corner, ellipse: centre), so keep them to 1–3 words and never put a labelled shape's top-left corner inside another labelled shape's top-left corner. Reuse every label word verbatim when you generate the final art; the reader's red marks come back addressed to those labels. `line` is for what the vocabulary lacks: 2–20 points, no detailed silhouettes. The blank 3D book draws the marks one after another and the workshop opens on the reader's screen; the call never waits for review.
 
 The reader may draw red marks on any spread. Read them from compact `get_project_context` (`storyboard.spreads[].annotations`): each carries `page` (`left`, `right`, `both`), `shape` (`loop` encloses something, `stroke` underlines, crosses, or points), `bounds`, and `near`, the labels it touches. A loop around `"boat"` means change that thing; a stroke across it means remove or move it; a mark with no `near` label is a new element the reader wants there. Then call `sketch_storyboard(action: "update")` for only the marked spreads, passing the `expectedStoryboardRevision` you read together with `resolvedAnnotations` for the spreads you incorporated. A `storyboard_conflict` result means the reader drew more after your read: read again, then retry with a fresh `requestId`. Generate final compositions only after this visible plan.
 
