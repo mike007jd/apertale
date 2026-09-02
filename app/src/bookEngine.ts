@@ -222,6 +222,8 @@ type StoredLibrary = {
   authoringQuality?: Record<string, AuthoringQualityLifecycle>;
 };
 
+type ConflictCode = "revision_conflict" | "undo_conflict" | "not_found" | "locked" | "invalid";
+
 type CoordinatedOpenResult =
   | { ok: true }
   | {
@@ -488,6 +490,20 @@ export class BookEngine {
     return lifecycle ? clone(lifecycle) : null;
   }
 
+  /**
+   * The one shape a caller sees when a locked mutation could not run against
+   * the revision it named. Every coordinated entry point falls back to this,
+   * so `revision_conflict` never varies in structure between tools.
+   */
+  private revisionConflict(summary: string, currentRevision = this.documentState.revision) {
+    return {
+      ok: false as const,
+      code: "revision_conflict" as const,
+      currentRevision,
+      summary,
+    };
+  }
+
   private async coordinateLibraryMutation<T>(
     work: () => T,
     signal?: AbortSignal,
@@ -516,12 +532,7 @@ export class BookEngine {
       () => this.adoptCreationBrief(creationBrief, validatedSourceAssetIds, expectedRevision, assetRoleIssues),
       signal,
       expectedDocumentId,
-    ) ?? {
-      ok: false as const,
-      code: "revision_conflict" as const,
-      currentRevision: this.documentState.revision,
-      summary: "The saved library changed in another tab; reopen the book before attaching its creation brief.",
-    };
+    ) ?? this.revisionConflict("The saved library changed in another tab; reopen the book before attaching its creation brief.");
   }
 
   async beginQualityReviewCoordinated(expectedDocumentId: string, expectedRevision: number, signal?: AbortSignal) {
@@ -530,10 +541,7 @@ export class BookEngine {
       signal,
       expectedDocumentId,
     ) ?? {
-      ok: false as const,
-      code: "revision_conflict" as const,
-      currentRevision: this.documentState.revision,
-      summary: "The saved library changed in another tab; reopen the book before starting quality review.",
+      ...this.revisionConflict("The saved library changed in another tab; reopen the book before starting quality review."),
       qualityGate: this.getQualityGate(),
     };
   }
@@ -549,10 +557,7 @@ export class BookEngine {
       signal,
       expectedDocumentId,
     ) ?? {
-      ok: false as const,
-      code: "revision_conflict" as const,
-      currentRevision: this.documentState.revision,
-      summary: "The saved library changed in another tab; reopen the book before recording critique.",
+      ...this.revisionConflict("The saved library changed in another tab; reopen the book before recording critique."),
       qualityGate: this.getQualityGate(),
     };
   }
@@ -585,12 +590,7 @@ export class BookEngine {
         this.documentState.id !== expected.documentId
         || this.documentState.revision !== expected.revision
       )) {
-        return {
-          ok: false as const,
-          code: "revision_conflict" as const,
-          currentRevision: this.documentState.revision,
-          summary: `Expected ${expected.documentId} at revision ${expected.revision}; refresh context before opening another book.`,
-        };
+        return this.revisionConflict(`Expected ${expected.documentId} at revision ${expected.revision}; refresh context before opening another book.`);
       }
       const durableLibrary = readLibraryForLifecycleMutation(this.libraryState);
       if (!durableLibrary) {
@@ -603,12 +603,10 @@ export class BookEngine {
       if (expected) {
         const durableSource = durableLibrary.documents.find((book) => book.id === expected.documentId);
         if (!durableSource || durableSource.revision !== expected.revision) {
-          return {
-            ok: false as const,
-            code: "revision_conflict" as const,
-            currentRevision: durableSource?.revision ?? this.documentState.revision,
-            summary: `Expected ${expected.documentId} at revision ${expected.revision}; the saved library changed in another tab.`,
-          };
+          return this.revisionConflict(
+            `Expected ${expected.documentId} at revision ${expected.revision}; the saved library changed in another tab.`,
+            durableSource?.revision ?? this.documentState.revision,
+          );
         }
       }
       const target = durableLibrary.documents.find((book) => book.id === documentId);
@@ -844,7 +842,7 @@ export class BookEngine {
   private failCommand(
     requestId: string,
     source: CommandSource,
-    code: "revision_conflict" | "undo_conflict" | "not_found" | "locked" | "invalid",
+    code: ConflictCode,
     summary: string,
     elementId?: string,
   ): DocumentResult {
@@ -854,7 +852,7 @@ export class BookEngine {
     return result;
   }
 
-  private conflict(code: "revision_conflict" | "undo_conflict" | "not_found" | "locked" | "invalid", summary: string): DocumentResult {
+  private conflict(code: ConflictCode, summary: string): DocumentResult {
     return { ok: false, code, currentRevision: this.documentState.revision, summary };
   }
 
@@ -2136,17 +2134,27 @@ export class BookEngine {
 
 export const bookEngine = new BookEngine();
 
-export function humanEdit(elementId: string, transform: Partial<Transform2D>) {
+/** Stamps a human element command with a fresh request id and the live precondition. */
+function humanCommand<Command extends EditCommand | AnimateCommand | InteractCommand>(
+  partial: Omit<Command, "requestId" | "expectedDocumentId" | "expectedRevision">,
+) {
   const snapshot = bookEngine.getSnapshot();
-  return bookEngine.dispatchCoordinated({ type: "edit", requestId: freshRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId, transform }, "human");
+  return bookEngine.dispatchCoordinated({
+    ...partial,
+    requestId: freshRequestId(),
+    expectedDocumentId: snapshot.document.id,
+    expectedRevision: snapshot.document.revision,
+  } as Command, "human");
+}
+
+export function humanEdit(elementId: string, transform: Partial<Transform2D>) {
+  return humanCommand<EditCommand>({ type: "edit", elementId, transform });
 }
 
 export function humanAnimate(elementId: string, motion: AnimateCommand["motion"]) {
-  const snapshot = bookEngine.getSnapshot();
-  return bookEngine.dispatchCoordinated({ type: "animate", requestId: freshRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId, motion }, "human");
+  return humanCommand<AnimateCommand>({ type: "animate", elementId, motion });
 }
 
 export function humanInteract(elementId: string, interaction: InteractCommand["interaction"]) {
-  const snapshot = bookEngine.getSnapshot();
-  return bookEngine.dispatchCoordinated({ type: "interact", requestId: freshRequestId(), expectedDocumentId: snapshot.document.id, expectedRevision: snapshot.document.revision, elementId, interaction }, "human");
+  return humanCommand<InteractCommand>({ type: "interact", elementId, interaction });
 }

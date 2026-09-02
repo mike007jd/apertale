@@ -83,6 +83,15 @@ function requiredDocumentId(input: ToolInput) {
   return requiredString(input, "expectedDocumentId");
 }
 
+/**
+ * The single precondition check every mutating tool shares.
+ *
+ * A tool calls it once on entry and again after each `await` (asset metadata,
+ * asset-role inspection). The repeat is not redundant with the engine's own
+ * check under the library lock: it lets the tool refuse against the revision
+ * the caller named, instead of validating assets for a book that another tab
+ * replaced while the await was in flight.
+ */
 function documentPreconditionConflict(expectedDocumentId: string, expectedRevision: number) {
   const currentDocument = bookEngine.getSnapshot().document;
   if (expectedDocumentId === currentDocument.id && expectedRevision === currentDocument.revision) return null;
