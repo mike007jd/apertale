@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getSketchImageVersion, paintSketchFade, paintWorkshopDrawing, sampleCanvasLuminance, wrapText } from "./pageCanvas";
+import { getSketchImageVersion, heroCentre, paintSketchBloom, paintWorkshopDrawing, sampleCanvasLuminance, wrapText } from "./pageCanvas";
 import type { StoryboardSpread } from "./storyboard";
 
 /** Preview leases resolve for `photo-*` ids and reject for anything else; full-size leases are untouched. */
@@ -49,19 +49,23 @@ describe("paintWorkshopDrawing", () => {
     const drawn: unknown[] = [];
     const order: string[] = [];
     const pencils: string[] = [];
+    const shadows: number[] = [];
+    const gradients: number[][] = [];
     let segments = 0;
     const context = {
-      strokeStyle: "", fillStyle: "", lineWidth: 0, lineCap: "", lineJoin: "", font: "", textBaseline: "", globalAlpha: 1, filter: "none",
+      strokeStyle: "", fillStyle: "", lineWidth: 0, lineCap: "", lineJoin: "", font: "", textBaseline: "", globalAlpha: 1, filter: "none", globalCompositeOperation: "source-over",
       clearRect: () => undefined,
+      ellipse(_x: number, y: number) { shadows.push(y); },
+      createRadialGradient(...args: number[]) { gradients.push(args); return { addColorStop: () => undefined }; },
       translate: () => undefined,
       rotate: () => undefined,
       closePath: () => undefined,
       fill: () => undefined,
-      fillRect() { pencils.push(String(this.fillStyle)); },
+      fillRect() { pencils.push(this.globalCompositeOperation === "destination-out" ? "hole" : String(this.fillStyle)); },
       measureText: (text: string) => ({ width: text.length * 10 }),
       drawImage(image: unknown) { drawn.push(image); order.push(`image:${this.globalAlpha}:${this.filter}`); },
       save: () => undefined,
-      restore() { this.globalAlpha = 1; this.filter = "none"; },
+      restore() { this.globalAlpha = 1; this.filter = "none"; this.globalCompositeOperation = "source-over"; },
       beginPath: () => { segments = 0; },
       moveTo: () => undefined,
       lineTo: () => { segments += 1; },
@@ -69,7 +73,7 @@ describe("paintWorkshopDrawing", () => {
       fillText(text: string, x: number, y: number) { texts.push({ text, alpha: Number(this.globalAlpha) }); positions.push({ text, x, y }); },
     };
     const canvas = { width: 200, height: 100, getContext: () => context };
-    return { strokes, texts, positions, drawn, order, pencils, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
+    return { strokes, texts, positions, drawn, order, pencils, shadows, gradients, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
   }
   const LIGHT = "rgba(64, 58, 50, .36)";
   const line = (n: number) => ({ kind: "line" as const, points: Array.from({ length: n }, (_, index) => ({ x: index / (n - 1), y: 0.5 })) });
@@ -209,14 +213,38 @@ describe("paintWorkshopDrawing", () => {
     expect(strokes[0].color).toBe("rgba(64, 58, 50, .55)");
   });
 
-  it("fades the finished plan over the loaded overlay and leaves the overlay alone at alpha 0", () => {
-    const { strokes, drawn, pair } = recordingCanvas();
+  it("blooms the created spread out of its hero: a sketched paper veil, a growing hole, and the text fading in", () => {
+    const { strokes, drawn, pencils, gradients, pair } = recordingCanvas();
     const base = { width: 200, height: 100 } as unknown as HTMLCanvasElement;
-    paintSketchFade(pair, spread([line(4)], [line(3)]), base, 0.4);
+    const plan = spread([line(4), { kind: "ellipse", x: 0.6, y: 0.2, w: 0.2, h: 0.4, label: "bear" }, { kind: "ellipse", x: 0.1, y: 0.1, w: 0.1, h: 0.1 }]);
+    expect(heroCentre(plan)).toEqual({ x: 0.7, y: 0.4 });
+    expect(heroCentre(spread([line(2)]))).toEqual({ x: 0.5, y: 0.5 });
+
+    paintSketchBloom(pair, plan, base, 0.5);
+    // Veil first, the sketch on it at full strength, then the hole, then the text at the bloom's alpha.
+    expect(pencils[0]).toBe("#f7efdf");
+    expect(pencils.at(-1)).toBe("hole");
+    expect(strokes[0]).toMatchObject({ alpha: 1 });
+    expect(gradients).toHaveLength(1);
+    expect(gradients[0].slice(0, 2)).toEqual([140, 40]);
+    expect(gradients[0][2]).toBeLessThan(gradients[0][5]);
     expect(drawn).toEqual([base]);
-    expect(strokes.map((stroke) => stroke.alpha)).toEqual([0.4, 0.4]);
-    paintSketchFade(pair, spread([line(4)]), base, 0);
+
+    paintSketchBloom(pair, plan, base, 1);
     expect(drawn).toEqual([base, base]);
-    expect(strokes).toHaveLength(2);
+    expect(gradients).toHaveLength(1);
+    expect(pencils.filter((fill) => fill === "hole")).toHaveLength(1);
+  });
+
+  it("floats the idle pencil with its shadow when Codex is present and nothing is being drawn", () => {
+    const { pencils, shadows, pair } = recordingCanvas();
+    paintWorkshopDrawing(pair, spread([]), [], 1);
+    expect(pencils).toEqual([]);
+    paintWorkshopDrawing(pair, spread([]), [], 1, { x: 0.7, y: 0.4, hover: 0.5 });
+    expect(shadows).toEqual([40 + 15 * 0.3]);
+    expect(pencils).toContain("#e8b04c");
+    // While a mark is mid-stroke the drawing pencil wins and no shadow is cast.
+    paintWorkshopDrawing(pair, spread([line(4), line(4)]), [], 0.25, { x: 0.7, y: 0.4, hover: 0.5 });
+    expect(shadows).toHaveLength(1);
   });
 });

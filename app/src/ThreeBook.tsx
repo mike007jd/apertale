@@ -6,7 +6,7 @@ import { recordDiagnostic } from "./diagnostics";
 import { coverBoardMaterials, createCoverEndpaperCanvas, paintCoverEndpaper } from "./endpaper";
 import { BOARD_H, BOARD_T, BOARD_W, BODY_BASE, JOINT, PAGE_H, PAGE_THICKNESS, PAGE_W, buildSceneElement, createTurnLeaf, makeOpenPageGeometry, makePageMaterial, type SceneElement } from "./bookGeometry";
 import { createBookPointer, type BookPointerProps } from "./bookPointer";
-import { MARK_REVEAL_MS, MAX_REVEAL_MS, getSketchImageVersion, loadPagePairs, paintSketchFade, paintWorkshopDrawing, snapshotOverlay, type PagePair } from "./pageCanvas";
+import { MARK_REVEAL_MS, MAX_REVEAL_MS, SKETCH_BLOOM_MS, getSketchImageVersion, loadPagePairs, paintSketchBloom, paintWorkshopDrawing, snapshotOverlay, type IdlePencil, type PagePair } from "./pageCanvas";
 import { readerCameraPage, readerSinglePagePresentation, spreadFraction } from "./stageGeometry";
 import { focusTraits, frameSequenceIndex, hoverTraits, motionTraits, resolveInteraction } from "./interaction";
 import { bookCaseMatterPose, bookSpinePose, caseHandoffGroupX, resolveTurnContentPlan } from "./pageDeformation";
@@ -18,6 +18,8 @@ type Props = Omit<BookPointerProps, "annotationEnabled" | "readOnly"> & {
   renderEvidenceToken?: string;
   mode?: "reader" | "workshop";
   workshopDrawing?: { revision: number; spread?: StoryboardSpread };
+  /** Whether Codex has called a Site Tool on this page yet, and whether one is running now; the idle pencil shows it. */
+  agentState?: "absent" | "waiting" | "busy";
   annotationEnabled?: boolean;
   readOnly?: boolean;
   /**
@@ -54,10 +56,24 @@ const STATIC_OPEN = { current: 1 } as const;
 /** Surfaces with no shelf behind them open in place. */
 const NO_HANDOFF = { current: null } as const;
 
-export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader", workshopDrawing, annotationEnabled = false, readOnly = false, openProgress = STATIC_OPEN, handoffRect = NO_HANDOFF, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
+/**
+ * Where the pencil waits between strokes. Before the plan arrives it floats
+ * over the right page, breathing, and twitches while a Site Tool runs; once
+ * the plan is drawn it rests at the page corner, leaving the paper to the
+ * reader's red pencil. `now` 0 freezes the breathing for reduced quality.
+ */
+export function idlePencil(agent: "absent" | "waiting" | "busy", markCount: number, revealProgress: number, now: number): IdlePencil | undefined {
+  if (agent === "absent" || (markCount > 0 && revealProgress < 1)) return undefined;
+  if (markCount > 0) return { x: 0.86, y: 0.92, hover: 0 };
+  const breath = now ? 0.5 + 0.5 * Math.sin(now / 700) : 0.5;
+  const twitch = now && agent === "busy" ? 0.08 * Math.sin(now / 60) : 0;
+  return { x: 0.72, y: 0.42, hover: clamp01(breath * 0.8 + 0.15 + twitch) };
+}
+
+export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader", workshopDrawing, agentState = "absent", annotationEnabled = false, readOnly = false, openProgress = STATIC_OPEN, handoffRect = NO_HANDOFF, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const propsRef = useRef({ snapshot, turn, renderEvidenceToken, mode, workshopDrawing, annotationEnabled, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
-  propsRef.current = { snapshot, turn, renderEvidenceToken, mode, workshopDrawing, annotationEnabled, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
+  const propsRef = useRef({ snapshot, turn, renderEvidenceToken, mode, workshopDrawing, agentState, annotationEnabled, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure });
+  propsRef.current = { snapshot, turn, renderEvidenceToken, mode, workshopDrawing, agentState, annotationEnabled, readOnly, openProgress, handoffRect, onSelect, onHover, onMoveElement, onPageGesture, onAnnotationStroke, onPageTurnReady, onLoading, onReady, onRendered, onFailure };
   const sceneStructureKey = readerSceneStructureKey(snapshot, mode);
 
   useEffect(() => {
@@ -900,9 +916,8 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
     let lastWorkshopPaintKey = "";
     /** When each spread revision first became visible; a revisited spread never replays. */
     const revealStarts = new Map<string, number>();
-    /** The pencil plan fading off the created book's first spread; plays once per book. */
-    const SKETCH_FADE_MS = 600;
-    const sketchFadedDocuments = new Set<string>();
+    /** The created book's spreads blooming out of their pencil plans; each plays once per spread. */
+    const bloomedSpreads = new Set<string>();
     let sketchFade: { spreadId: string; spread: StoryboardSpread; base: HTMLCanvasElement; start: number; step: number } | null = null;
     let renderedEvidenceKey = "";
     let renderedEvidenceCandidate = "";
@@ -1012,32 +1027,35 @@ export function ThreeBook({ snapshot, turn, renderEvidenceToken, mode = "reader"
         const revealProgress = reduced || revealMs === 0
           ? 1
           : clamp01((frameTime - (revealStarts.get(sketchKey) ?? frameTime)) / revealMs);
-        const paintKey = `${drawing?.revision ?? 0}:${current.session.currentSpreadIndex}:${bookPointer.state.annotationDraft.length}:${Math.round(revealProgress * 60)}:${getSketchImageVersion()}`;
+        const idle = idlePencil(propsRef.current.agentState, drawing?.spread?.marks.length ?? 0, revealProgress, reduced ? 0 : frameTime);
+        const paintKey = `${drawing?.revision ?? 0}:${current.session.currentSpreadIndex}:${bookPointer.state.annotationDraft.length}:${Math.round(revealProgress * 60)}:${getSketchImageVersion()}:${idle ? `${idle.x}:${idle.hover.toFixed(2)}` : ""}`;
         if (paintKey !== lastWorkshopPaintKey) {
           lastWorkshopPaintKey = paintKey;
-          paintWorkshopDrawing(pagePair, drawing?.spread, bookPointer.state.annotationDraft, revealProgress);
+          paintWorkshopDrawing(pagePair, drawing?.spread, bookPointer.state.annotationDraft, revealProgress, idle);
         }
       } else if (pagePair) {
-        // The book Codex just created opens wearing its own pencil plan for a
-        // moment, so the reader sees the sketch become the art.
+        // Each spread of the book Codex just created opens wearing its own
+        // pencil plan, and the colour blooms out of the hero the first time
+        // the reader sees it.
         if (sketchFade && sketchFade.spreadId !== spread.id) {
           const left = pagePairs.get(sketchFade.spreadId);
-          if (left) paintSketchFade(left, sketchFade.spread, sketchFade.base, 0);
+          if (left) paintSketchBloom(left, sketchFade.spread, sketchFade.base, 1);
           sketchFade = null;
         }
         const plan = propsRef.current.workshopDrawing?.spread;
-        // Not before the loading curtain lifts, or the fade plays to nobody.
-        if (plan?.marks.length && readySent && !sketchFadedDocuments.has(current.document.id)) {
-          sketchFadedDocuments.add(current.document.id);
+        const bloomKey = `${current.document.id}:${spread.id}`;
+        // Not before the loading curtain lifts, or the bloom plays to nobody.
+        if (plan?.marks.length && readySent && !bloomedSpreads.has(bloomKey)) {
+          bloomedSpreads.add(bloomKey);
           const base = reduced ? null : snapshotOverlay(pagePair);
           if (base) sketchFade = { spreadId: spread.id, spread: plan, base, start: frameTime, step: -1 };
         }
         if (sketchFade) {
-          const progress = clamp01((frameTime - sketchFade.start) / SKETCH_FADE_MS);
-          const step = Math.round(progress * 30);
+          const progress = clamp01((frameTime - sketchFade.start) / SKETCH_BLOOM_MS);
+          const step = Math.round(progress * 48);
           if (step !== sketchFade.step) {
             sketchFade.step = step;
-            paintSketchFade(pagePair, sketchFade.spread, sketchFade.base, 1 - progress);
+            paintSketchBloom(pagePair, sketchFade.spread, sketchFade.base, progress);
           }
           if (progress >= 1) sketchFade = null;
         }

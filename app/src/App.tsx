@@ -1769,6 +1769,7 @@ export function App() {
                 : storyboard.createdDocumentId === snapshot.document.id
                   ? { revision: storyboard.revision, spread: storyboard.spreads.find((item) => item.index === snapshot.session.currentSpreadIndex) }
                   : undefined}
+              agentState={!codexFoundPage ? "absent" : agentActivity?.phase === "start" ? "busy" : "waiting"}
               annotationEnabled={showCreateGuide && storyPencilActive}
               // Preview is a reader's view, and the workshop book is a prop.
               // Neither may be dragged, and on a phone the canvas is the only

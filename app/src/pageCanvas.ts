@@ -20,6 +20,15 @@ export type PagePair = {
 /** Per-mark reveal budget: a six-mark spread is pencilled in about 1.5 s, a full one in 3.6 s, slow enough to watch the pencil work. */
 export const MARK_REVEAL_MS = 240;
 export const MAX_REVEAL_MS = 3600;
+/** The created book's colour blooms out of the hero over this long, pencil lines going where the colour arrives. */
+export const SKETCH_BLOOM_MS = 1400;
+/** Warm paper matching the page fill in `paintTypesetPage`; the bloom erodes it to show the art beneath. */
+const PAPER_VEIL = "#f7efdf";
+/** Highest the idle pencil floats above the paper, in overlay pixels. */
+const PENCIL_LIFT_PX = 30;
+
+/** Where the pencil waits when it is not drawing: normalized spread coords, `hover` 0 resting on the paper to 1 fully lifted. */
+export type IdlePencil = { x: number; y: number; hover: number };
 
 const PENCIL = "rgba(64, 58, 50, .82)";
 const PENCIL_WOOD = "#e8b04c";
@@ -193,13 +202,15 @@ export function paintWorkshopDrawing(
   spread: StoryboardSpread | undefined,
   draft: readonly StoryboardPoint[],
   sketchProgress: number,
+  idle?: IdlePencil,
 ) {
   const canvas = pair.overlay.image as HTMLCanvasElement | undefined;
   const context = canvas?.getContext("2d");
   if (!canvas || !context) return;
   const { width, height } = canvas;
   context.clearRect(0, 0, width, height);
-  paintSketch(context, spread, width, height, sketchProgress);
+  const drawing = paintSketch(context, spread, width, height, sketchProgress);
+  if (!drawing && idle) paintPencil(context, px(idle, width, height), idle.hover * PENCIL_LIFT_PX);
   if (draft.length >= 2) {
     context.strokeStyle = RED_PENCIL;
     context.lineWidth = 8;
@@ -208,10 +219,18 @@ export function paintWorkshopDrawing(
   pair.overlay.needsUpdate = true;
 }
 
-/** The pencil drawing right now: tip on the live end of the stroke, body leaning up and to the right. */
-function paintPencil(context: CanvasRenderingContext2D, tip: StoryboardPoint) {
+/** The pencil: tip on `tip`, body leaning up and to the right; lifted by `lift` pixels with its shadow left on the paper. */
+function paintPencil(context: CanvasRenderingContext2D, tip: StoryboardPoint, lift = 0) {
   context.save();
-  context.translate(tip.x, tip.y);
+  if (lift > 0) {
+    context.fillStyle = PENCIL_DARK;
+    context.globalAlpha = 0.16 * (1 - lift / (PENCIL_LIFT_PX * 2));
+    context.beginPath();
+    context.ellipse(tip.x + lift * 0.5, tip.y + lift * 0.3, 60, 9, -Math.PI / 3, 0, Math.PI * 2);
+    context.fill();
+    context.globalAlpha = 1;
+  }
+  context.translate(tip.x, tip.y - lift);
   context.rotate(-Math.PI / 3);
   context.fillStyle = PENCIL_DARK;
   context.beginPath();
@@ -231,6 +250,7 @@ function paintPencil(context: CanvasRenderingContext2D, tip: StoryboardPoint) {
   context.restore();
 }
 
+/** Paints the sketch and the reader's red marks; true while a mark is mid-stroke and the pencil is on it. */
 function paintSketch(context: CanvasRenderingContext2D, spread: StoryboardSpread | undefined, width: number, height: number, sketchProgress: number) {
   context.lineCap = "round";
   context.lineJoin = "round";
@@ -244,26 +264,56 @@ function paintSketch(context: CanvasRenderingContext2D, spread: StoryboardSpread
   context.strokeStyle = RED_PENCIL;
   context.lineWidth = 8;
   spread?.annotations.forEach((stroke) => tracePath(context, stroke.points.map((point) => px(point, width, height))));
+  return pencil !== null;
+}
+
+/** The centre of the tallest labelled ellipse (a character's body), or the spread centre when the plan has none. */
+export function heroCentre(spread: StoryboardSpread): StoryboardPoint {
+  let hero: StoryboardPoint = { x: 0.5, y: 0.5 };
+  let tallest = 0;
+  for (const mark of spread.marks) {
+    if (mark.kind !== "ellipse" || !mark.label || mark.h <= tallest) continue;
+    tallest = mark.h;
+    hero = { x: mark.x + mark.w / 2, y: mark.y + mark.h / 2 };
+  }
+  return hero;
 }
 
 /**
- * The created book's first spread wears its own pencil plan for a moment:
- * the finished overlay (typeset text) is restored from `base`, then the
- * sketch is drawn over it at `alpha`. Alpha 0 leaves the overlay as loaded.
+ * The created spread blooms out of its own pencil plan: a paper veil wearing
+ * the sketch covers the art, then a soft circle grows from the hero and erodes
+ * the veil, so colour arrives where the pencil lines go. The finished overlay
+ * (typeset text) fades in from `base`; progress 1 leaves it as loaded.
  */
-export function paintSketchFade(pair: PagePair, spread: StoryboardSpread, base: HTMLCanvasElement, alpha: number) {
+export function paintSketchBloom(pair: PagePair, spread: StoryboardSpread, base: HTMLCanvasElement, progress: number) {
   const canvas = pair.overlay.image as HTMLCanvasElement | undefined;
   const context = canvas?.getContext("2d");
   if (!canvas || !context) return;
   const { width, height } = canvas;
   context.clearRect(0, 0, width, height);
-  context.drawImage(base, 0, 0);
-  if (alpha > 0) {
+  if (progress < 1) {
     context.save();
-    context.globalAlpha = alpha;
+    context.fillStyle = PAPER_VEIL;
+    context.fillRect(0, 0, width, height);
     paintSketch(context, spread, width, height, 1);
+    if (progress > 0) {
+      const hero = px(heroCentre(spread), width, height);
+      const reach = Math.hypot(Math.max(hero.x, width - hero.x), Math.max(hero.y, height - hero.y));
+      const soft = reach * 0.3;
+      const edge = (1 - (1 - progress) ** 2) * (reach + soft);
+      const hole = context.createRadialGradient(hero.x, hero.y, Math.max(0, edge - soft), hero.x, hero.y, edge);
+      hole.addColorStop(0, "rgba(0, 0, 0, 1)");
+      hole.addColorStop(1, "rgba(0, 0, 0, 0)");
+      context.globalCompositeOperation = "destination-out";
+      context.fillStyle = hole;
+      context.fillRect(0, 0, width, height);
+    }
     context.restore();
   }
+  context.save();
+  context.globalAlpha = progress;
+  context.drawImage(base, 0, 0);
+  context.restore();
   pair.overlay.needsUpdate = true;
 }
 
