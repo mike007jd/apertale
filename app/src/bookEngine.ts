@@ -1594,7 +1594,7 @@ export class BookEngine {
         if (
           !validTransform(operation.transform)
           || (operation.kind && !["embedded", "lifted", "decoration"].includes(operation.kind))
-          || (typeof operation.depth === "number" && (operation.depth < 0 || operation.depth > 0.5))
+          || (typeof operation.depth === "number" && (operation.depth < BOOK_ELEMENT_GRAMMAR.depth.min || operation.depth > BOOK_ELEMENT_GRAMMAR.depth.max))
           || !validMotion(operation.motion)
           || !validFrameAssets(operation.frameAssetIds)
           || (operation.frameAssetIds?.length && isProceduralElement(element))
@@ -1730,7 +1730,9 @@ export class BookEngine {
     return {
       ...element,
       transform: nextTransform,
-      depth: typeof command.depth === "number" ? Math.max(0, Math.min(0.5, command.depth)) : element.depth,
+      depth: typeof command.depth === "number"
+        ? Math.max(BOOK_ELEMENT_GRAMMAR.depth.min, Math.min(BOOK_ELEMENT_GRAMMAR.depth.max, command.depth))
+        : element.depth,
       locked: typeof command.locked === "boolean" ? command.locked : element.locked,
       provenance: source,
     };
