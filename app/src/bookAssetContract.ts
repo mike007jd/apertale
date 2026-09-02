@@ -122,7 +122,7 @@ export function backgroundAssetUseIssues(
       issues.push(`${itemLabel} was imported before asset roles were recorded; re-import it through the matching image handoff.`);
     } else if (
       asset.assetUse !== "book-art"
-      && !(separation === "preserved-photo-layout" && declaredSources.has(assetId))
+      && !(separation === BOOK_ASSET_REFERENCE_RULES.sourceReuseSeparation && declaredSources.has(assetId))
     ) {
       issues.push(`${itemLabel} is a reader source photo and is not an approved preserved-photo layout source.`);
     }
@@ -247,24 +247,35 @@ export function bookAssetReferenceIssueKey(issue: BookAssetReferenceIssue) {
   return JSON.stringify(issue);
 }
 
+/**
+ * The asset-reference rule set as data: the artwork separation vocabulary, the
+ * separation that waives the composite/clean-plate split, and one message per
+ * finding code. `worker/bookAssetReferenceRules.json` is generated from this
+ * (see `scripts/sync-book-element-grammar.mjs`) so the publish boundary keeps
+ * its own traversal while both sides state these rules once.
+ */
+export const BOOK_ASSET_REFERENCE_RULES = {
+  separations: ["inpainted-clean-plate", "preserved-photo-layout"],
+  sourceReuseSeparation: "preserved-photo-layout",
+  messages: {
+    "generated-source-clean-reuse": "Spread {spread} must keep its original composite separate from its final clean plate.",
+    "cover-interior-reuse": "Spread {spread} cannot reuse the dedicated cover as interior artwork.",
+    "background-cross-spread-reuse": "Spread {spread} must use purpose-built background artwork instead of reusing asset {asset} from spread {owner}.",
+    "resting-frame-mismatch": "Spread {spread} layer {layer} must use its resting frame as assetId.",
+    "foreground-cross-layer-reuse": "Spread {spread} reuses foreground final {asset} across layers; layers must use distinct final assets.",
+    "cover-foreground-reuse": "Spread {spread} cannot reuse its cover as a foreground layer.",
+    "background-foreground-reuse": "Spread {spread} cannot reuse background asset {asset} as a foreground layer.",
+  },
+} as const;
+
 export function formatBookAssetReferenceIssue(issue: BookAssetReferenceIssue) {
-  const spreadNumber = issue.spreadIndex + 1;
-  switch (issue.code) {
-    case "generated-source-clean-reuse":
-      return `Spread ${spreadNumber} must keep its original composite separate from its final clean plate.`;
-    case "cover-interior-reuse":
-      return `Spread ${spreadNumber} cannot reuse the dedicated cover as interior artwork.`;
-    case "background-cross-spread-reuse":
-      return `Spread ${spreadNumber} must use purpose-built background artwork instead of reusing asset ${issue.assetId} from spread ${issue.ownerSpreadIndex + 1}.`;
-    case "resting-frame-mismatch":
-      return `Spread ${spreadNumber} layer ${issue.layerIndex + 1} must use its resting frame as assetId.`;
-    case "foreground-cross-layer-reuse":
-      return `Spread ${spreadNumber} reuses foreground final ${issue.assetId} across layers; layers must use distinct final assets.`;
-    case "cover-foreground-reuse":
-      return `Spread ${spreadNumber} cannot reuse its cover as a foreground layer.`;
-    case "background-foreground-reuse":
-      return `Spread ${spreadNumber} cannot reuse background asset ${issue.assetId} as a foreground layer.`;
-  }
+  const values: Record<string, string | number> = {
+    spread: issue.spreadIndex + 1,
+    ...("layerIndex" in issue ? { layer: issue.layerIndex + 1 } : {}),
+    ...("ownerSpreadIndex" in issue ? { owner: issue.ownerSpreadIndex + 1 } : {}),
+    ...("assetId" in issue ? { asset: issue.assetId } : {}),
+  };
+  return BOOK_ASSET_REFERENCE_RULES.messages[issue.code].replace(/\{(\w+)\}/gu, (_, key: string) => String(values[key]));
 }
 
 export function bookAssetReferenceFindings(manifest: BookAssetReferenceManifest) {
@@ -279,7 +290,7 @@ export function bookAssetReferenceFindings(manifest: BookAssetReferenceManifest)
     if (
       spread.background.sourceAssetId
       && spread.background.sourceAssetId === spread.background.cleanPlateAssetId
-      && spread.background.separation !== "preserved-photo-layout"
+      && spread.background.separation !== BOOK_ASSET_REFERENCE_RULES.sourceReuseSeparation
     ) {
       findings.push({
         code: "generated-source-clean-reuse",

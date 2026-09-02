@@ -1,0 +1,16 @@
+{
+  "separations": [
+    "inpainted-clean-plate",
+    "preserved-photo-layout"
+  ],
+  "sourceReuseSeparation": "preserved-photo-layout",
+  "messages": {
+    "generated-source-clean-reuse": "Spread {spread} must keep its original composite separate from its final clean plate.",
+    "cover-interior-reuse": "Spread {spread} cannot reuse the dedicated cover as interior artwork.",
+    "background-cross-spread-reuse": "Spread {spread} must use purpose-built background artwork instead of reusing asset {asset} from spread {owner}.",
+    "resting-frame-mismatch": "Spread {spread} layer {layer} must use its resting frame as assetId.",
+    "foreground-cross-layer-reuse": "Spread {spread} reuses foreground final {asset} across layers; layers must use distinct final assets.",
+    "cover-foreground-reuse": "Spread {spread} cannot reuse its cover as a foreground layer.",
+    "background-foreground-reuse": "Spread {spread} cannot reuse background asset {asset} as a foreground layer."
+  }
+}
