@@ -25,11 +25,12 @@ book engine or local state — and express that difference as the shell's
 The Book element grammar is the single source of truth for every field bound and
 closed vocabulary a book element may carry: transform ranges, depth, label
 length, frame-sequence count, motion presets and duration, reveal shape, hover
-and focus responses, and the element-id, share-token, book-id, and image-type
-patterns. The WebMCP tool catalog derives its parsers and JSON Schema from it,
-the command engine validates against it, and `worker/bookElementGrammar.json` is
-generated from it so the publish boundary keeps its own validators while sharing
-one set of constants.
+and focus responses, element kinds, pages, provenance, the spread and
+element-per-spread counts, and the element-id, share-token, book-id,
+procedural-marker, and image-type patterns. The WebMCP tool catalog derives its
+parsers and JSON Schema from it, the command engine validates against it, and
+`worker/bookElementGrammar.json` is generated from it so the publish boundary
+keeps its own validators while sharing one set of constants.
 
 ## WebMCP tool catalog
 

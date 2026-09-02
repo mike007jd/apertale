@@ -1,5 +1,15 @@
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
-import { BOOK_ELEMENT_ID_PATTERN_SOURCE, MOTION_PRESETS } from "./types";
+import {
+  BOOK_ELEMENT_ID_PATTERN_SOURCE,
+  BOOK_ELEMENT_KINDS,
+  BOOK_PAGES,
+  BOOK_PROVENANCE,
+  MAX_BOOK_SPREADS,
+  MAX_SPREAD_ELEMENTS,
+  MOTION_PRESETS,
+  PROCEDURAL_ASSET_ID_PATTERN_SOURCE,
+  PROCEDURAL_ASSET_PREFIX,
+} from "./types";
 import type { MotionSpec, RevealSpec, Transform2D } from "./types";
 
 /**
@@ -12,6 +22,11 @@ import type { MotionSpec, RevealSpec, Transform2D } from "./types";
  */
 export const BOOK_ELEMENT_GRAMMAR = {
   label: { max: 64 },
+  elementKinds: BOOK_ELEMENT_KINDS,
+  pages: BOOK_PAGES,
+  provenance: BOOK_PROVENANCE,
+  spreads: { min: 1, max: MAX_BOOK_SPREADS },
+  elementsPerSpread: { max: MAX_SPREAD_ELEMENTS },
   transform: {
     x: { min: 0, max: 1 },
     y: { min: 0, max: 1 },
@@ -34,6 +49,10 @@ export const BOOK_ELEMENT_GRAMMAR = {
   hoverResponses: HOVER_RESPONSES,
   focusResponses: FOCUS_RESPONSES,
   elementIdPatternSource: BOOK_ELEMENT_ID_PATTERN_SOURCE,
+  proceduralAsset: {
+    prefix: PROCEDURAL_ASSET_PREFIX,
+    idPatternSource: PROCEDURAL_ASSET_ID_PATTERN_SOURCE,
+  },
   tokenPatternSource: "^[A-Za-z0-9_-]{43}$",
   bookIdPatternSource: "^[0-9a-f]{8}-[0-9a-f-]{27,35}$",
   imageTypes: ["image/png", "image/jpeg", "image/webp"],

@@ -2,6 +2,27 @@
   "label": {
     "max": 64
   },
+  "elementKinds": [
+    "embedded",
+    "lifted",
+    "decoration"
+  ],
+  "pages": [
+    "left",
+    "right"
+  ],
+  "provenance": [
+    "sample",
+    "human",
+    "agent"
+  ],
+  "spreads": {
+    "min": 1,
+    "max": 12
+  },
+  "elementsPerSpread": {
+    "max": 24
+  },
   "transform": {
     "x": {
       "min": 0,
@@ -83,6 +104,10 @@
     "orbit-inspect"
   ],
   "elementIdPatternSource": "^[a-z0-9][a-z0-9-]{0,63}$",
+  "proceduralAsset": {
+    "prefix": "procedural:",
+    "idPatternSource": "^procedural:hotspot:(amber|aqua|jade|rose)$"
+  },
   "tokenPatternSource": "^[A-Za-z0-9_-]{43}$",
   "bookIdPatternSource": "^[0-9a-f]{8}-[0-9a-f-]{27,35}$",
   "imageTypes": [

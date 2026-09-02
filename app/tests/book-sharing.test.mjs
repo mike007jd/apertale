@@ -384,6 +384,18 @@ test("publishes an uploaded book and makes revocation fail closed", async () => 
   assert.equal(invalidPublishResponse.status, 400);
   assert.equal((await invalidPublishResponse.json()).code, "invalid_manifest");
 
+  for (const [field, value] of [["kind", "sticker"], ["page", "middle"], ["provenance", "model"]]) {
+    const outsideVocabulary = structuredClone(manifest);
+    outsideVocabulary.spreads[0].elements[0][field] = value;
+    const outsideVocabularyResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${manageToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ manifest: outsideVocabulary, shareToken }),
+    }));
+    assert.equal(outsideVocabularyResponse.status, 400, `${field} must stay inside the grammar vocabulary`);
+    assert.equal((await outsideVocabularyResponse.json()).code, "invalid_manifest");
+  }
+
   const missingBundledAsset = structuredClone(manifest);
   missingBundledAsset.spreads[0].elements[1].assetId = "/assets/generated/does-not-exist.png";
   const missingBundledResponse = await api.handle(new Request(`https://example.test/api/books/${draft.bookId}/publish`, {

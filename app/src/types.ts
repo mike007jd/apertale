@@ -5,6 +5,11 @@ export type ThemeId = (typeof THEME_IDS)[number];
 export type QualityTier = "balanced" | "reduced";
 /** Authoring bound shared by persistence validation, create, readiness, and the WebMCP schema. */
 export const MAX_BOOK_SPREADS = 12 as const;
+/** Authoring bound on one spread's foreground/procedural layer list. */
+export const MAX_SPREAD_ELEMENTS = 24 as const;
+export const BOOK_ELEMENT_KINDS = ["embedded", "lifted", "decoration"] as const;
+export const BOOK_PAGES = ["left", "right"] as const;
+export const BOOK_PROVENANCE = ["sample", "human", "agent"] as const;
 export const BOOK_ELEMENT_ID_PATTERN_SOURCE = "^[a-z0-9][a-z0-9-]{0,63}$" as const;
 export const BOOK_ELEMENT_ID_PATTERN = new RegExp(BOOK_ELEMENT_ID_PATTERN_SOURCE);
 export const MOTION_PRESETS = ["gentle-float", "fly-across", "water-bob", "soft-pulse", "slow-orbit"] as const;
@@ -61,20 +66,27 @@ export type InteractionSpec = {
 export type BookElement = {
   id: string;
   label: string;
-  kind: "embedded" | "lifted" | "decoration";
+  kind: (typeof BOOK_ELEMENT_KINDS)[number];
   assetId: string;
   /** Optional 2–6 frame image sequence; the first frame is the resting image. */
   frameAssetIds?: string[];
-  page: "left" | "right";
+  page: (typeof BOOK_PAGES)[number];
   transform: Transform2D;
   depth: number;
   locked: boolean;
   motion?: MotionSpec;
   interaction?: InteractionSpec;
-  provenance: "sample" | "human" | "agent";
+  provenance: (typeof BOOK_PROVENANCE)[number];
 };
 
-const PROCEDURAL_ASSET_PREFIX = "procedural:";
+export const PROCEDURAL_ASSET_PREFIX = "procedural:";
+/**
+ * The publish boundary matches procedural markers exactly; this side only
+ * classifies by prefix so an unknown tone still renders (see
+ * `bookGeometry.ts`, which falls back to amber) instead of being rejected as a
+ * malformed image asset.
+ */
+export const PROCEDURAL_ASSET_ID_PATTERN_SOURCE = "^procedural:hotspot:(amber|aqua|jade|rose)$" as const;
 
 export function isProceduralAssetId(assetId: string) {
   return assetId.startsWith(PROCEDURAL_ASSET_PREFIX);
@@ -259,7 +271,7 @@ export type ScenePatchOperation =
       label: string;
       assetId: string;
       frameAssetIds?: string[];
-      page: "left" | "right";
+      page: (typeof BOOK_PAGES)[number];
       kind?: BookElement["kind"];
       transform?: Partial<Transform2D>;
       depth?: number;

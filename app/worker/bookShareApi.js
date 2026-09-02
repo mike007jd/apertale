@@ -21,14 +21,14 @@ const MAX_ASSETS = qualityRubric.maxBookUploadedAssets;
 const MAX_SITE_BOOKS = 2_000;
 const MAX_BOOKS_PER_WINDOW = 40;
 const CREATION_WINDOW_MS = 60 * 60 * 1_000;
-const ELEMENT_KINDS = new Set(["embedded", "lifted", "decoration"]);
-const PAGES = new Set(["left", "right"]);
-const PROVENANCE = new Set(["sample", "human", "agent"]);
+const ELEMENT_KINDS = new Set(grammar.elementKinds);
+const PAGES = new Set(grammar.pages);
+const PROVENANCE = new Set(grammar.provenance);
 const MOTION_PRESETS = new Set(grammar.motion.presets);
 const HOVER_RESPONSES = new Set(grammar.hoverResponses);
 const FOCUS_RESPONSES = new Set(grammar.focusResponses);
 const REVEAL_KINDS = new Set(grammar.reveal.kinds);
-const PROCEDURAL_ASSET_PATTERN = /^procedural:hotspot:(amber|aqua|jade|rose)$/u;
+const PROCEDURAL_ASSET_PATTERN = new RegExp(grammar.proceduralAsset.idPatternSource, "u");
 const BUNDLED_ASSET_PATTERN = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._/-]{0,503}$/u;
 const BUNDLED_ASSETS = new Set(bundledAssetCatalog.assets);
 
@@ -222,8 +222,8 @@ function validateManifest(manifest) {
   if (!Number.isSafeInteger(manifest.revision) || manifest.revision < 1) {
     throw new HttpError(400, "invalid_manifest", "The book revision is invalid.");
   }
-  if (!Array.isArray(manifest.spreads) || manifest.spreads.length < 1 || manifest.spreads.length > 12) {
-    throw new HttpError(400, "invalid_manifest", "A shared book must contain 1 to 12 spreads.");
+  if (!Array.isArray(manifest.spreads) || manifest.spreads.length < grammar.spreads.min || manifest.spreads.length > grammar.spreads.max) {
+    throw new HttpError(400, "invalid_manifest", `A shared book must contain ${grammar.spreads.min} to ${grammar.spreads.max} spreads.`);
   }
 
   const references = new Set();
@@ -236,7 +236,7 @@ function validateManifest(manifest) {
     if (!isRecord(spread)) throw new HttpError(400, "invalid_manifest", message);
     assertOnly(spread, ["id", "order", "textureUrl", "artwork", "title", "body", "kicker", "elements"], message);
     assertString(spread.id, { min: 1, max: 128, message });
-    if (spreadIds.has(spread.id) || spread.order !== order || !Array.isArray(spread.elements) || spread.elements.length > 24) {
+    if (spreadIds.has(spread.id) || spread.order !== order || !Array.isArray(spread.elements) || spread.elements.length > grammar.elementsPerSpread.max) {
       throw new HttpError(400, "invalid_manifest", message);
     }
     spreadIds.add(spread.id);
