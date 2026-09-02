@@ -397,6 +397,12 @@ export function App() {
     if (!showCreateGuide) setStoryPencilActive(false);
   }, [showCreateGuide]);
 
+  const showStoryboardNotice = useCallback((notice: string) => {
+    setStoryboardNotice(notice);
+    window.clearTimeout(storyboardNoticeTimeout.current);
+    storyboardNoticeTimeout.current = window.setTimeout(() => setStoryboardNotice(null), 4200);
+  }, []);
+
   // The reader's marks vanish when Codex applies them. Say so, or the reader
   // cannot tell an applied correction from a mis-tap on Undo.
   useEffect(() => {
@@ -418,10 +424,16 @@ export function App() {
             ? `Codex sketched ${sketched.length} spread${sketched.length === 1 ? "" : "s"}`
             : null;
     if (!notice) return;
-    setStoryboardNotice(notice);
-    window.clearTimeout(storyboardNoticeTimeout.current);
-    storyboardNoticeTimeout.current = window.setTimeout(() => setStoryboardNotice(null), 4200);
-  }, [storyboard]);
+    showStoryboardNotice(notice);
+  }, [storyboard, showStoryboardNotice]);
+
+  // The agent-action toast is hidden inside the workshop, so "Codex read your
+  // marks" would vanish exactly where it matters; route it to the pencil notice.
+  useEffect(() => {
+    const action = snapshot.lastAction;
+    if (!showCreateGuide || action?.source !== "agent" || action.phase !== "success") return;
+    showStoryboardNotice(action.summary);
+  }, [showCreateGuide, showStoryboardNotice, snapshot.lastAction]);
 
   const turnPage = turnController.turnPage;
   const onPageGesture = turnController.onPageGesture;
