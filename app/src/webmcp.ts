@@ -135,16 +135,19 @@ async function inlineImageFiles(images: unknown): Promise<File[]> {
   const entries = images.map((image, index) => {
     if (!image || typeof image !== "object" || Array.isArray(image)) invalid(`images[${index}] must be an object.`);
     const entry = image as ToolInput;
-    assertOnly(entry, ["name", "dataUrl", "split"]);
-    if (typeof entry.split !== "undefined" && typeof entry.split !== "boolean") invalid(`images[${index}].split must be a boolean.`);
-    return { index, name: boundedString(entry, "name", 128), dataUrl: requiredString(entry, "dataUrl"), split: entry.split === true };
+    assertOnly(entry, ["name", "dataUrl", "split", "key"]);
+    for (const flag of ["split", "key"] as const) {
+      if (typeof entry[flag] !== "undefined" && typeof entry[flag] !== "boolean") invalid(`images[${index}].${flag} must be a boolean.`);
+    }
+    return { index, name: boundedString(entry, "name", 128), dataUrl: requiredString(entry, "dataUrl"), split: entry.split === true, key: entry.key === true };
   });
   // Count tiles before touching pixels: over-cap sheets are refused, not decoded and discarded.
   const total = entries.reduce((count, entry) => count + (entry.split ? IMAGEGEN_SHEET.tiles : 1), 0);
   if (total > MAX_BOOK_PUBLISHABLE_ASSETS) invalid(`images would store ${total} assets; the limit is ${MAX_BOOK_PUBLISHABLE_ASSETS}.`);
-  const files = await Promise.all(entries.map(async ({ index, name, dataUrl, split }) => {
+  const files = await Promise.all(entries.map(async ({ index, name, dataUrl, split, key }) => {
     const file = await dataUrlToFile(name, dataUrl).catch(() => invalid(`images[${index}].dataUrl must be a base64 PNG, JPEG, or WebP data URL.`));
-    return split ? splitImageGrid(file, IMAGEGEN_SHEET.columns, IMAGEGEN_SHEET.rows) : [file];
+    if (!split && !key) return [file];
+    return splitImageGrid(file, split ? IMAGEGEN_SHEET.columns : 1, split ? IMAGEGEN_SHEET.rows : 1, key);
   }));
   return files.flat();
 }
@@ -1502,7 +1505,9 @@ export function registerWebMcpTools(
             ok: true,
             storyboard: summarizeStoryboard(applied.storyboard),
             summary: action === "replace" ? "The complete rough storyboard is visible on the book." : "The marked spreads were revised in place.",
-            next: "Continue working. If the reader adds red marks, refresh get_project_context: a loop around a label means change that thing; a stroke across it means remove or move it. Revise only those spreads.",
+            next: action === "replace"
+              ? "Stop and end your turn now: tell the reader the pencil book is on the pages and ask them to circle changes in red or say continue. Next turn, read storyboard.spreads[].annotations from get_project_context, revise only the marked spreads, then generate art."
+              : "Continue working. If the reader adds red marks, refresh get_project_context: a loop around a label means change that thing; a stroke across it means remove or move it. Revise only those spreads.",
           });
         }),
       },
@@ -1530,6 +1535,7 @@ export function registerWebMcpTools(
                   name: { type: "string", minLength: 1, maxLength: 128, description: "File name; tiles get -1 … -4 suffixes." },
                   dataUrl: { type: "string", minLength: 32, description: "data:image/png;base64,… (or image/jpeg, image/webp)." },
                   split: { type: "boolean", description: "true for a 2×2 sheet: top-left, top-right, bottom-left, bottom-right become four assets." },
+                  key: { type: "boolean", description: "true for cutouts drawn on one flat solid colour: the backdrop sampled at each tile's corners becomes real alpha." },
                 },
                 required: ["name", "dataUrl"],
                 additionalProperties: false,

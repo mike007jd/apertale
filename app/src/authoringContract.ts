@@ -419,7 +419,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "plan-art",
-      rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Before final art, call sketch_storyboard action replace so the complete rough book appears on the blank 3D pages: per spread a caption plus 14–24 marks listed back to front that read as an illustrator's thumbnail, at most 6 of them labelled (character bodies, key props, the text rect, the action arrow; never horizon, contours, heads, limbs, motion lines, or background masses): horizon and contour lines, background masses, props, each character as head and body ellipses with limb lines, motion lines, one labelled action arrow, and a rect labelled text holding one title label, all in spread coordinates. Main characters are foreground subjects: each body ellipse spans at least 0.3 of the spread height, and the final art keeps that scale so faces stay readable after the sheet is split. When the reader supplied source photos, give the rect that will hold each photo its assetId so the pencil plan shows the photo ghosted in place. Read the reader's red marks from compact project context (each carries page, loop-or-stroke, bounds, and the labels it touches; full geometry only under detail storyboard) and update only marked spreads, clearing applied marks through resolvedAnnotations with the storyboard revision you read. Generate illustrated compositions after that visible plan; preserve source-photo geometry for preserved-photo-album.",
+      rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Before final art, call sketch_storyboard action replace so the complete rough book appears on the blank 3D pages: per spread a caption plus 14–24 marks listed back to front that read as an illustrator's thumbnail, at most 6 of them labelled (character bodies, key props, the text rect, the action arrow; never horizon, contours, heads, limbs, motion lines, or background masses): horizon and contour lines, background masses, props, each character as head and body ellipses with limb lines, motion lines, one labelled action arrow, and a rect labelled text holding one title label, all in spread coordinates. Main characters are foreground subjects: each body ellipse spans at least 0.3 of the spread height, and the final art keeps that scale so faces stay readable after the sheet is split. When the reader supplied source photos, give the rect that will hold each photo its assetId so the pencil plan shows the photo ghosted in place. Read the reader's red marks from compact project context (each carries page, loop-or-stroke, bounds, and the labels it touches; full geometry only under detail storyboard) and update only marked spreads, clearing applied marks through resolvedAnnotations with the storyboard revision you read. After the replace call, end the turn and ask the reader to circle changes in red on the pencil book or say continue; generate illustrated compositions only in a later turn after reading their marks; preserve source-photo geometry for preserved-photo-album.",
     },
     {
       id: "readiness-before-create",
@@ -427,7 +427,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "imagegen-before-create",
-      rule: "Finish every final cover and spread asset before manage_book create. Use host ImageGen for generated art in sheets, not one request per image: one dedicated portrait cover request, then one 2×2 sheet per four consecutive spreads (each quadrant a complete 1.62:1 composition, no gutters or borders between quadrants), one matching 2×2 sheet of clean plates, and one transparent 2×2 sheet per four cutouts. Render every sheet at 2048×1264 pixels or larger, so each tile is at least 1024×632 and passes the background check; smaller sheets are rejected at create. Do not reillustrate preserved-photo-album originals.",
+      rule: "Finish every final cover and spread asset before manage_book create. Use host ImageGen for generated art in sheets, not one request per image: one dedicated portrait cover request, then one 2×2 sheet per four consecutive spreads (each quadrant a complete 1.62:1 composition, no gutters or borders between quadrants), one matching 2×2 sheet of clean plates, and one 2×2 sheet per four cutouts on a flat solid magenta backdrop. Any generator size is accepted: split tiles are upscaled to at least 1024×632 at import, so ask for composition, never resize locally. Do not reillustrate preserved-photo-album originals.",
     },
     {
       id: "photo-truth",
@@ -435,7 +435,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "handoff-before-refer",
-      rule: "Hand off reader references with request_image_handoff assetUse source-photo and generated finals with assetUse book-art. Prefer the images argument: compress each final to WebP (alpha kept, under 3 MB) before base64, pass every final in one call as data URLs (a few megabytes in total), and give every sheet split: true, so the page stores the four tiles in reading order and returns their ids, sizes, hasMeaningfulAlpha, and heightAtScale1 at once; no assets refresh is needed. Only when inline bytes are impossible, call without images to open the drop target, then refresh get_project_context(detail: assets).",
+      rule: "Hand off reader references with request_image_handoff assetUse source-photo and generated finals with assetUse book-art. Prefer the images argument: compress each final to WebP (alpha kept, under 3 MB) before base64, pass every final in one call as data URLs (a few megabytes in total), and give every sheet split: true and the cutout sheet key: true, so the page stores the four tiles in reading order, keys the flat backdrop out, and returns their ids, sizes, hasMeaningfulAlpha, and heightAtScale1 at once; no assets refresh is needed. Only when inline bytes are impossible, call without images to open the drop target, then refresh get_project_context(detail: assets).",
     },
     {
       id: "layout",
@@ -447,7 +447,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "cutouts",
-      rule: "Foreground subjects must be native transparent cutouts with a real alpha channel. One ImageGen request renders up to four subjects on one transparent 2×2 sheet, each complete and centred in its own quadrant with clear padding and nothing crossing a quadrant edge; hand the sheet off with split so every stored asset holds exactly one subject.",
+      rule: "Foreground subjects must be native transparent cutouts with a real alpha channel, keyed by the page: one ImageGen request renders up to four subjects on one 2×2 sheet over a flat solid magenta backdrop (#FF00FF, no shadow or glow), each complete and centred in its own quadrant with clear padding and nothing crossing a quadrant edge; hand the sheet off with split and key so the backdrop becomes alpha and every stored asset holds exactly one subject.",
     },
     {
       id: "provenance-revision",
@@ -506,7 +506,7 @@ export function buildAuthoringGuide() {
     },
     cutouts: {
       nativeAlpha: true,
-      sheet: "2x2 transparent sheet, up to four subjects per ImageGen request, split at handoff",
+      sheet: "2x2 sheet on a flat magenta backdrop, up to four subjects per ImageGen request, split and keyed at handoff",
       oneSubjectPerAsset: true,
       reject: [
         "opaque canvas",

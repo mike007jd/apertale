@@ -9,7 +9,7 @@ Compose full-spread artwork for the stage's approximately 1.62:1 target. The 1.4
 3. Define a distinct visual beat for each spread before generating art.
 4. Generate a dedicated 2:3 portrait cover with a legible exact title and no extra copy.
 5. Generate one original purpose-built full-spread artwork for every spread, four at a time on a 2×2 sheet (plus a matching clean-plate sheet). Required counts after splitting: generated cover 1, generated full-spreads equal to the agreed spread count.
-6. Only after that art set exists, hand every sheet off inline with `split: true`, refresh the registry, and create once with the verified cover plus every spread's complete background and 2–4 layer manifest as one publishable finished book.
+6. Only after that art set exists, hand every sheet off inline with `split: true` (cutouts also `key: true`), refresh the registry, and create once with the verified cover plus every spread's complete background and 2–4 layer manifest as one publishable finished book.
 7. Plan foreground, midground, background, and interactive cutouts rather than placing one full-bleed image everywhere.
 8. For each spread, decide which parts belong in the full-spread illustration, which become isolated interactive subjects, and whether a short 2–6 frame sequence adds meaning.
 9. Add content-specific interactions and inspect both themes.
@@ -23,7 +23,7 @@ Hard rejection: placing an uploaded source photo on the right page, or using a r
 3. Plan title, dedicated generated portrait cover, every spread, and ordered provenance. Required generated-art counts: 1 cover + one original full-spread artwork per spread. Provenance entries: 1 cover + one per spread.
 4. Use host ImageGen/image editing to make those assets. Crop, isolate, or extend source photos only as references into new compositions.
 5. Keep the selected source-asset ids in the user's given order. Map each id as a reference, not as a lazy right-page placement.
-6. Only after the complete art set exists, hand the sheets off inline through `request_image_handoff(images, assetUse: "book-art")` with `split: true`; the drawer is the fallback only.
+6. Only after the complete art set exists, hand the sheets off inline through `request_image_handoff(images, assetUse: "book-art")` with `split: true` (cutouts also `key: true`); the drawer is the fallback only.
 7. Refresh the asset list, then create once with exact asset ids bound to the cover and every complete spread manifest as one publishable finished book. Preserve the person's identity and source truth in provenance; do not create while any final is missing.
 8. Use interaction to reveal captions, memories, dates, places, or facts—not to obscure the original photograph when a photo is cited as story truth.
 
@@ -38,9 +38,9 @@ Hard rejection: placing an uploaded source photo on the right page, or using a r
 
 ## Illustration-led book
 
-1. Generate four coherent spreads per 2×2 sheet at 2048×1264 px or larger, each quadrant at the 1.62:1 stage target with no gutter or border between quadrants, main characters large in the foreground (at least a third of the quadrant height, faces readable); the page splits the sheet, so never store an unsplit sheet or stretch a portrait asset.
+1. Generate four coherent spreads per 2×2 sheet at whatever size the generator returns (the page upscales tiles to 1024×632), each quadrant at the 1.62:1 stage target with no gutter or border between quadrants, main characters large in the foreground (at least a third of the quadrant height, faces readable); the page splits the sheet, so never store an unsplit sheet or stretch a portrait asset.
 2. Keep the centre gutter visually continuous and reserve copy-safe space through composition rather than a pasted-on box.
-3. Isolate only the subjects that benefit from hover, click, parallax, light, or motion, up to four per transparent 2×2 cutout sheet. Preserve the full-spread background underneath so a layer never leaves a hole.
+3. Isolate only the subjects that benefit from hover, click, parallax, light, or motion, up to four per 2×2 cutout sheet on a flat solid magenta backdrop. Preserve the full-spread background underneath so a layer never leaves a hole.
 4. Use 2–6 generated frames for lightning, wing beats, water shimmer, blooming, or another small semantic change. Keep the first frame identical to the resting composition and respect reduced motion.
 5. Pair factual interactions with a concise fact card and source. Narrative interactions should advance a beat or reveal a detail.
 

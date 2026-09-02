@@ -268,7 +268,9 @@ describe("site-native authoring guide contract", () => {
     expect(byId["imagegen-before-create"]).toMatch(/2×2 sheet per four consecutive spreads/);
     expect(byId["plan-art"]).toMatch(/14–24 marks.*back to front.*at most 6 of them labelled/);
     expect(byId["plan-art"]).toMatch(/at least 0\.3 of the spread height/);
-    expect(byId["imagegen-before-create"]).toMatch(/2048×1264/);
+    expect(byId["imagegen-before-create"]).toMatch(/upscaled to at least 1024×632/);
+    expect(byId["plan-art"]).toMatch(/end the turn and ask the reader/);
+    expect(byId.cutouts).toMatch(/magenta backdrop.*split and key/);
     expect(byId["handoff-before-refer"]).toMatch(/images argument.*split: true/);
     expect(byId["handoff-before-refer"]).toMatch(/heightAtScale1.*no assets refresh/);
     expect(byId["layout"]).toMatch(/scaleX = scaleY = the ellipse height ÷ the asset's heightAtScale1/);

@@ -219,6 +219,7 @@ describe("WebMCP registration", () => {
     }, { signal: new AbortController().signal })));
     expect(result).toMatchObject({ ok: true, storyboard: { revision: 1, spreads: [{ index: 0, marks: [{ kind: "rect", label: "guide" }, { kind: "arrow" }, { kind: "label", label: "Dawn" }, { kind: "line" }] }] } });
     expect(JSON.stringify(result.storyboard)).not.toContain("points");
+    expect(result.next).toMatch(/end your turn now.*circle changes in red/);
     expect(revealStoryboard).toHaveBeenCalledOnce();
 
     addStoryboardAnnotation(0, { points: [{ x: 0.6, y: 0.45 }, { x: 0.7, y: 0.5 }] });
@@ -1578,6 +1579,14 @@ describe("WebMCP registration", () => {
       images: [{ name: "x.png", dataUrl: "data:text/plain;base64,aGVsbG8gd29ybGQgdGhpcyBpcyBub3QgYW4gaW1hZ2U=" }],
     }, { signal: new AbortController().signal })).rejects.toThrow("images[0].dataUrl must be a base64 PNG, JPEG, or WebP data URL.");
     expect(currentImageHandoff()).toBeNull();
+    await expect(handoff.execute({
+      requestId: "handoff-inline-key",
+      assetUse: "book-art",
+      reason: "Bad key flag.",
+      images: [{ name: "cutouts.png", dataUrl: pixel, key: "yes" }],
+    }, { signal: new AbortController().signal })).rejects.toThrow("images[0].key must be a boolean.");
+    const imageSchema = (handoff.inputSchema as { properties: { images: { items: { properties: Record<string, { type: string }> } } } }).properties.images.items.properties;
+    expect(imageSchema.key.type).toBe("boolean");
     cleanup();
   });
 

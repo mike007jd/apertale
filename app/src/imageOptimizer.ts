@@ -3,6 +3,11 @@ export const MAX_SOURCE_IMAGE_BYTES = 12_000_000;
 const MAX_STORED_IMAGE_BYTES = 1_500_000;
 const MAX_STORED_IMAGE_DIMENSION = 2048;
 const ANALYSIS_MAX_DIMENSION = 512;
+/** Smallest split tile: the background check wants 1024×512 and 632 keeps the 1.62:1 stage. Generators ignore pixel-size requests, so tiles are upscaled here. */
+const MIN_TILE = { width: 1024, height: 632 };
+/** Max channel distance from the backdrop colour: at or below KEY_CLEAR a pixel is transparent, from KEY_SOLID up it is untouched. */
+const KEY_CLEAR = 16;
+const KEY_SOLID = 64;
 const TRANSPARENT_ALPHA_MAX = 8;
 const VISIBLE_ALPHA_MIN = 32;
 
@@ -60,20 +65,43 @@ export async function dataUrlToFile(name: string, dataUrl: string): Promise<File
  * Cuts one generated sheet into equal tiles in reading order. A 2×2 sheet is
  * one ImageGen request for four spreads or four cutouts; PNG sheets keep alpha.
  */
-export async function splitImageGrid(file: File, columns: number, rows: number): Promise<File[]> {
+export async function splitImageGrid(file: File, columns: number, rows: number, key = false): Promise<File[]> {
   const decoded = await decodeImage(file);
   try {
     const width = Math.floor(decoded.width / columns);
     const height = Math.floor(decoded.height / rows);
     if (width < 1 || height < 1) throw new RangeError("The sheet is too small to split.");
+    const scale = Math.max(1, MIN_TILE.width / width, MIN_TILE.height / height);
+    const tileWidth = Math.round(width * scale);
+    const tileHeight = Math.round(height * scale);
     const stem = file.name.replace(/\.[^.]+$/, "");
     // WebP keeps alpha at a fraction of PNG's size; a browser without a WebP encoder answers with PNG, and the blob says so.
     return await Promise.all(Array.from({ length: columns * rows }, (_, tile) => {
-      const { canvas } = draw(decoded, width, height, { x: (tile % columns) * width, y: Math.floor(tile / columns) * height, width, height });
+      const { canvas, context } = draw(decoded, tileWidth, tileHeight, { x: (tile % columns) * width, y: Math.floor(tile / columns) * height, width, height });
+      if (key) {
+        const image = context.getImageData(0, 0, tileWidth, tileHeight);
+        keyOutBackdrop(image.data, tileWidth, tileHeight);
+        context.putImageData(image, 0, 0);
+      }
       return encode(canvas, "image/webp", 0.92).then((blob) => new File([blob], replaceExtension(`${stem}-${tile + 1}`, blob.type), { type: blob.type }));
     }));
   } finally {
     decoded.close?.();
+  }
+}
+
+/**
+ * Turns a flat backdrop into alpha in place. The backdrop colour is the mean
+ * of the four corner pixels, so any solid colour the generator honoured works;
+ * a baked checkerboard is two colours and needs a regenerate instead.
+ */
+export function keyOutBackdrop(pixels: Uint8ClampedArray, width: number, height: number) {
+  const corners = [0, width - 1, (height - 1) * width, height * width - 1].map((pixel) => pixel * 4);
+  const [red, green, blue] = [0, 1, 2].map((channel) => corners.reduce((sum, offset) => sum + pixels[offset + channel], 0) / corners.length);
+  // ponytail: hard chroma key without despill; add edge despill if magenta fringes show on stored cutouts.
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    const distance = Math.max(Math.abs(pixels[offset] - red), Math.abs(pixels[offset + 1] - green), Math.abs(pixels[offset + 2] - blue));
+    pixels[offset + 3] = Math.round(pixels[offset + 3] * Math.min(1, Math.max(0, (distance - KEY_CLEAR) / (KEY_SOLID - KEY_CLEAR))));
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitImageDimensions, summarizeAlphaPixels } from "./imageOptimizer";
+import { fitImageDimensions, keyOutBackdrop, summarizeAlphaPixels } from "./imageOptimizer";
 
 describe("image optimization bounds", () => {
   it("preserves small images and proportionally limits large images", () => {
@@ -67,5 +67,23 @@ describe("image alpha analysis", () => {
     );
 
     expect(analysis).toMatchObject({ hasTransparency: true, hasMeaningfulAlpha: false });
+  });
+});
+
+describe("flat backdrop key-out", () => {
+  it("turns the corner colour transparent, keeps far colours opaque, and ramps near ones", () => {
+    const magenta = [255, 0, 255, 255];
+    const subject = [40, 120, 30, 255];
+    const nearMagenta = [255, 40, 255, 255];
+    // 3×3: magenta everywhere except a subject pixel in the centre and a near-magenta pixel beside it.
+    const rows = [[magenta, magenta, magenta], [magenta, subject, nearMagenta], [magenta, magenta, magenta]];
+    const pixels = new Uint8ClampedArray(rows.flat(2));
+    keyOutBackdrop(pixels, 3, 3);
+    const alpha = (x: number, y: number) => pixels[(y * 3 + x) * 4 + 3];
+    expect(alpha(0, 0)).toBe(0);
+    expect(alpha(2, 2)).toBe(0);
+    expect(alpha(1, 1)).toBe(255);
+    expect(alpha(2, 1)).toBe(128);
+    expect(Array.from(pixels.slice(16, 19))).toEqual([40, 120, 30]);
   });
 });
