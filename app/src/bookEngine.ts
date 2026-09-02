@@ -15,7 +15,8 @@ import {
   formatBookAssetReferenceIssue,
 } from "./bookAssetContract";
 import { recordDiagnostic } from "./diagnostics";
-import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS, hasAuthoredInteraction, resolveInteraction } from "./interaction";
+import { BOOK_ELEMENT_GRAMMAR, frameCountIssue, motionIssue, revealIssue, transformIssue } from "./bookElementGrammar";
+import { defaultInteraction, FOCUS_RESPONSES, HOVER_RESPONSES, hasAuthoredInteraction, resolveInteraction } from "./interaction";
 import { listProjectAssetReferences, listStoredPublishedAssetIds } from "./projectArtifact";
 import { getPublicationRecord } from "./publishingClient";
 import {
@@ -32,7 +33,7 @@ import {
   isCurrentQualityReport,
   qualityGateState,
 } from "./qualityContract";
-import { BOOK_ELEMENT_ID_PATTERN, DIRECT_MANIPULATION, MOTION_PRESETS, MAX_BOOK_SPREADS, isProceduralAssetId, isProceduralElement, spreadBaseAssetId } from "./types";
+import { BOOK_ELEMENT_ID_PATTERN, DIRECT_MANIPULATION, MAX_BOOK_SPREADS, isProceduralAssetId, isProceduralElement, spreadBaseAssetId } from "./types";
 import type {
   AuthoringQualityLifecycle,
   QualityGateState,
@@ -140,30 +141,11 @@ const clone = <T,>(value: T): T => structuredClone(value);
 
 const freshRequestId = () => crypto.randomUUID();
 
-const validTransform = (transform: Partial<Transform2D> | undefined) => !transform || Object.entries(transform).every(([field, value]) => {
-  if (typeof value !== "number" || !Number.isFinite(value)) return false;
-  if (field === "x" || field === "y") return value >= 0 && value <= 1;
-  if (field === "scaleX" || field === "scaleY") return value >= 0.3 && value <= 1.8;
-  if (field === "rotationDeg") return value >= -180 && value <= 180;
-  return false;
-});
-
-const validReveal = (reveal: RevealSpec | undefined) => !reveal || (
-  REVEAL_KINDS.includes(reveal.kind)
-  && (reveal.kind === "none" || (reveal.title.trim().length >= 1 && reveal.title.trim().length <= 100))
-  && reveal.summary.trim().length <= 500
-  && Array.isArray(reveal.facts)
-  && reveal.facts.length <= 8
-  && reveal.facts.every((fact) => fact.label.trim().length >= 1 && fact.label.trim().length <= 64 && fact.value.trim().length >= 1 && fact.value.trim().length <= 160)
-  && (typeof reveal.source === "undefined" || reveal.source.trim().length <= 200)
-);
-
-const validMotion = (motion: MotionSpec | null | undefined) => typeof motion === "undefined"
-  || motion === null
-  || (MOTION_PRESETS.includes(motion.preset)
-    && motion.durationMs >= 400
-    && motion.durationMs <= 20_000
-    && typeof motion.loop === "boolean");
+// The book element grammar owns every bound and vocabulary; these adapters keep
+// the engine's boolean call sites unchanged.
+const validTransform = (transform: Partial<Transform2D> | undefined) => !transformIssue(transform);
+const validReveal = (reveal: RevealSpec | undefined) => !revealIssue(reveal);
+const validMotion = (motion: MotionSpec | null | undefined) => !motionIssue(motion);
 
 const normalizeReveal = (reveal: RevealSpec) => ({
   kind: reveal.kind,
@@ -182,21 +164,20 @@ function materializeBookLayer(
   const validFrameAssets = typeof layer.frameAssetIds === "undefined"
     || (
       !isProceduralAssetId(layer.assetId)
-      && layer.frameAssetIds.length >= 2
-      && layer.frameAssetIds.length <= 6
+      && !frameCountIssue(layer.frameAssetIds)
       && layer.frameAssetIds[0] === layer.assetId
       && layer.frameAssetIds.every(validImageAssetId)
     );
   if (
     !BOOK_ELEMENT_ID_PATTERN.test(layer.id)
     || layer.label.trim().length < 1
-    || layer.label.trim().length > 64
+    || layer.label.trim().length > BOOK_ELEMENT_GRAMMAR.label.max
     || !["left", "right"].includes(layer.page)
     || (layer.kind && !["embedded", "lifted", "decoration"].includes(layer.kind))
     || !validAssetId(layer.assetId)
     || !validFrameAssets
     || !validTransform(layer.transform)
-    || (typeof layer.depth === "number" && (layer.depth < 0 || layer.depth > 0.5))
+    || (typeof layer.depth === "number" && (layer.depth < BOOK_ELEMENT_GRAMMAR.depth.min || layer.depth > BOOK_ELEMENT_GRAMMAR.depth.max))
     || !validMotion(layer.motion)
     || (layer.hover && !HOVER_RESPONSES.includes(layer.hover))
     || (layer.focus && !FOCUS_RESPONSES.includes(layer.focus))

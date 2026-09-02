@@ -16,10 +16,17 @@ import { isStoredAssetId } from "./assetId";
 import { IMAGE_HANDOFF_ASSET_USES, dismissImageHandoff, requestImageHandoff } from "./imageHandoff";
 import type { AuthoringSurfaceRequest } from "./authoringSurface";
 import { recordDiagnostic } from "./diagnostics";
+import {
+  BOOK_ELEMENT_GRAMMAR,
+  frameCountIssue,
+  motionSchema,
+  revealSchema,
+  transformSchema,
+} from "./bookElementGrammar";
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { listProjectAssetReferences } from "./projectArtifact";
 import { MAX_LABEL_LENGTH, MAX_MARKS_PER_SPREAD, MAX_STROKE_POINTS, applyStoryboardSketches, getStoryboardSnapshot, resetStoryboard, retireStoryboard, summarizeStoryboard, type StoryboardMark, type StoryboardPoint, type StoryboardSketchInput } from "./storyboard";
-import { BOOK_ELEMENT_ID_PATTERN, BOOK_ELEMENT_ID_PATTERN_SOURCE, MOTION_PRESETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
+import { BOOK_ELEMENT_ID_PATTERN, MOTION_PRESETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, PreparedBookBackground, PreparedBookLayer, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 import {
   QUALITY_CONTRACT_VERSION,
@@ -117,17 +124,22 @@ function pick<T extends string>(value: unknown, name: string, allowed: readonly 
   return value as T;
 }
 
+function boundedTransformField(value: ToolInput, field: keyof Transform2D) {
+  const bound = BOOK_ELEMENT_GRAMMAR.transform[field];
+  return optionalBoundedNumber(value, field, bound.min, bound.max);
+}
+
 function parseTransform(raw: unknown) {
   if (typeof raw === "undefined") return undefined;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid("transform must be an object.");
   const value = raw as ToolInput;
   assertOnly(value, ["x", "y", "scaleX", "scaleY", "rotationDeg"]);
   const transform: Partial<Transform2D> = {
-    x: optionalBoundedNumber(value, "x", 0, 1),
-    y: optionalBoundedNumber(value, "y", 0, 1),
-    scaleX: optionalBoundedNumber(value, "scaleX", 0.3, 1.8),
-    scaleY: optionalBoundedNumber(value, "scaleY", 0.3, 1.8),
-    rotationDeg: optionalBoundedNumber(value, "rotationDeg", -180, 180),
+    x: boundedTransformField(value, "x"),
+    y: boundedTransformField(value, "y"),
+    scaleX: boundedTransformField(value, "scaleX"),
+    scaleY: boundedTransformField(value, "scaleY"),
+    rotationDeg: boundedTransformField(value, "rotationDeg"),
   };
   Object.keys(transform).forEach((key) => typeof transform[key as keyof Transform2D] === "undefined" && delete transform[key as keyof Transform2D]);
   if (Object.keys(transform).length === 0) invalid("transform must include at least one field.");
@@ -141,11 +153,12 @@ function parseReveal(raw: unknown): RevealSpec | undefined {
   assertOnly(value, ["kind", "title", "summary", "facts", "source"]);
   const kind = pick<RevealKind>(value.kind, "reveal.kind", REVEAL_KINDS);
   if (!kind) invalid("reveal.kind is required.");
-  const title = boundedString(value, "title", 100, true) ?? "";
-  const summary = boundedString(value, "summary", 500, true) ?? "";
+  const reveal = BOOK_ELEMENT_GRAMMAR.reveal;
+  const title = boundedString(value, "title", reveal.title.max, true) ?? "";
+  const summary = boundedString(value, "summary", reveal.summary.max, true) ?? "";
   if (kind !== "none" && title.length === 0) invalid("reveal.title is required for a visible reveal.");
   const facts = typeof value.facts === "undefined" ? [] : value.facts;
-  if (!Array.isArray(facts) || facts.length > 8) invalid("reveal.facts must contain at most 8 facts.");
+  if (!Array.isArray(facts) || facts.length > reveal.facts.max) invalid(`reveal.facts must contain at most ${reveal.facts.max} facts.`);
   return {
     kind,
     title,
@@ -154,9 +167,9 @@ function parseReveal(raw: unknown): RevealSpec | undefined {
       if (!rawFact || typeof rawFact !== "object" || Array.isArray(rawFact)) invalid(`reveal.facts[${factIndex}] must be an object.`);
       const fact = rawFact as ToolInput;
       assertOnly(fact, ["label", "value"]);
-      return { label: boundedString(fact, "label", 64), value: boundedString(fact, "value", 160) };
+      return { label: boundedString(fact, "label", reveal.factLabel.max), value: boundedString(fact, "value", reveal.factValue.max) };
     }),
-    source: boundedString(value, "source", 200, true),
+    source: boundedString(value, "source", reveal.source.max, true),
   };
 }
 
@@ -166,16 +179,16 @@ function parseMotion(raw: unknown): MotionSpec | null | undefined {
   const value = raw as ToolInput;
   assertOnly(value, ["preset", "durationMs", "loop"]);
   const preset = pick<MotionPreset>(value.preset, "motion.preset", [...MOTION_PRESETS]);
-  const durationMs = optionalBoundedNumber(value, "durationMs", 400, 20000);
+  const durationMs = optionalBoundedNumber(value, "durationMs", BOOK_ELEMENT_GRAMMAR.motion.durationMs.min, BOOK_ELEMENT_GRAMMAR.motion.durationMs.max);
   if (!preset || !Number.isInteger(durationMs) || typeof value.loop !== "boolean") invalid("motion requires preset, integer durationMs, and loop.");
   return { preset, durationMs: Number(durationMs), loop: value.loop };
 }
 
 function parseFrames(raw: unknown): string[] | null | undefined {
   if (typeof raw === "undefined" || raw === null) return raw;
-  if (!Array.isArray(raw) || raw.length < 2 || raw.length > 6 || raw.some((item) => typeof item !== "string" || item.trim().length === 0)) {
-    invalid("frameAssetIds must contain 2–6 asset ids.");
-  }
+  if (!Array.isArray(raw)) invalid("frameAssetIds must contain 2–6 asset ids.");
+  const countIssue = frameCountIssue(raw);
+  if (countIssue) invalid(countIssue);
   return raw.map((item) => String(item));
 }
 
@@ -282,7 +295,7 @@ function parseSceneOperation(raw: unknown, index: number): ScenePatchOperation {
   const hover = pick<HoverResponse>(value.hover, "hover", HOVER_RESPONSES);
   const focus = pick<FocusResponse>(value.focus, "focus", FOCUS_RESPONSES);
   const reveal = parseReveal(value.reveal);
-  const depth = optionalBoundedNumber(value, "depth", 0, 0.5);
+  const depth = optionalBoundedNumber(value, "depth", BOOK_ELEMENT_GRAMMAR.depth.min, BOOK_ELEMENT_GRAMMAR.depth.max);
   if (typeof value.locked !== "undefined" && typeof value.locked !== "boolean") invalid("locked must be boolean.");
   const motion = parseMotion(value.motion);
   const frameAssetIds = parseFrames(value.frameAssetIds);
@@ -300,7 +313,7 @@ function parseSceneOperation(raw: unknown, index: number): ScenePatchOperation {
     return {
       op,
       id,
-      label: boundedString(value, "label", 64),
+      label: boundedString(value, "label", BOOK_ELEMENT_GRAMMAR.label.max),
       assetId,
       frameAssetIds: frameAssetIds ?? undefined,
       page,
@@ -348,55 +361,6 @@ const requiredMutation = {
 
 const requiredMutationFields = ["requestId", "expectedDocumentId", "expectedRevision"];
 
-const revealSchema = {
-  type: "object",
-  description: "Safe visible knowledge shown when the reader selects this element.",
-  properties: {
-    kind: { type: "string", enum: REVEAL_KINDS },
-    title: { type: "string", maxLength: 100 },
-    summary: { type: "string", maxLength: 500 },
-    facts: {
-      type: "array",
-      maxItems: 8,
-      items: {
-        type: "object",
-        properties: {
-          label: { type: "string", minLength: 1, maxLength: 64 },
-          value: { type: "string", minLength: 1, maxLength: 160 },
-        },
-        required: ["label", "value"],
-        additionalProperties: false,
-      },
-    },
-    source: { type: "string", maxLength: 200 },
-  },
-  required: ["kind", "title", "summary"],
-  additionalProperties: false,
-};
-
-const transformSchema = {
-  type: "object",
-  properties: {
-    x: { type: "number", minimum: 0, maximum: 1 },
-    y: { type: "number", minimum: 0, maximum: 1 },
-    scaleX: { type: "number", minimum: 0.3, maximum: 1.8 },
-    scaleY: { type: "number", minimum: 0.3, maximum: 1.8 },
-    rotationDeg: { type: "number", minimum: -180, maximum: 180 },
-  },
-  additionalProperties: false,
-};
-
-const motionSchema = {
-  type: "object",
-  properties: {
-    preset: { type: "string", enum: [...MOTION_PRESETS] },
-    durationMs: { type: "integer", minimum: 400, maximum: 20000 },
-    loop: { type: "boolean" },
-  },
-  required: ["preset", "durationMs", "loop"],
-  additionalProperties: false,
-};
-
 const preparedBackgroundSchema = {
   type: "object",
   description: "Prepared full-spread composite, final base, and optional personal-photo provenance.",
@@ -414,14 +378,14 @@ const preparedLayerSchema = {
   type: "object",
   description: "Prepared native-alpha foreground layer with an authored interaction.",
   properties: {
-    id: { type: "string", minLength: 1, maxLength: 64, pattern: BOOK_ELEMENT_ID_PATTERN_SOURCE, description: "Stable lowercase id using only letters, digits, and hyphens." },
-    label: { type: "string", minLength: 1, maxLength: 64 },
+    id: { type: "string", minLength: 1, maxLength: 64, pattern: BOOK_ELEMENT_GRAMMAR.elementIdPatternSource, description: "Stable lowercase id using only letters, digits, and hyphens." },
+    label: { type: "string", minLength: 1, maxLength: BOOK_ELEMENT_GRAMMAR.label.max },
     assetId: { type: "string", description: "Verified browser-local cutout asset." },
-    frameAssetIds: { type: "array", minItems: 2, maxItems: 6, items: { type: "string" }, description: "Optional animation frames; the first item must equal assetId and is the resting frame." },
+    frameAssetIds: { type: "array", minItems: BOOK_ELEMENT_GRAMMAR.frameAssetIds.min, maxItems: BOOK_ELEMENT_GRAMMAR.frameAssetIds.max, items: { type: "string" }, description: "Optional animation frames; the first item must equal assetId and is the resting frame." },
     page: { type: "string", enum: ["left", "right"] },
     kind: { type: "string", enum: ["embedded", "lifted", "decoration"] },
     transform: transformSchema,
-    depth: { type: "number", minimum: 0, maximum: 0.5 },
+    depth: { type: "number", minimum: BOOK_ELEMENT_GRAMMAR.depth.min, maximum: BOOK_ELEMENT_GRAMMAR.depth.max },
     locked: { type: "boolean" },
     motion: motionSchema,
     hover: { type: "string", enum: HOVER_RESPONSES },

@@ -1,10 +1,14 @@
 import qualityRubric from "./qualityRubric.json" with { type: "json" };
 import bundledAssetCatalog from "./bundledAssetCatalog.json" with { type: "json" };
+// Generated from src/bookElementGrammar.ts by scripts/sync-book-element-grammar.mjs.
+// This boundary keeps its own validators and only shares the grammar's bounds,
+// vocabularies, and patterns.
+import grammar from "./bookElementGrammar.json" with { type: "json" };
 
 const ASSET_ID_PATTERN = /^asset:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-const BOOK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f-]{27,35}$/i;
-const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const TOKEN_PATTERN = new RegExp(grammar.tokenPatternSource);
+const BOOK_ID_PATTERN = new RegExp(grammar.bookIdPatternSource, "i");
+const ALLOWED_IMAGE_TYPES = new Set(grammar.imageTypes);
 const MAX_ASSET_BYTES = 1_500_000;
 const MAX_MANIFEST_BYTES = 1_000_000;
 // Derived from the rubric so the client publication plan and this upload quota
@@ -17,10 +21,10 @@ const CREATION_WINDOW_MS = 60 * 60 * 1_000;
 const ELEMENT_KINDS = new Set(["embedded", "lifted", "decoration"]);
 const PAGES = new Set(["left", "right"]);
 const PROVENANCE = new Set(["sample", "human", "agent"]);
-const MOTION_PRESETS = new Set(["gentle-float", "fly-across", "water-bob", "soft-pulse", "slow-orbit"]);
-const HOVER_RESPONSES = new Set(["none", "lift-glow", "tilt-toward-pointer", "warm-rim"]);
-const FOCUS_RESPONSES = new Set(["none", "spotlight", "rise-and-center", "orbit-inspect"]);
-const REVEAL_KINDS = new Set(["none", "caption", "fact-card"]);
+const MOTION_PRESETS = new Set(grammar.motion.presets);
+const HOVER_RESPONSES = new Set(grammar.hoverResponses);
+const FOCUS_RESPONSES = new Set(grammar.focusResponses);
+const REVEAL_KINDS = new Set(grammar.reveal.kinds);
 const PROCEDURAL_ASSET_PATTERN = /^procedural:hotspot:(amber|aqua|jade|rose)$/u;
 const BUNDLED_ASSET_PATTERN = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._/-]{0,503}$/u;
 const BUNDLED_ASSETS = new Set(bundledAssetCatalog.assets);
@@ -128,23 +132,23 @@ function validateMotion(motion, message) {
   if (!MOTION_PRESETS.has(motion.preset) || typeof motion.loop !== "boolean") {
     throw new HttpError(400, "invalid_manifest", message);
   }
-  assertNumber(motion.durationMs, 400, 20_000, message, true);
+  assertNumber(motion.durationMs, grammar.motion.durationMs.min, grammar.motion.durationMs.max, message, true);
 }
 
 function validateReveal(reveal, message) {
   if (!isRecord(reveal)) throw new HttpError(400, "invalid_manifest", message);
   assertOnly(reveal, ["kind", "title", "summary", "facts", "source"], message);
   if (!REVEAL_KINDS.has(reveal.kind)) throw new HttpError(400, "invalid_manifest", message);
-  assertString(reveal.title, { min: reveal.kind === "none" ? 0 : 1, max: 100, message });
-  assertString(reveal.summary, { max: 500, message });
-  if (!Array.isArray(reveal.facts) || reveal.facts.length > 8) throw new HttpError(400, "invalid_manifest", message);
+  assertString(reveal.title, { min: reveal.kind === "none" ? 0 : 1, max: grammar.reveal.title.max, message });
+  assertString(reveal.summary, { max: grammar.reveal.summary.max, message });
+  if (!Array.isArray(reveal.facts) || reveal.facts.length > grammar.reveal.facts.max) throw new HttpError(400, "invalid_manifest", message);
   reveal.facts.forEach((fact) => {
     if (!isRecord(fact)) throw new HttpError(400, "invalid_manifest", message);
     assertOnly(fact, ["label", "value"], message);
-    assertString(fact.label, { min: 1, max: 64, message });
-    assertString(fact.value, { min: 1, max: 160, message });
+    assertString(fact.label, { min: 1, max: grammar.reveal.factLabel.max, message });
+    assertString(fact.value, { min: 1, max: grammar.reveal.factValue.max, message });
   });
-  if (typeof reveal.source !== "undefined") assertString(reveal.source, { max: 200, message });
+  if (typeof reveal.source !== "undefined") assertString(reveal.source, { max: grammar.reveal.source.max, message });
 }
 
 function validateInteraction(interaction, message) {
@@ -168,7 +172,7 @@ function validateElement(element, spreadNumber, references, elementIds) {
   assertString(element.id, { min: 1, max: 128, message });
   if (elementIds.has(element.id)) throw new HttpError(400, "invalid_manifest", message);
   elementIds.add(element.id);
-  assertString(element.label, { min: 1, max: 64, message });
+  assertString(element.label, { min: 1, max: grammar.label.max, message });
   if (!ELEMENT_KINDS.has(element.kind) || !PAGES.has(element.page) || !PROVENANCE.has(element.provenance) || typeof element.locked !== "boolean") {
     throw new HttpError(400, "invalid_manifest", message);
   }
@@ -176,16 +180,14 @@ function validateElement(element, spreadNumber, references, elementIds) {
   assertAssetReference(element.assetId, references);
   if (!isRecord(element.transform)) throw new HttpError(400, "invalid_manifest", message);
   assertOnly(element.transform, ["x", "y", "scaleX", "scaleY", "rotationDeg"], message);
-  assertNumber(element.transform.x, 0, 1, message);
-  assertNumber(element.transform.y, 0, 1, message);
-  assertNumber(element.transform.scaleX, 0.3, 1.8, message);
-  assertNumber(element.transform.scaleY, 0.3, 1.8, message);
-  assertNumber(element.transform.rotationDeg, -180, 180, message);
-  assertNumber(element.depth, 0, 0.5, message);
+  for (const field of ["x", "y", "scaleX", "scaleY", "rotationDeg"]) {
+    assertNumber(element.transform[field], grammar.transform[field].min, grammar.transform[field].max, message);
+  }
+  assertNumber(element.depth, grammar.depth.min, grammar.depth.max, message);
   validateMotion(element.motion, message);
   validateInteraction(element.interaction, message);
   if (typeof element.frameAssetIds !== "undefined") {
-    if (!Array.isArray(element.frameAssetIds) || element.frameAssetIds.length < 2 || element.frameAssetIds.length > 6) {
+    if (!Array.isArray(element.frameAssetIds) || element.frameAssetIds.length < grammar.frameAssetIds.min || element.frameAssetIds.length > grammar.frameAssetIds.max) {
       throw new HttpError(400, "invalid_manifest", message);
     }
     if (PROCEDURAL_ASSET_PATTERN.test(element.assetId)) {
