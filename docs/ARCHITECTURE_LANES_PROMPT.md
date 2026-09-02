@@ -128,12 +128,44 @@
 
 ---
 
-## 第二轮第二波（可选，视第一波结果与用户意愿）
+## 第二轮第二波已完成（2026-09-02 合入 main，不要重做）
 
-- **候选 4(b)** ThreeBook 命令式 scene controller：Reader shell 已稳定一轮，可以做。拥有 `src/ThreeBook.tsx` 与 `src/readerShell.ts`，只读 `bookEngine.ts`。先用 `impact` 看 `ThreeBook` 的 props 上游。
-- **候选 8** Asset registry keyed lease set：只在 lease 泄漏真的出现时做；目前无证据，默认不启动。
-- **contract 簇**（types / authoringContract / qualityContract / qualityLifecycle / bookAssetContract / creationBrief / projectArtifact / interaction）方向整理：等 G 与 H 合入后再看依赖方向图，再决定要不要开。
+| Lane | 结果 | 关键产物 / 偏差 |
+|---|---|---|
+| I · worker 手抄词汇并入 grammar | 合并（`90ffb3a`） | `types.ts` 新增 `BOOK_ELEMENT_KINDS` / `BOOK_PAGES` / `BOOK_PROVENANCE` / `MAX_SPREAD_ELEMENTS` / `PROCEDURAL_ASSET_ID_PATTERN_SOURCE`，`BookElement` 三个联合从它们派生（导出名不变）；grammar 多了 `elementKinds`、`pages`、`provenance`、`spreads {1,12}`、`elementsPerSpread {24}`、`proceduralAsset {prefix, idPatternSource}`；worker 五处常量改读 `bookElementGrammar.json`；`tests/book-sharing.test.mjs` 新增一条 JSON 词汇与 worker 拒绝一致的断言（已验证可失败）。**procedural 分歧刻意保留**：src 侧 `isProceduralAssetId` 仍用前缀（它是分类器，`impact` CRITICAL，外部导入的 `procedural:hotspot:teal` 今天能渲染），worker 仍用四 tone 全匹配；两者现在是 grammar 里并列的两个字段并带注释 |
+
+词汇放在 `types.ts` 而不是 grammar 字面量里，因为 `bookElementGrammar.ts` 已 import `types.ts`，反向会成环。
+
+---
+
+## 第三轮候选（按推荐顺序；每个都小，可以一波并行）
+
+### Lane J · `bookEngine.ts` / `webmcp.ts` 的内联词汇接 grammar
+
+Lane I 的直接后续。证据（main `90ffb3a`）：
+```
+src/bookEngine.ts:175   !["left", "right"].includes(layer.page)
+src/bookEngine.ts:176   !["embedded", "lifted", "decoration"].includes(layer.kind)
+src/bookEngine.ts:1502  command.operations.length > 24   （及 :1503 消息文本里的 1–24）
+src/bookEngine.ts:1572  elements.length >= 24
+src/bookEngine.ts:1596  !["embedded", "lifted", "decoration"].includes(operation.kind)
+src/webmcp.ts:303       optionalBoundedNumber(value, "index", 0, 23)
+src/webmcp.ts:319       pick(value.page, "page", ["left", "right"] as const)
+src/webmcp.ts:333       pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const)
+```
+拥有：`src/bookEngine.ts`、`src/webmcp.ts`（只动上述行）、两者测试。只读：`src/types.ts`、`src/bookElementGrammar.ts`（import 即可）。改法：读 `BOOK_ELEMENT_KINDS` / `BOOK_PAGES` / `MAX_SPREAD_ELEMENTS`（或 `BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max`），消息文本用模板插值。`pick(..., as const)` 的类型推断要保住，否则 `as const` 数组换成 grammar 常量时 `kind` 会退化成 `string`。停止条件：`grep -n '"embedded"\|"left", "right"\|\b24\b\|\b23\b' src/bookEngine.ts src/webmcp.ts` 只剩 `kind: "lifted"` 这类默认值赋值；`npm run typecheck && npm test` 全绿。
+
+### Lane K · sourceAssets 三层校验收成两层（Lane G 遗留）
+
+证据：workshop `uniqueAssets`（UI 容量规则，`creationWorkshop.ts`）→ brief `normalizeSourceAssets`（抛错，`creationBrief.ts:57`）→ contract `briefAssets` + `isStoredAssetId`（软阻塞，`authoringContract.ts:103`、`:171-180`）。第一层语义不同不动；看二、三层是否同一规则两种表达。若 `assessCreationReadiness` 的软阻塞语义（收集 blocker 而非抛错）必须保留，只共享「合法 source asset」谓词，不合并控制流。拥有：`src/creationBrief.ts`、`src/authoringContract.ts`、两者测试。只读：`src/webmcp.ts`、`src/App.tsx`。先用 `impact({target:"assessCreationReadiness"})`，它在 WebMCP 信任边界上。
+
+### 仍待定（无新证据，默认不启动）
+
+- **候选 4(b)** ThreeBook 命令式 scene controller：拥有 `src/ThreeBook.tsx` 与 `src/readerShell.ts`，只读 `bookEngine.ts`。先 `impact` 看 `ThreeBook` props 上游。
+- **候选 8** Asset registry keyed lease set：只在 lease 泄漏真的出现时做。
+- **contract 簇**方向整理：G、H、I 已合入，可以画一次依赖方向图（types → bookElementGrammar → bookAssetContract；creationBrief → authoringContract？）再决定。
+- Lane F 留下的 Switch marker 亚像素差（`offsetLeft` 整数 vs 原 `inset:0` 的 77.47）：视觉不可见，不追。
 
 ## 最终汇报
 
-按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（起点 33 / 359）；任何刻意的行为差异单列。
+按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第三轮起点 33 / 361）；任何刻意的行为差异单列。
