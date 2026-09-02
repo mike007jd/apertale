@@ -38,7 +38,7 @@ Hard rejection: placing an uploaded source photo on the right page, or using a r
 
 ## Illustration-led book
 
-1. Generate four coherent spreads per 2×2 sheet, each quadrant at the 1.62:1 stage target with no gutter or border between quadrants; the page splits the sheet, so never store an unsplit sheet or stretch a portrait asset.
+1. Generate four coherent spreads per 2×2 sheet at 2048×1264 px or larger, each quadrant at the 1.62:1 stage target with no gutter or border between quadrants, main characters large in the foreground (at least a third of the quadrant height, faces readable); the page splits the sheet, so never store an unsplit sheet or stretch a portrait asset.
 2. Keep the centre gutter visually continuous and reserve copy-safe space through composition rather than a pasted-on box.
 3. Isolate only the subjects that benefit from hover, click, parallax, light, or motion, up to four per transparent 2×2 cutout sheet. Preserve the full-spread background underneath so a layer never leaves a hole.
 4. Use 2–6 generated frames for lightning, wing beats, water shimmer, blooming, or another small semantic change. Keep the first frame identical to the resting composition and respect reduced motion.
