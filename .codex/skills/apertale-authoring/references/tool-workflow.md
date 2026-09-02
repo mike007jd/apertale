@@ -9,7 +9,7 @@ Call `get_project_context`:
 - default/compact for the active book, outline, spread, elements, theme, revision, and capabilities;
 - `detail: "authoring-guide"` before any create flow; obey the returned two-phase quality contract even when this skill is not installed;
 - `detail: "creation-readiness"` with the structured brief before create; ask every blocking question and re-check until `ready: true`;
-- `detail: "assets"` after direct host media transfer or a completed `request_image_handoff`;
+- `detail: "assets"` only after a drawer transfer (a `request_image_handoff` without `images`); an inline handoff result already carries every id, size, and alpha flag, so go straight to `manage_book create`;
 - `detail: "selected-reveal"` only when revising the selected element's knowledge card.
 - `detail: "quality-review"` after the current cover and every spread have rendered; use its rubric, deterministic checks, render manifest, and round state;
 - `detail: "storyboard"` only when you need the full pencil stroke geometry back. Compact context already carries `storyboard.revision`, per-spread stroke counts, captions, and every red annotation the reader drew.

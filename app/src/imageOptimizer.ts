@@ -5,6 +5,20 @@ const MAX_STORED_IMAGE_DIMENSION = 2048;
 const ANALYSIS_MAX_DIMENSION = 512;
 /** Smallest split tile: the background check wants 1024×512 and 632 keeps the 1.62:1 stage. Generators ignore pixel-size requests, so tiles are upscaled here. */
 const MIN_TILE = { width: 1024, height: 632 };
+const STAGE_ASPECT = { min: 1.45, max: 2.1, target: 1.62 };
+
+/**
+ * Centre crop that brings a sheet quadrant into the spread stage's aspect
+ * range, so a 4:3 sheet costs a sliver of sky instead of a regeneration.
+ */
+export function stageTileCrop(width: number, height: number) {
+  const aspect = width / height;
+  if (aspect >= STAGE_ASPECT.min && aspect <= STAGE_ASPECT.max) return { x: 0, y: 0, width, height };
+  const cropped = aspect < STAGE_ASPECT.min
+    ? { width, height: Math.round(width / STAGE_ASPECT.target) }
+    : { width: Math.round(height * STAGE_ASPECT.target), height };
+  return { x: Math.floor((width - cropped.width) / 2), y: Math.floor((height - cropped.height) / 2), ...cropped };
+}
 /** Max channel distance from the backdrop colour: at or below KEY_CLEAR a pixel is transparent, from KEY_SOLID up it is untouched. */
 const KEY_CLEAR = 16;
 const KEY_SOLID = 64;
@@ -68,16 +82,18 @@ export async function dataUrlToFile(name: string, dataUrl: string): Promise<File
 export async function splitImageGrid(file: File, columns: number, rows: number, key = false): Promise<File[]> {
   const decoded = await decodeImage(file);
   try {
-    const width = Math.floor(decoded.width / columns);
-    const height = Math.floor(decoded.height / rows);
-    if (width < 1 || height < 1) throw new RangeError("The sheet is too small to split.");
+    const quadrant = { width: Math.floor(decoded.width / columns), height: Math.floor(decoded.height / rows) };
+    if (quadrant.width < 1 || quadrant.height < 1) throw new RangeError("The sheet is too small to split.");
+    // Cutout sheets keep their full quadrant; art sheets are cropped into the stage aspect.
+    const crop = key ? { x: 0, y: 0, ...quadrant } : stageTileCrop(quadrant.width, quadrant.height);
+    const { width, height } = crop;
     const scale = Math.max(1, MIN_TILE.width / width, MIN_TILE.height / height);
     const tileWidth = Math.round(width * scale);
     const tileHeight = Math.round(height * scale);
     const stem = file.name.replace(/\.[^.]+$/, "");
     // WebP keeps alpha at a fraction of PNG's size; a browser without a WebP encoder answers with PNG, and the blob says so.
     return await Promise.all(Array.from({ length: columns * rows }, (_, tile) => {
-      const { canvas, context } = draw(decoded, tileWidth, tileHeight, { x: (tile % columns) * width, y: Math.floor(tile / columns) * height, width, height });
+      const { canvas, context } = draw(decoded, tileWidth, tileHeight, { x: (tile % columns) * quadrant.width + crop.x, y: Math.floor(tile / columns) * quadrant.height + crop.y, width, height });
       if (key) {
         const image = context.getImageData(0, 0, tileWidth, tileHeight);
         keyOutBackdrop(image.data, tileWidth, tileHeight);

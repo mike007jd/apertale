@@ -1576,7 +1576,7 @@ export function registerWebMcpTools(
                 hasMeaningfulAlpha: asset.analysis?.hasMeaningfulAlpha === true,
                 heightAtScale1: asset.width && asset.height ? stageHeightAtScale1(asset.width, asset.height) : null,
               })),
-              after: "Bind only these ids; no assets refresh is needed. Cutouts are trimmed to their subject: place a layer at the storyboard body ellipse (page from cx < 0.5, x = (cx − pageOffset) × 2, y = cy) with scaleX = scaleY = wanted spread-height fraction ÷ heightAtScale1, at most 1.8.",
+              after: "Every id here is verified: call manage_book create with them now, without another get_project_context (readiness, assets, storyboard) or schema read first. Cutouts are trimmed to their subject: place a layer at the storyboard body ellipse (page from cx < 0.5, x = (cx − pageOffset) × 2, y = cy) with scaleX = scaleY = wanted spread-height fraction ÷ heightAtScale1, at most 1.8.",
             });
           }
           const pendingOutcome = requestImageHandoff({ requestId, assetUse, reason });

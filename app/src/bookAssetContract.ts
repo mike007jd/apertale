@@ -6,6 +6,7 @@ import type { DocumentState, PreparedBookBackground, PreparedBookLayer } from ".
 
 const COVER_ASPECT = { min: 0.58, max: 0.78 };
 const SPREAD_ASPECT = { min: 1.45, max: 2.1 };
+const CANVAS_DRIFT = 0.03;
 const ALPHA_IMAGE_TYPES = new Set(["image/png", "image/webp"]);
 
 type PreparedAssetManifest = {
@@ -230,7 +231,12 @@ export function backgroundPairAssetRoleIssues(
   if (!sourceDimensions || !cleanDimensions) {
     return [`${label} need verified original canvas dimensions; re-import both images before continuing.`];
   }
-  if (sourceDimensions.width !== cleanDimensions.width || sourceDimensions.height !== cleanDimensions.height) {
+  // ImageGen rounds the same request to canvases a pixel or two apart; only a different-sized image is a mistake.
+  const drift = Math.max(
+    Math.abs(sourceDimensions.width - cleanDimensions.width) / sourceDimensions.width,
+    Math.abs(sourceDimensions.height - cleanDimensions.height) / sourceDimensions.height,
+  );
+  if (drift > CANVAS_DRIFT) {
     return [`${label} must use the same original canvas size.`];
   }
   return [];

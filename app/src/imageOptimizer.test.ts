@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fitImageDimensions, keyOutBackdrop, summarizeAlphaPixels } from "./imageOptimizer";
+import { fitImageDimensions, keyOutBackdrop, stageTileCrop, summarizeAlphaPixels } from "./imageOptimizer";
 
 describe("image optimization bounds", () => {
   it("preserves small images and proportionally limits large images", () => {
@@ -89,5 +89,13 @@ describe("flat backdrop key-out", () => {
     // The visible near-magenta pixel is unmixed from the backdrop; the keyed-out backdrop keeps its colour.
     expect(Array.from(pixels.slice(20, 23))).toEqual([255, 255, 255]);
     expect(Array.from(pixels.slice(0, 3))).toEqual([255, 0, 255]);
+  });
+});
+
+describe("stage tile crop", () => {
+  it("keeps in-range quadrants whole and centre-crops 4:3 or panoramic ones to 1.62:1", () => {
+    expect(stageTileCrop(798, 493)).toEqual({ x: 0, y: 0, width: 798, height: 493 });
+    expect(stageTileCrop(768, 576)).toEqual({ x: 0, y: 51, width: 768, height: 474 });
+    expect(stageTileCrop(1000, 400)).toEqual({ x: 176, y: 0, width: 648, height: 400 });
   });
 });
