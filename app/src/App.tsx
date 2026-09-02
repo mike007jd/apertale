@@ -40,7 +40,6 @@ import {
   reduceCreationWorkshop,
   restoreCreationWorkshopAssets,
 } from "./creationWorkshop";
-import { AnimatePresence, MotionConfig } from "motion/react";
 import { smootherstep } from "./design/curves";
 import { durationMs } from "./design/tokens";
 import { announce, supportsWebGl2, useReaderShell } from "./readerShell";
@@ -1573,7 +1572,7 @@ export function App() {
   };
 
   return (
-    <MotionConfig reducedMotion={reducedMotion ? "always" : "never"}>
+    <>
       <main
         className={`app-shell ${snapshot.session.preview ? "is-preview" : ""} ${showCreateGuide ? "is-creation-active" : ""} ${showElementAgentGuide ? "is-agent-handoff-active" : ""} ${creationTransitionBusy ? "is-workspace-transitioning" : ""}`}
         aria-busy={creationTransitionBusy || undefined}
@@ -1850,9 +1849,7 @@ export function App() {
               <button onClick={toggleLock}>{selected.locked ? <Lock size={17} /> : <LockOpen size={17} />} {selected.locked ? "Unlock" : "Lock"}</button>
               <button className="icon-button" onClick={() => setShowMore(!showMore)} aria-label="More element controls"><DotsThree size={21} weight="bold" /></button>
             </div>
-            <AnimatePresence>
-            {showMore && (
-              <Panel key="element-panel" from="scale" className={`element-panel ${selected.page === "right" ? "clears-right" : "clears-left"}`}>
+              <Panel open={showMore} from="scale" className={`element-panel ${selected.page === "right" ? "clears-right" : "clears-left"}`}>
                 <div><span>Scale</span><button onClick={() => adjustSelected("scale", -0.1)} aria-label="Scale down" disabled={selected.locked}><Minus size={14} /></button><output>{Math.round(selected.transform.scaleX * 100)}%</output><button onClick={() => adjustSelected("scale", 0.1)} aria-label="Scale up" disabled={selected.locked}><Plus size={14} /></button></div>
                 <div><span>Rotate</span><button onClick={() => adjustSelected("rotate", -8)} aria-label="Rotate counter-clockwise" disabled={selected.locked}><ArrowCounterClockwise size={14} /></button><output>{Math.round(selected.transform.rotationDeg)}°</output><button onClick={() => adjustSelected("rotate", 8)} aria-label="Rotate clockwise" disabled={selected.locked}><ArrowClockwise size={14} /></button></div>
                 <label>
@@ -1883,8 +1880,6 @@ export function App() {
                   </select>
                 </label>
               </Panel>
-            )}
-            </AnimatePresence>
           </div>
         )}
 
@@ -1998,9 +1993,7 @@ export function App() {
         </footer>
       )}
 
-      <AnimatePresence>
-      {showOutline && !snapshot.session.preview && !showCreateGuide && (
-        <Panel key="story-outline" from="left" className="story-outline" aria-label="Book outline" role="complementary">
+      <Panel open={showOutline && !snapshot.session.preview && !showCreateGuide} from="left" className="story-outline" aria-label="Book outline" role="complementary">
           <div className="outline-head"><div><span>Story outline</span><small>Revision {snapshot.document.revision}</small></div><button onClick={() => setShowOutline(false)} aria-label="Close outline"><X size={18} /></button></div>
           <ol>
             {snapshot.document.spreads.map((item, index) => (
@@ -2014,9 +2007,7 @@ export function App() {
             ><i /> {webMcpAvailable ? "Site tools ready" : "WebMCP ready"}</span>
             {activeLibraryBook?.sample && <button onClick={(event) => confirmReset(event.currentTarget)}><ArrowCounterClockwise size={15} /> Reset sample</button>}
           </div>
-        </Panel>
-      )}
-      </AnimatePresence>
+      </Panel>
 
       {showCreateGuide && !snapshot.session.preview && (
         <section className="creation-workshop">
@@ -2264,6 +2255,7 @@ export function App() {
 
       <WorkspaceTransition
         phase={creationNavigation.phase}
+        reduced={reducedMotion}
         sourceOrigin={creationTransitionOrigins.source}
         actionOrigin={creationTransitionOrigins.action}
         onPhaseComplete={handleCreationTransitionComplete}
@@ -2283,6 +2275,6 @@ export function App() {
         )}
       </div>}
       </main>
-    </MotionConfig>
+    </>
   );
 }

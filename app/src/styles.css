@@ -775,6 +775,7 @@ summary:focus-visible {
 }
 
 .theme-switch {
+  position: relative;
   display: flex;
   padding: var(--space-1);
   border-radius: var(--radius-pill);
@@ -796,12 +797,22 @@ summary:focus-visible {
 
 .theme-switch button.is-active { color: var(--ink); }
 
-/* The travelling thumb. Motion measures both option positions and animates the
-   real distance, so the selection reads as movement rather than as a colour
-   that changed while you were not looking. */
-.theme-switch .switch-thumb {
+/* The travelling thumb. One marker for the whole group, so the selection reads
+   as movement rather than as a colour that changed while you were not looking:
+   the selected option's box is measured into the marker's inline geometry and
+   the transition covers the real distance between the two options. */
+.switch-thumb,
+.switch-underline {
   position: absolute;
-  inset: 0;
+  pointer-events: none;
+  transition:
+    left var(--motion-state) var(--ease-object),
+    top var(--motion-state) var(--ease-object),
+    width var(--motion-state) var(--ease-object),
+    height var(--motion-state) var(--ease-object);
+}
+
+.theme-switch .switch-thumb {
   z-index: 0;
   border-radius: var(--radius-pill);
   background: var(--surface-strong);
@@ -1569,7 +1580,6 @@ summary:focus-visible {
   background: color-mix(in srgb, var(--surface-strong) 93%, transparent);
   box-shadow: var(--elev-3);
   pointer-events: auto;
-  transition: opacity var(--motion-state) var(--ease-info), translate var(--motion-state) var(--ease-object);
 }
 
 .app-shell:has(.stage.is-story-pencil-active) .workshop-sheet {
@@ -1644,9 +1654,13 @@ summary:focus-visible {
   text-align: left;
 }
 
-/* The selected rule is a real element with a shared layout identity, so it
-   travels to the next word instead of fading out and back in. */
-.workshop-picker .switch-underline {
+/* The selected rule travels to the next word instead of fading out and back
+   in. The marker carries the option's box; the rule is drawn inside it, inset
+   the way it was when it lived in the button. */
+.workshop-picker { position: relative; }
+
+.workshop-picker .switch-underline::after {
+  content: "";
   position: absolute;
   left: var(--space-1);
   right: var(--space-1);
@@ -2921,4 +2935,36 @@ summary:focus-visible {
     font-size: var(--text-caption);
     white-space: nowrap;
   }
+}
+
+/* Presence: a surface that animates in AND out, without an animation runtime.
+   A removed element cannot animate, so `Panel`/`Toast` keep it mounted and
+   write `data-open`; `allow-discrete` holds it painted for the length of its
+   exit and `@starting-style` supplies the values the entrance comes from. The
+   reduced-motion rules above turn every transition off, so both the platform
+   preference and `?reducedMotion=1` make this an instant state change. */
+.presence {
+  transition:
+    opacity var(--motion-state) var(--ease-info),
+    transform var(--motion-state) var(--ease-object),
+    translate var(--motion-state) var(--ease-object),
+    display var(--motion-state) allow-discrete;
+}
+
+.presence[data-open="false"] {
+  display: none;
+  opacity: 0;
+}
+
+/* `transform` rather than `translate`, because the surfaces themselves are
+   placed with `translate` and must keep it. */
+.presence-scale[data-open="false"] { transform: scale(.96); }
+.presence-left[data-open="false"] { transform: translateX(-12px); }
+.presence-toast[data-open="false"] { transform: translateY(-8px) scale(.97); }
+
+@starting-style {
+  .presence[data-open="true"] { opacity: 0; }
+  .presence-scale[data-open="true"] { transform: scale(.96); }
+  .presence-left[data-open="true"] { transform: translateX(-12px); }
+  .presence-toast[data-open="true"] { transform: translateY(-8px) scale(.97); }
 }

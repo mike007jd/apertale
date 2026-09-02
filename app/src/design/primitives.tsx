@@ -12,81 +12,103 @@
  *    disabled. Not three. A control that cannot be seen to accept a press is
  *    not finished.
  *
- * 2. Motion declares which family it belongs to. Anything with a physical
- *    metaphor (a control being pushed, a drawer sliding, a thumb travelling)
- *    uses `springObject`. Anything purely informational (a toast arriving, a
- *    panel swapping its contents) uses a duration and `ease.info`, because
- *    information should not have inertia.
+ * 2. Motion belongs to the stylesheet. Presence and travel are both expressible
+ *    in CSS now that `@starting-style` and a discrete `display` transition
+ *    exist, so neither needs an animation runtime — and the reduced-motion
+ *    rules in styles.css already cover both `prefers-reduced-motion` and the
+ *    `?reducedMotion=1` override, so a CSS animation honours them for free.
  *
  * The four states themselves are NOT delivered here. They come from the element
  * selector block at the top of styles.css, which reaches every bare `button`
  * without a call site having to adopt anything — which is what made fixing all
- * 63 at once possible. Wrappers only exist where a state cannot be expressed in
- * CSS at all: presence (a thing that must animate on its way out, after React
- * would have unmounted it) and shared-element travel. Anything a `:hover` rule
- * can already say belongs in the stylesheet, not in a component here.
+ * 63 at once possible. Wrappers only exist where a selector cannot say it:
+ * presence, which needs the element to stay mounted while it leaves, and the
+ * travelling switch marker, which needs the selected option measured.
  */
-import { AnimatePresence, motion, useReducedMotionConfig } from "motion/react";
-import type { HTMLMotionProps } from "motion/react";
-import type { ReactNode } from "react";
-import { durationMs, easePoints, motion as motionTokens } from "./tokens";
+import { useEffect, useRef, useState } from "react";
+import type { ComponentPropsWithoutRef, ReactNode } from "react";
+import { durationMs, easePoints } from "./tokens";
 import type { CreationNavigationPhase, WorkspaceMotionOrigin } from "./creationNavigation";
-
-const spring = { type: "spring", ...motionTokens.springObject } as const;
-const surfaceSpring = { type: "spring", ...motionTokens.springSurface } as const;
-
-/** Informational motion: a duration, never a spring. */
-const info = { duration: durationMs.state / 1000, ease: easePoints.info } as const;
-const navigation = { duration: durationMs.reveal / 1000, ease: easePoints.navigation } as const;
 
 const portalCircle = (origin: WorkspaceMotionOrigin, radius: number) =>
   `circle(${radius}px at ${origin.x}px ${origin.y}px)`;
+
+const cubic = (points: readonly number[]) => `cubic-bezier(${points.join(",")})`;
 
 /**
  * An origin-aware opaque handoff between the library/reader and the blank-book
  * workspace. The mounted scene changes only while this paper surface covers
  * the viewport, so WebGL setup cannot flash as a navigation cut.
+ *
+ * The one animation still driven from JS: it has to report completion so React
+ * can swap the mounted scene, and a stylesheet that turns transitions off would
+ * strand the phase machine mid-navigation. `reduced` is passed in rather than
+ * sniffed because the caller's flag also carries the `?reducedMotion=1` override.
  */
 export function WorkspaceTransition({
   phase,
   sourceOrigin,
   actionOrigin,
+  reduced = false,
   onPhaseComplete,
 }: {
   phase: CreationNavigationPhase;
   sourceOrigin: WorkspaceMotionOrigin;
   actionOrigin: WorkspaceMotionOrigin;
+  reduced?: boolean;
   onPhaseComplete: () => void;
 }) {
-  const reduced = useReducedMotionConfig();
-  if (phase === "idle") return null;
+  const surface = useRef<HTMLDivElement>(null);
+  const complete = useRef(onPhaseComplete);
+  complete.current = onPhaseComplete;
+
+  const idle = phase === "idle";
   const origin = phase === "covering-workspace" ? actionOrigin : sourceOrigin;
   const point = portalCircle(origin, 0);
   const cover = portalCircle(origin, origin.radius);
   const revealWorkspace = phase === "revealing-workspace";
   const revealSource = phase === "revealing-source";
-  const initial = revealWorkspace || revealSource
+  const from = revealWorkspace || revealSource
     ? { opacity: 1, clipPath: cover }
     : { opacity: 1, clipPath: point };
-  const animate = revealWorkspace
+  const to = revealWorkspace
     ? { opacity: 0, clipPath: cover }
     : revealSource
       ? { opacity: 1, clipPath: point }
       : { opacity: 1, clipPath: cover };
 
+  useEffect(() => {
+    const element = surface.current;
+    if (idle) return;
+    const duration = reduced ? 0 : revealWorkspace ? durationMs.state : durationMs.navigation;
+    const animation = element?.animate?.(
+      [from, to],
+      { duration, easing: cubic(revealWorkspace ? easePoints.info : easePoints.navigation), fill: "forwards" },
+    );
+    if (!animation) {
+      // No Web Animations API: report the phase done rather than leaving
+      // navigation waiting on a callback that cannot arrive.
+      const settle = requestAnimationFrame(() => complete.current());
+      return () => cancelAnimationFrame(settle);
+    }
+    animation.finished.then(() => complete.current(), () => undefined);
+    return () => animation.cancel();
+    // The phase is the whole identity of one run; the origins are read from it.
+  }, [phase, idle, reduced, revealWorkspace]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (idle) return null;
+
   return (
-    <motion.div
+    <div
+      ref={surface}
       key={phase}
       className="workspace-transition"
       data-phase={phase}
       aria-hidden="true"
-      initial={reduced ? false : initial}
-      animate={animate}
-      transition={reduced ? { duration: 0 } : revealWorkspace ? info : navigation}
-      onAnimationComplete={onPhaseComplete}
+      style={from}
     >
       <span className="workspace-transition-mark">Apertale</span>
-    </motion.div>
+    </div>
   );
 }
 
@@ -97,13 +119,16 @@ type SwitchOption<T extends string> = {
   ariaLabel?: string;
 };
 
+type MarkerBox = { left: number; top: number; width: number; height: number };
+
 /**
  * A segmented control whose selected marker physically travels between options.
  *
  * The previous implementation swapped a background colour, which is a state
  * change with no motion in it — you could not see which way the selection
- * moved. `layoutId` gives the marker a shared identity across options, so
- * Motion measures both positions and animates the real distance between them.
+ * moved. One marker lives in the group rather than one per option, so it keeps
+ * its identity across a change and CSS transitions the real distance between
+ * the two option boxes.
  *
  * `thumb` is a pill behind the option (Day/Night). `underline` is a rule under
  * the word, the way print marks a selection; the workshop pickers used to
@@ -126,13 +151,42 @@ export function Switch<T extends string>({
   variant?: "thumb" | "underline";
   disabled?: boolean;
 }) {
-  const reduced = useReducedMotionConfig();
+  const group = useRef<HTMLDivElement>(null);
+  const [marker, setMarker] = useState<MarkerBox | null>(null);
+
+  // The options are laid out by the call site's own stylesheet — pills, wrapped
+  // chips, a row of words — so the marker box is measured rather than derived
+  // from an option count that would only be right for equal-width options.
+  useEffect(() => {
+    const measure = () => {
+      const selected = group.current?.querySelector<HTMLElement>("button[aria-pressed='true']");
+      setMarker(selected
+        ? { left: selected.offsetLeft, top: selected.offsetTop, width: selected.offsetWidth, height: selected.offsetHeight }
+        : null);
+    };
+    measure();
+    // A switch mounted inside a hidden topbar measures zero, so re-measure when
+    // the group is finally laid out — the same event as a resize or a late
+    // font. (No ResizeObserver in the test DOM, which has no layout anyway.)
+    if (typeof ResizeObserver === "undefined" || !group.current) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(group.current);
+    return () => observer.disconnect();
+  }, [value, options]);
+
   return (
-    <div className={className} role="group" aria-label={groupLabel}>
+    <div className={className} role="group" aria-label={groupLabel} ref={group}>
+      {marker && (
+        <span
+          aria-hidden="true"
+          className={variant === "thumb" ? "switch-thumb" : "switch-underline"}
+          style={marker}
+        />
+      )}
       {options.map((option) => {
         const selected = option.value === value;
         return (
-          <motion.button
+          <button
             key={option.value}
             type="button"
             className={selected ? "is-active" : ""}
@@ -141,16 +195,8 @@ export function Switch<T extends string>({
             aria-pressed={selected}
             disabled={disabled}
           >
-            {selected && (
-              <motion.span
-                aria-hidden="true"
-                className={variant === "thumb" ? "switch-thumb" : "switch-underline"}
-                layoutId={`${groupLabel}-thumb`}
-                transition={reduced ? { duration: 0 } : spring}
-              />
-            )}
             <span className="switch-label">{option.label}</span>
-          </motion.button>
+          </button>
         );
       })}
     </div>
@@ -158,34 +204,28 @@ export function Switch<T extends string>({
 }
 
 /**
- * A surface that enters and leaves. Panels are summoned, so they arrive on a
- * spring from slightly below and behind — the direction a thing lifted toward
- * the reader would come from — and leave on a duration, because a dismissal
- * should not linger.
+ * A surface that enters and leaves. Panels are summoned, so they arrive from
+ * slightly below and behind — the direction a thing lifted toward the reader
+ * would come from — and leave the same way.
+ *
+ * The surface stays mounted and carries `data-open`, because an element React
+ * has already removed cannot animate on its way out. `.presence` owns the rest.
  */
 export function Panel({
   children,
   className,
   from,
+  open = true,
   ...rest
-}: Omit<HTMLMotionProps<"div">, "ref"> & { from: "left" | "scale" }) {
-  const reduced = useReducedMotionConfig();
-  const offset = from === "left" ? { x: -12 } : { scale: 0.96 };
-  // Only the axis `from` introduced is animated back. Writing all four settled
-  // values would emit `translate(0,0) scale(1)` into the inline transform and
-  // overwrite whatever the call site's stylesheet had put there.
-  const settled = from === "left" ? { x: 0 } : { scale: 1 };
+}: ComponentPropsWithoutRef<"div"> & { from: "left" | "scale"; open?: boolean }) {
   return (
-    <motion.div
-      className={className}
-      initial={reduced ? false : { opacity: 0, ...offset }}
-      animate={{ opacity: 1, ...settled }}
-      exit={reduced ? { opacity: 0 } : { opacity: 0, ...offset, transition: info }}
-      transition={reduced ? { duration: 0 } : surfaceSpring}
+    <div
+      className={`presence presence-${from} ${className ?? ""}`}
+      data-open={open}
       {...rest}
     >
       {children}
-    </motion.div>
+    </div>
   );
 }
 
@@ -193,9 +233,9 @@ export function Panel({
  * Transient status. It is the lowest thing on the screen by design: a toast
  * that outranks the book is a lie about its own importance.
  *
- * Rendering it through AnimatePresence is the point — before this, status
- * appeared and vanished on a class toggle, so a reader who looked away missed
- * that anything had happened at all.
+ * Animating its presence is the point — before this, status appeared and
+ * vanished on a class toggle, so a reader who looked away missed that anything
+ * had happened at all.
  */
 export function Toast({
   open,
@@ -206,23 +246,15 @@ export function Toast({
   className?: string;
   children: ReactNode;
 }) {
-  const reduced = useReducedMotionConfig();
   return (
-    <AnimatePresence initial={false}>
-      {open && (
-        <motion.div
-          className={className}
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          initial={reduced ? false : { opacity: 0, y: -8, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={reduced ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.98, transition: info }}
-          transition={reduced ? { duration: 0 } : spring}
-        >
-          {children}
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <div
+      className={`presence presence-toast ${className ?? ""}`}
+      data-open={open}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      {children}
+    </div>
   );
 }

@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, X } from "@phosphor-icons/react";
-import { MotionConfig } from "motion/react";
 import { clamp } from "./design/curves";
 import { ThemeSwitch } from "./design/ThemeSwitch";
 import { FallbackBook } from "./FallbackBook";
@@ -112,7 +111,7 @@ export function SharedBookApp() {
   const nav = reader.navDisabled;
 
   return (
-    <MotionConfig reducedMotion={reducedMotion ? "always" : "never"}>
+    <>
       <main className="app-shell is-preview is-shared-reader">
       <PortraitOrientationGate />
       <header className="topbar">
@@ -173,6 +172,6 @@ export function SharedBookApp() {
 
         <div className="sr-only" aria-live="polite">{announce(snapshot.document.title, spread.title, spread.body)}</div>
       </main>
-    </MotionConfig>
+    </>
   );
 }
