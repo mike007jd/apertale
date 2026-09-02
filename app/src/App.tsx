@@ -86,7 +86,7 @@ import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId, type TurnState } from "./types";
 import { authoringSurfaceReady, type AuthoringSurfaceRequest } from "./authoringSurface";
 import { MAX_ANNOTATIONS_PER_SPREAD, addStoryboardAnnotation, clearStoryboardAnnotations, getStoryboardSnapshot, subscribeToStoryboard, undoStoryboardAnnotation } from "./storyboard";
-import { registerWebMcpTools } from "./webmcp";
+import { registerWebMcpTools, type ToolActivity } from "./webmcp";
 import { StoryPencilControls, WorkshopPickers } from "./workshopControls";
 import { ElementAgentCard } from "./ElementAgentCard";
 
@@ -254,6 +254,8 @@ export function App() {
   const [turn, setTurn] = useState<TurnState>(null);
   const [webMcpAvailable, setWebMcpAvailable] = useState(false);
   const [codexFoundPage, setCodexFoundPage] = useState(false);
+  const [agentActivity, setAgentActivity] = useState<ToolActivity | null>(null);
+  const agentActivityTimeout = useRef(0);
   const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null);
   const [copyError, setCopyError] = useState(false);
   const [showMore, setShowMore] = useState(false);
@@ -1260,7 +1262,13 @@ export function App() {
   useEffect(() => registerWebMcpTools(
     setWebMcpAvailable,
     presentAuthoringSurface,
-    () => setCodexFoundPage(true),
+    (activity) => {
+      setCodexFoundPage(true);
+      setAgentActivity(activity);
+      window.clearTimeout(agentActivityTimeout.current);
+      // A finished call lingers long enough to read, then clears itself.
+      if (activity.phase !== "start") agentActivityTimeout.current = window.setTimeout(() => setAgentActivity(null), 2400);
+    },
     () => beginOpenCodexGuide(null),
   ), [beginOpenCodexGuide, presentAuthoringSurface]);
 
@@ -1740,6 +1748,14 @@ export function App() {
         aria-busy={creationTransitionBusy || undefined}
       >
       <PortraitOrientationGate />
+      {/* Which Site tool Codex is running right now. Lives outside every
+          panel and the workshop toggle, so it survives the whole handoff. */}
+      <Toast open={Boolean(agentActivity)} className={`agent-activity agent-activity-${agentActivity?.phase ?? "start"}`}>
+        {agentActivity?.phase === "done"
+          ? <Check size={15} weight="bold" aria-hidden="true" />
+          : <Sparkle size={15} weight="fill" className={agentActivity?.phase === "start" ? "is-spinning" : undefined} aria-hidden="true" />}
+        <span>Codex · {agentActivity?.title}{agentActivity?.phase === "error" ? " failed" : ""}</span>
+      </Toast>
       <header className="topbar" hidden={showLibrary || showCreateGuide} aria-hidden={showElementAgentGuide || undefined}>
         {!snapshot.session.preview && <button className="library-button" onClick={openLibrary} aria-label="Open book library"><Books size={18} /> <span>Books</span></button>}
         <button className="wordmark" onClick={() => { bookEngine.setPreview(false); openLibrary(); }} aria-label="Open book library">Apertale</button>

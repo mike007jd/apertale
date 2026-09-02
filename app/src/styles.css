@@ -1427,6 +1427,29 @@ summary:focus-visible {
 .story-pencil-beat small { color: var(--accent); font-size: var(--text-caption); font-weight: var(--weight-strong); letter-spacing: var(--track-caps); text-transform: uppercase; }
 .story-pencil-beat strong { overflow: hidden; font-family: var(--font-display); font-size: var(--text-body); font-weight: var(--weight-text); text-overflow: ellipsis; white-space: nowrap; }
 
+/* Which Site tool Codex is running: top centre, above every panel and the workshop. */
+.agent-activity {
+  position: absolute;
+  z-index: 40;
+  top: 14px;
+  left: 50%;
+  translate: -50% 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-pill);
+  padding: 8px 14px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface-strong) 94%, transparent);
+  box-shadow: var(--elev-2);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-strong);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.agent-activity-done { color: var(--status-success); }
+.agent-activity-error { color: var(--status-danger); }
+
 .story-pencil-notice {
   position: absolute;
   z-index: 5;

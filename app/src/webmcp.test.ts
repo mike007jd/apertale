@@ -130,7 +130,7 @@ describe("WebMCP registration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reports agent use separately from tool availability", async () => {
+  it("reports each tool call to the page by title and phase, separately from availability", async () => {
     const tools: WebMCP.ModelContextTool[] = [];
     vi.stubGlobal("document", {
       modelContext: {
@@ -138,13 +138,18 @@ describe("WebMCP registration", () => {
       },
     });
     const status = vi.fn();
-    const onToolStart = vi.fn();
-    const cleanup = registerWebMcpTools(status, () => undefined, onToolStart);
+    const onToolActivity = vi.fn();
+    const cleanup = registerWebMcpTools(status, () => undefined, onToolActivity);
 
     await vi.waitFor(() => expect(status).toHaveBeenCalledWith(true));
-    expect(onToolStart).not.toHaveBeenCalled();
+    expect(onToolActivity).not.toHaveBeenCalled();
     await tools[0]!.execute({}, { signal: new AbortController().signal });
-    expect(onToolStart).toHaveBeenCalledTimes(1);
+    expect(onToolActivity.mock.calls.map(([activity]) => activity)).toEqual([
+      { name: "get_project_context", title: "Get project context", phase: "start" },
+      { name: "get_project_context", title: "Get project context", phase: "done" },
+    ]);
+    await expect(tools[0]!.execute({ detail: "not-a-detail" }, { signal: new AbortController().signal })).rejects.toThrow();
+    expect(onToolActivity).toHaveBeenLastCalledWith({ name: "get_project_context", title: "Get project context", phase: "error" });
     cleanup();
   });
 
@@ -184,6 +189,8 @@ describe("WebMCP registration", () => {
       caption: "The guide finds a hidden path",
       annotations: [{ shape: "stroke", page: "right", near: ["guide"], points: [{ x: 0.6, y: 0.45 }, { x: 0.7, y: 0.5 }] }],
     });
+    // The reader sees that the mark was taken, not only that it later vanished.
+    expect(bookEngine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "Codex read your 1 mark" });
     const full = JSON.parse(String(await tool("get_project_context").execute({ detail: "storyboard" }, { signal: new AbortController().signal })));
     expect(full.storyboard.spreads[0].marks[3]).toEqual({ kind: "line", points: [{ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.5 }] });
     expect(getStoryboardSnapshot().revision).toBe(2);
@@ -565,6 +572,12 @@ describe("WebMCP registration", () => {
 
     const beforePresentationRevision = bookEngine.getSnapshot().document.revision;
     const presentationDocumentId = bookEngine.getSnapshot().document.id;
+    await tool("set_presentation").execute({ requestId: "turn-page", expectedDocumentId: presentationDocumentId, expectedRevision: beforePresentationRevision, spreadId: "city-for-small-things" }, {
+      signal: new AbortController().signal,
+    });
+    const turnedTitle = bookEngine.getSnapshot().document.spreads.find((spread) => spread.id === "city-for-small-things")!.title;
+    expect(bookEngine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: `Codex turned to ${turnedTitle}` });
+    expect(bookEngine.getSnapshot().document.revision).toBe(beforePresentationRevision);
     const presentation = await tool("set_presentation").execute({ requestId: "night-preview", expectedDocumentId: presentationDocumentId, expectedRevision: beforePresentationRevision, theme: "midnight-desk", preview: true, spreadId: "city-for-small-things" }, {
       signal: new AbortController().signal,
     });
@@ -591,6 +604,7 @@ describe("WebMCP registration", () => {
       preview: false,
     }, { signal: new AbortController().signal })));
     expect(shelfPresentation).toMatchObject({ surface: "shelf", preview: false });
+    expect(bookEngine.getSnapshot().lastAction).toMatchObject({ source: "agent", summary: "Codex is looking at the cover" });
     expect(presented).toHaveBeenLastCalledWith(expect.objectContaining({
       requestId: "show-cover",
       surface: "shelf",

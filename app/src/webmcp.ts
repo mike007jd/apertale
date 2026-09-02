@@ -47,6 +47,8 @@ import {
 } from "./authoringContract";
 
 type ToolInput = Record<string, unknown>;
+/** One tool call as the page shows it: which tool, by its human title, and whether it is still running. */
+export type ToolActivity = { name: string; title: string; phase: "start" | "done" | "error" };
 const uncancelledToolSignal = new AbortController().signal;
 
 function invalid(message: string): never {
@@ -618,7 +620,7 @@ function assetRoleFailure(issues: readonly string[]) {
 export function registerWebMcpTools(
   onStatus: (available: boolean) => void,
   presentAuthoringSurface: (request: AuthoringSurfaceRequest, signal: AbortSignal) => void | Promise<void> = () => undefined,
-  onToolStart: () => void = () => undefined,
+  onToolActivity: (activity: ToolActivity) => void = () => undefined,
   onStoryboardUpdate: () => void = () => undefined,
 ) {
   if (!document.modelContext?.registerTool) {
@@ -630,13 +632,26 @@ export function registerWebMcpTools(
   const controller = new AbortController();
   const registerTool = document.modelContext.registerTool.bind(document.modelContext);
   let registeredCount = 0;
-  const register: typeof registerTool = (tool, options) => registerTool(tool, options).then(() => {
+  // Every registration passes through here, so the page learns which tool is
+  // running from the one place that already knows its human title.
+  const register: typeof registerTool = (tool, options) => registerTool({
+    ...tool,
+    execute: async (input, executeOptions) => {
+      const activity = { name: tool.name, title: tool.title ?? tool.name };
+      onToolActivity({ ...activity, phase: "start" });
+      try {
+        const result = await tool.execute(input, executeOptions);
+        onToolActivity({ ...activity, phase: "done" });
+        return result;
+      } catch (error) {
+        onToolActivity({ ...activity, phase: "error" });
+        throw error;
+      }
+    },
+  }, options).then(() => {
     registeredCount += 1;
   });
-  const runRegisteredTool = (name: string, signal: AbortSignal, operation: () => unknown) => {
-    onToolStart();
-    return runTool(name, signal, operation);
-  };
+  const runRegisteredTool = runTool;
   const sessionResults = new BoundedMap<string, unknown>(128);
   const remember = <Result>(requestId: string, result: Result): Result => {
     sessionResults.set(requestId, result);
@@ -750,12 +765,17 @@ export function registerWebMcpTools(
             .filter((asset) => asset.assetUse === "source-photo")
             .map((asset) => asset.id);
           const qualityLifecycle = detail === "quality-review" ? bookEngine.getQualityLifecycle() : null;
+          const storyboard = summarizeStoryboard();
+          // The reader's marks leave the page only through this read, so say
+          // when they were taken, before the revision that clears them lands.
+          const markCount = storyboard.spreads.reduce((count, spread) => count + spread.annotations.length, 0);
+          if (markCount > 0) bookEngine.narrate("agent", `Codex read your ${markCount} mark${markCount === 1 ? "" : "s"}`);
           const result = {
             ...context,
             // The Agent authored the sketches; echoing them back cost ~550 KB
             // per context read. Compact carries counts plus the reader's red
             // marks, which are the only strokes the Agent has not seen.
-            storyboard: detail === "storyboard" ? getStoryboardSnapshot() : summarizeStoryboard(),
+            storyboard: detail === "storyboard" ? getStoryboardSnapshot() : storyboard,
             assets: detail === "assets"
               ? await listAssetMetadata()
               : await getAssetMetadata(currentSpread.elements.map((element) => element.assetId)),
@@ -1337,7 +1357,7 @@ export function registerWebMcpTools(
             spreadId = requiredString(input, "spreadId");
             const spreadIndex = bookEngine.getSnapshot().document.spreads.findIndex((spread) => spread.id === spreadId);
             if (spreadIndex < 0) invalid("spreadId is not present in the current book.");
-            bookEngine.setSpread(spreadIndex);
+            bookEngine.setSpread(spreadIndex, "agent");
           }
           if (typeof input.theme === "undefined" && typeof input.preview === "undefined" && typeof input.spreadId === "undefined" && surface === undefined) invalid("set_presentation requires theme, preview, spreadId, or surface.");
           if (typeof input.theme !== "undefined") bookEngine.setTheme(theme, "agent");
@@ -1352,6 +1372,7 @@ export function registerWebMcpTools(
           if (visibleSurface === "shelf" && bookEngine.getSnapshot().session.preview) {
             bookEngine.setPreview(false, "agent");
           }
+          if (visibleSurface === "shelf") bookEngine.narrate("agent", "Codex is looking at the cover");
           if (visibleSurface) {
             const presented = bookEngine.getSnapshot();
             const presentedSpreadId = visibleSurface === "reader"

@@ -1020,10 +1020,17 @@ export class BookEngine {
     this.emit();
   }
 
-  setSpread(index: number) {
+  setSpread(index: number, source?: CommandSource) {
     const next = Math.max(0, Math.min(this.documentState.spreads.length - 1, index));
     this.sessionState = { ...this.sessionState, currentSpreadIndex: next, selectionId: null };
-    this.emit();
+    // A human turn is its own evidence; an agent turn happens off-screen for the reader.
+    if (source === "agent") this.narrate(source, `Codex turned to ${this.documentState.spreads[next]?.title || `spread ${next + 1}`}`);
+    else this.emit();
+  }
+
+  /** Surface a presentation-only agent step that changes no document state. */
+  narrate(source: CommandSource, summary: string) {
+    this.showAction(source, "success", summary);
   }
 
   setTheme(theme: ThemeId, source: CommandSource = "human") {
