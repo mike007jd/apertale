@@ -7,10 +7,11 @@ import {
   type StoredAssetMetadata,
 } from "./assetStore";
 import { buildCreationBrief, type AuthoringMode, type CreationBrief } from "./creationBrief";
+import { IMAGEGEN_SHEET, MAX_BOOK_SPREADS } from "./types";
 import { type CreationBookType, type CreationPhotoPolicy, type InteractionDensity } from "./authoringContract";
 
 export const CREATION_STYLES = ["Paper collage", "Watercolor", "Cinematic", "Surprise me"] as const;
-export const CREATION_LENGTHS = [4, 6, 8, 10, 12] as const;
+export const CREATION_LENGTHS = [IMAGEGEN_SHEET.tiles, 2 * IMAGEGEN_SHEET.tiles, MAX_BOOK_SPREADS] as const;
 export const CREATION_SOURCES = [
   { id: "idea", label: "Idea" },
   { id: "photos", label: "Photos" },
@@ -40,7 +41,7 @@ export type CreationWorkshopState = {
 
 export const INITIAL_CREATION_WORKSHOP: CreationWorkshopState = {
   mode: "idea",
-  spreadCount: 6,
+  spreadCount: 4,
   visualDirection: "Paper collage",
   interactionDensity: "balanced",
   photoUse: null,

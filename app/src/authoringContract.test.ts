@@ -263,7 +263,10 @@ describe("site-native authoring guide contract", () => {
     expect(guide.interaction.reveal).toEqual(REVEAL_KINDS);
     expect(guide.interaction.motion).toEqual([...MOTION_PRESETS]);
     expect(guide.cutouts.nativeAlpha).toBe(true);
-    expect(guide.cutouts.oneSubjectPerRequest).toBe(true);
+    expect(guide.cutouts.oneSubjectPerAsset).toBe(true);
+    expect(guide.cutouts.sheet).toMatch(/2x2/);
+    expect(byId["imagegen-before-create"]).toMatch(/2×2 sheet per four consecutive spreads/);
+    expect(byId["handoff-before-refer"]).toMatch(/images argument.*split: true/);
     expect(guide.verify).toEqual(expect.arrayContaining([
       expect.stringMatching(/content/i),
       expect.stringMatching(/asset counts/i),

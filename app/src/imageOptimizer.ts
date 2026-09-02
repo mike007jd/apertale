@@ -1,3 +1,4 @@
+import { SUPPORTED_IMAGE_TYPES } from "./bookElementGrammar";
 export const MAX_SOURCE_IMAGE_BYTES = 12_000_000;
 const MAX_STORED_IMAGE_BYTES = 1_500_000;
 const MAX_STORED_IMAGE_DIMENSION = 2048;
@@ -39,13 +40,42 @@ export function fitImageDimensions(width: number, height: number, maximum = MAX_
 }
 
 function replaceExtension(name: string, type: string) {
-  const extension = type === "image/jpeg" ? ".jpg" : ".png";
+  const extension = type === "image/jpeg" ? ".jpg" : type === "image/webp" ? ".webp" : ".png";
   return `${name.replace(/\.[^.]+$/, "") || "Imported image"}${extension}`;
 }
 
 const decodeImage = (blob: Blob): Promise<DecodedImage> => createImageBitmap(blob);
 
-function encode(canvas: HTMLCanvasElement, type: "image/png" | "image/jpeg", quality?: number) {
+/** Inline tool-argument bytes become the same File the drop target would have handed the registry; the browser decodes the base64. */
+export async function dataUrlToFile(name: string, dataUrl: string): Promise<File> {
+  if (!dataUrl.startsWith("data:image/")) throw new TypeError("Expected an image data URL.");
+  const blob = await (await fetch(dataUrl)).blob();
+  if (!SUPPORTED_IMAGE_TYPES.has(blob.type)) throw new TypeError("Expected a PNG, JPEG, or WebP data URL.");
+  return new File([blob], name, { type: blob.type });
+}
+
+/**
+ * Cuts one generated sheet into equal tiles in reading order. A 2×2 sheet is
+ * one ImageGen request for four spreads or four cutouts; PNG sheets keep alpha.
+ */
+export async function splitImageGrid(file: File, columns: number, rows: number): Promise<File[]> {
+  const decoded = await decodeImage(file);
+  try {
+    const width = Math.floor(decoded.width / columns);
+    const height = Math.floor(decoded.height / rows);
+    if (width < 1 || height < 1) throw new RangeError("The sheet is too small to split.");
+    const stem = file.name.replace(/\.[^.]+$/, "");
+    // WebP keeps alpha at a fraction of PNG's size; a browser without a WebP encoder answers with PNG, and the blob says so.
+    return await Promise.all(Array.from({ length: columns * rows }, (_, tile) => {
+      const { canvas } = draw(decoded, width, height, { x: (tile % columns) * width, y: Math.floor(tile / columns) * height, width, height });
+      return encode(canvas, "image/webp", 0.92).then((blob) => new File([blob], replaceExtension(`${stem}-${tile + 1}`, blob.type), { type: blob.type }));
+    }));
+  } finally {
+    decoded.close?.();
+  }
+}
+
+function encode(canvas: HTMLCanvasElement, type: "image/png" | "image/jpeg" | "image/webp", quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The browser could not encode the optimized image.")), type, quality);
   });
@@ -95,13 +125,15 @@ export function summarizeAlphaPixels(pixels: Uint8ClampedArray, width: number, h
   };
 }
 
-function draw(source: CanvasImageSource, width: number, height: number) {
+/** Paints `source` (or just `crop` of it) scaled onto a fresh width × height canvas. */
+function draw(source: CanvasImageSource, width: number, height: number, crop?: { x: number; y: number; width: number; height: number }) {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d", { alpha: true, willReadFrequently: true });
   if (!context) throw new Error("Canvas image optimization is unavailable in this browser.");
-  context.drawImage(source, 0, 0, width, height);
+  if (crop) context.drawImage(source, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
+  else context.drawImage(source, 0, 0, width, height);
   return { canvas, context };
 }
 

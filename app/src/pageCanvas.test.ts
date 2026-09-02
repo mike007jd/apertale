@@ -47,10 +47,17 @@ describe("paintWorkshopDrawing", () => {
     const texts: { text: string; alpha: number }[] = [];
     const drawn: unknown[] = [];
     const order: string[] = [];
+    const pencils: string[] = [];
     let segments = 0;
     const context = {
       strokeStyle: "", fillStyle: "", lineWidth: 0, lineCap: "", lineJoin: "", font: "", textBaseline: "", globalAlpha: 1, filter: "none",
       clearRect: () => undefined,
+      translate: () => undefined,
+      rotate: () => undefined,
+      closePath: () => undefined,
+      fill: () => undefined,
+      fillRect() { pencils.push(String(this.fillStyle)); },
+      measureText: (text: string) => ({ width: text.length * 10 }),
       drawImage(image: unknown) { drawn.push(image); order.push(`image:${this.globalAlpha}:${this.filter}`); },
       save: () => undefined,
       restore() { this.globalAlpha = 1; this.filter = "none"; },
@@ -61,7 +68,7 @@ describe("paintWorkshopDrawing", () => {
       fillText(text: string) { texts.push({ text, alpha: Number(this.globalAlpha) }); },
     };
     const canvas = { width: 200, height: 100, getContext: () => context };
-    return { strokes, texts, drawn, order, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
+    return { strokes, texts, drawn, order, pencils, pair: { overlay: { image: canvas, needsUpdate: false }, spread: {} } as unknown as Parameters<typeof paintWorkshopDrawing>[0] };
   }
   const line = (n: number) => ({ kind: "line" as const, points: Array.from({ length: n }, (_, index) => ({ x: index / (n - 1), y: 0.5 })) });
   const spread = (marks: StoryboardSpread["marks"], annotations: StoryboardSpread["annotations"] = []): StoryboardSpread => ({ index: 0, caption: "", sketchRevision: 1, marks, annotations });
@@ -74,6 +81,18 @@ describe("paintWorkshopDrawing", () => {
     expect(strokes[1].color).toContain("230, 74, 61");
     expect(strokes[1].width).toBeGreaterThan(strokes[0].width);
     expect(pair.overlay.needsUpdate).toBe(true);
+  });
+
+  it("rides a pencil on the mark being drawn and lifts it once the sketch is complete", () => {
+    const mid = recordingCanvas();
+    // A quarter of the reveal: the first of two marks is half drawn.
+    paintWorkshopDrawing(mid.pair, spread([line(11), line(11)]), [], 0.25);
+    expect(mid.strokes.map((item) => item.segments)).toEqual([5]);
+    expect(mid.pencils).toEqual(["#e8b04c", "rgba(38, 34, 30, .95)", "#d8615a"]);
+
+    const done = recordingCanvas();
+    paintWorkshopDrawing(done.pair, spread([line(11), line(11)]), [], 1);
+    expect(done.pencils).toEqual([]);
   });
 
   it("draws boxes, arrows with heads, and labels only once their turn has come", () => {

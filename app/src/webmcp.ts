@@ -1,6 +1,7 @@
 import { bookEngine } from "./bookEngine";
 import { BoundedMap } from "./boundedMap";
-import { getAssetMetadata, listAssetMetadata } from "./assetStore";
+import { getAssetMetadata, listAssetMetadata, storeLocalImages } from "./assetStore";
+import { dataUrlToFile, splitImageGrid } from "./imageOptimizer";
 import {
   backgroundAssetUseIssues,
   backgroundPairAssetRoleIssues,
@@ -14,7 +15,7 @@ import {
 } from "./bookAssetContract";
 import { isStoredAssetId } from "./assetId";
 import { CREATION_SOURCE_ASSET_LIMIT } from "./creationBrief";
-import { IMAGE_HANDOFF_ASSET_USES, dismissImageHandoff, requestImageHandoff } from "./imageHandoff";
+import { IMAGE_HANDOFF_ASSET_USES, dismissImageHandoff, importOutcome, requestImageHandoff, supersedeImageHandoff } from "./imageHandoff";
 import type { AuthoringSurfaceRequest } from "./authoringPresentation";
 import { recordDiagnostic } from "./diagnostics";
 import {
@@ -27,7 +28,7 @@ import {
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { listProjectAssetReferences } from "./projectArtifact";
 import { MAX_LABEL_LENGTH, MAX_MARKS_PER_SPREAD, MAX_STROKE_POINTS, applyStoryboardSketches, getStoryboardSnapshot, resetStoryboard, retireStoryboard, summarizeStoryboard, type StoryboardMark, type StoryboardPoint, type StoryboardSketchInput } from "./storyboard";
-import { BOOK_ELEMENT_ID_PATTERN, MOTION_PRESETS, MAX_BOOK_PUBLISHABLE_ASSETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
+import { BOOK_ELEMENT_ID_PATTERN, IMAGEGEN_SHEET, MOTION_PRESETS, MAX_BOOK_PUBLISHABLE_ASSETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, PreparedBookBackground, PreparedBookLayer, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 import {
   QUALITY_CONTRACT_VERSION,
@@ -125,6 +126,26 @@ function optionalBoundedNumber(input: ToolInput, key: string, minimum: number, m
     invalid(`${key} must be between ${minimum} and ${maximum}.`);
   }
   return value;
+}
+
+/** Inline finals from the tool argument, each sheet already cut into its tiles in reading order. */
+async function inlineImageFiles(images: unknown): Promise<File[]> {
+  if (!Array.isArray(images) || images.length === 0) invalid("images must hold at least one entry.");
+  const entries = images.map((image, index) => {
+    if (!image || typeof image !== "object" || Array.isArray(image)) invalid(`images[${index}] must be an object.`);
+    const entry = image as ToolInput;
+    assertOnly(entry, ["name", "dataUrl", "split"]);
+    if (typeof entry.split !== "undefined" && typeof entry.split !== "boolean") invalid(`images[${index}].split must be a boolean.`);
+    return { index, name: boundedString(entry, "name", 128), dataUrl: requiredString(entry, "dataUrl"), split: entry.split === true };
+  });
+  // Count tiles before touching pixels: over-cap sheets are refused, not decoded and discarded.
+  const total = entries.reduce((count, entry) => count + (entry.split ? IMAGEGEN_SHEET.tiles : 1), 0);
+  if (total > MAX_BOOK_PUBLISHABLE_ASSETS) invalid(`images would store ${total} assets; the limit is ${MAX_BOOK_PUBLISHABLE_ASSETS}.`);
+  const files = await Promise.all(entries.map(async ({ index, name, dataUrl, split }) => {
+    const file = await dataUrlToFile(name, dataUrl).catch(() => invalid(`images[${index}].dataUrl must be a base64 PNG, JPEG, or WebP data URL.`));
+    return split ? splitImageGrid(file, IMAGEGEN_SHEET.columns, IMAGEGEN_SHEET.rows) : [file];
+  }));
+  return files.flat();
 }
 
 function pick<T extends string>(value: unknown, name: string, allowed: readonly T[]) {
@@ -1490,13 +1511,29 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.requestImageHandoff,
         title: "Request an image handoff",
-        description: "Open the drop target for source photos or generated book art and return at once; the reader or your own file tools supply the files.",
+        description: "Store finals sent inline as base64 data URLs (a 2×2 sheet splits into four assets) and return their ids; without images, open the drop target instead.",
         inputSchema: {
           type: "object",
           properties: {
             requestId: { type: "string", description: "Caller-supplied id for this request." },
             assetUse: { type: "string", enum: [...IMAGE_HANDOFF_ASSET_USES], description: "Use source-photo for reader references; use book-art for generated cover, spread, clean-plate, or cutout finals." },
             reason: { type: "string", description: "Plain-language reason shown to the reader, including what and how many files are needed.", maxLength: 220 },
+            images: {
+              type: "array",
+              minItems: 1,
+              maxItems: MAX_BOOK_PUBLISHABLE_ASSETS,
+              description: "Preferred path: inline WebP data URLs (PNG/JPEG accepted) under 12 MB. split: true stores a sheet as four tiles in reading order; ids return at once.",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", minLength: 1, maxLength: 128, description: "File name; tiles get -1 … -4 suffixes." },
+                  dataUrl: { type: "string", minLength: 32, description: "data:image/png;base64,… (or image/jpeg, image/webp)." },
+                  split: { type: "boolean", description: "true for a 2×2 sheet: top-left, top-right, bottom-left, bottom-right become four assets." },
+                },
+                required: ["name", "dataUrl"],
+                additionalProperties: false,
+              },
+            },
           },
           required: ["requestId", "assetUse", "reason"],
           additionalProperties: false,
@@ -1505,14 +1542,30 @@ export function registerWebMcpTools(
         // chose, so it takes the same hint every other mutating tool carries.
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: (input, options) => runRegisteredTool(SITE_TOOL.requestImageHandoff, options?.signal ?? uncancelledToolSignal, async () => {
-          assertOnly(input, ["requestId", "assetUse", "reason"]);
+          assertOnly(input, ["requestId", "assetUse", "reason", "images"]);
           const requestId = requiredString(input, "requestId");
           const prior = sessionResults.get(requestId);
           if (prior) return prior;
-          const assetUse = requiredString(input, "assetUse");
-          if (!IMAGE_HANDOFF_ASSET_USES.includes(assetUse as (typeof IMAGE_HANDOFF_ASSET_USES)[number])) invalid("assetUse is not supported.");
+          const assetUse = requiredString(input, "assetUse") as (typeof IMAGE_HANDOFF_ASSET_USES)[number];
+          if (!IMAGE_HANDOFF_ASSET_USES.includes(assetUse)) invalid("assetUse is not supported.");
           const reason = boundedString(input, "reason", 220);
-          const pendingOutcome = requestImageHandoff({ requestId, assetUse: assetUse as (typeof IMAGE_HANDOFF_ASSET_USES)[number], reason });
+          if (typeof input.images !== "undefined") {
+            // Bytes arrived in the argument, so no drawer, no file chooser, no
+            // reader drag: the same admission as a drop, answered with the ids.
+            const files = await inlineImageFiles(input.images);
+            supersedeImageHandoff("Superseded by an inline image handoff.");
+            const batch = await storeLocalImages(files, { assetUse, limit: MAX_BOOK_PUBLISHABLE_ASSETS });
+            if (batch.assets.length === 0) invalid(`no image was stored (${batch.rejected} rejected, ${batch.failed} failed); send PNG, JPEG, or WebP under 12 MB.`);
+            const outcome = importOutcome({ assetIds: batch.assets.map((asset) => asset.id), rejected: batch.rejected, failed: batch.failed });
+            recordDiagnostic(outcome.status === "partial" ? "handoff:partial" : "handoff:provided", { requestId, assetUse, inline: true, ...outcome.counts });
+            return remember(requestId, {
+              ...outcome,
+              assetUse,
+              assets: batch.assets.map((asset) => ({ id: asset.id, name: asset.name, width: asset.width, height: asset.height })),
+              after: "Bind only these ids; refresh get_project_context(detail: \"assets\") to see alpha analysis before using a tile as a cutout.",
+            });
+          }
+          const pendingOutcome = requestImageHandoff({ requestId, assetUse, reason });
           activeImageHandoffs.set(requestId, pendingOutcome);
           void pendingOutcome.finally(() => {
             if (activeImageHandoffs.get(requestId) === pendingOutcome) activeImageHandoffs.delete(requestId);

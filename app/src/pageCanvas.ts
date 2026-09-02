@@ -17,11 +17,14 @@ export type PagePair = {
   overlay: THREE.CanvasTexture;
 };
 
-/** Per-mark reveal budget: a six-mark spread draws in about half a second, a full one in 2.4 s. */
-export const MARK_REVEAL_MS = 90;
-export const MAX_REVEAL_MS = 2400;
+/** Per-mark reveal budget: a six-mark spread is pencilled in about 1.5 s, a full one in 3.6 s, slow enough to watch the pencil work. */
+export const MARK_REVEAL_MS = 240;
+export const MAX_REVEAL_MS = 3600;
 
 const PENCIL = "rgba(64, 58, 50, .82)";
+const PENCIL_WOOD = "#e8b04c";
+const PENCIL_DARK = "rgba(38, 34, 30, .95)";
+const PENCIL_ERASER = "#d8615a";
 const RED_PENCIL = "rgba(230, 74, 61, .94)";
 const HAND_FONT = "\"Marker Felt\", \"Chalkboard SE\", \"Bradley Hand\", \"Segoe Print\", \"Comic Sans MS\", cursive";
 const LABEL_PX = { s: 36, m: 48, l: 64 } as const;
@@ -51,15 +54,17 @@ function sketchImage(assetId: string) {
 /** A deterministic wobble so a pencil line never reads as a vector rule, and never jitters between frames. */
 const wobble = (seed: number, index: number) => Math.sin(seed * 12.9898 + index * 1.7) * 1.4;
 
-function tracePath(context: CanvasRenderingContext2D, points: readonly StoryboardPoint[], progress = 1, seed = 0) {
+/** Strokes the first `progress` of the path and returns the point the pencil stopped at. */
+function tracePath(context: CanvasRenderingContext2D, points: readonly StoryboardPoint[], progress = 1, seed = 0): StoryboardPoint | null {
   const visible = Math.max(0, Math.min(points.length, Math.ceil(points.length * progress)));
-  if (visible < 2) return;
+  if (visible < 2) return points[0] ?? null;
   context.beginPath();
   context.moveTo(points[0].x, points[0].y);
   for (let index = 1; index < visible; index += 1) {
     context.lineTo(points[index].x + wobble(seed, index), points[index].y + wobble(seed + 1, index));
   }
   context.stroke();
+  return points[visible - 1];
 }
 
 const px = (point: StoryboardPoint, width: number, height: number) => ({ x: point.x * width, y: point.y * height });
@@ -100,16 +105,19 @@ function paintArrowHead(context: CanvasRenderingContext2D, from: StoryboardPoint
   context.stroke();
 }
 
-function paintMark(context: CanvasRenderingContext2D, mark: StoryboardMark, width: number, height: number, progress: number, seed: number) {
-  if (progress <= 0) return;
+/** Paints a mark `progress` of the way in; while it is still being drawn, returns where the pencil is. */
+function paintMark(context: CanvasRenderingContext2D, mark: StoryboardMark, width: number, height: number, progress: number, seed: number): StoryboardPoint | null {
+  if (progress <= 0) return null;
   if (mark.kind === "label") {
+    const size = LABEL_PX[mark.size ?? "m"];
     context.save();
     context.globalAlpha = progress;
-    context.font = `${LABEL_PX[mark.size ?? "m"]}px ${HAND_FONT}`;
+    context.font = `${size}px ${HAND_FONT}`;
     context.textBaseline = "top";
     context.fillText(mark.text, mark.x * width, mark.y * height);
+    const tip = progress < 1 ? { x: mark.x * width + context.measureText(mark.text).width * progress, y: mark.y * height + size * 0.8 } : null;
     context.restore();
-    return;
+    return tip;
   }
   const path = markPath(mark, width, height);
   const ghost = mark.kind === "rect" && mark.assetId ? sketchImage(mark.assetId) : null;
@@ -122,8 +130,8 @@ function paintMark(context: CanvasRenderingContext2D, mark: StoryboardMark, widt
     context.drawImage(ghost, crop.x, crop.y, crop.width, crop.height, l, t, w, h);
     context.restore();
   }
-  tracePath(context, path, progress, seed);
-  if (progress < 1) return;
+  const tip = tracePath(context, path, progress, seed);
+  if (progress < 1) return tip;
   if (mark.kind === "arrow") paintArrowHead(context, path[1], path[2]);
   if (mark.label) {
     const anchor = mark.kind === "arrow" ? path[1] : path[0];
@@ -133,6 +141,7 @@ function paintMark(context: CanvasRenderingContext2D, mark: StoryboardMark, widt
     context.fillText(mark.label, anchor.x + 6, anchor.y - 6);
     context.restore();
   }
+  return null;
 }
 
 /**
@@ -159,6 +168,29 @@ export function paintWorkshopDrawing(
   pair.overlay.needsUpdate = true;
 }
 
+/** The pencil drawing right now: tip on the live end of the stroke, body leaning up and to the right. */
+function paintPencil(context: CanvasRenderingContext2D, tip: StoryboardPoint) {
+  context.save();
+  context.translate(tip.x, tip.y);
+  context.rotate(-Math.PI / 3);
+  context.fillStyle = PENCIL_DARK;
+  context.beginPath();
+  context.moveTo(0, 0);
+  context.lineTo(18, -7);
+  context.lineTo(18, 7);
+  context.closePath();
+  context.fill();
+  context.fillStyle = PENCIL_WOOD;
+  context.fillRect(18, -7, 96, 14);
+  context.fillStyle = PENCIL_DARK;
+  context.globalAlpha = 0.3;
+  context.fillRect(18, 1, 96, 6);
+  context.globalAlpha = 1;
+  context.fillStyle = PENCIL_ERASER;
+  context.fillRect(114, -7, 14, 14);
+  context.restore();
+}
+
 function paintSketch(context: CanvasRenderingContext2D, spread: StoryboardSpread | undefined, width: number, height: number, sketchProgress: number) {
   context.lineCap = "round";
   context.lineJoin = "round";
@@ -166,7 +198,10 @@ function paintSketch(context: CanvasRenderingContext2D, spread: StoryboardSpread
   context.fillStyle = PENCIL;
   context.lineWidth = 6.5;
   const marks = spread?.marks ?? [];
-  marks.forEach((mark, index) => paintMark(context, mark, width, height, clamp01(sketchProgress * marks.length - index), index + 1));
+  // At most one mark is mid-stroke at a time; the pencil sits on its live end.
+  let pencil: StoryboardPoint | null = null;
+  for (const [index, mark] of marks.entries()) pencil = paintMark(context, mark, width, height, clamp01(sketchProgress * marks.length - index), index + 1) ?? pencil;
+  if (pencil) paintPencil(context, pencil);
   context.strokeStyle = RED_PENCIL;
   context.lineWidth = 8;
   spread?.annotations.forEach((stroke) => tracePath(context, stroke.points.map((point) => px(point, width, height))));

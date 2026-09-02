@@ -7,6 +7,8 @@ export type ThemeId = (typeof THEME_IDS)[number];
 export type QualityTier = "balanced" | "reduced";
 /** Authoring bound shared by persistence validation, create, readiness, and the WebMCP schema. */
 export const MAX_BOOK_SPREADS = 12 as const;
+/** One ImageGen request renders this sheet; spread counts step by its tile count so no sheet is half used. */
+export const IMAGEGEN_SHEET = { columns: 2, rows: 2, tiles: 4 } as const;
 /** Browser-local image capacity shared by readiness, quality review, and publishing. */
 export const MAX_BOOK_PUBLISHABLE_ASSETS = 50 as const;
 /** Authoring bound on one spread's foreground/procedural layer list. */

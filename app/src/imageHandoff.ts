@@ -9,13 +9,14 @@
  * across two or three context switches to become an asset id the Agent could
  * reference.
  *
- * WebMCP arguments are JSON, so image bytes still enter through the browser's
- * file input or drop target. The tool opens that target and returns immediately;
- * the calling Agent can then use Computer Use or a browser file chooser without
- * being blocked by its own WebMCP call. The page cannot inspect the Agent's tool
- * inventory, so the Agent owns that capability check. When host UI automation
- * is unavailable, it opens the real asset folder and asks the reader to drag
- * its files once instead of making them hunt through a hidden work directory.
+ * Bytes normally arrive inline as base64 data URLs in the tool argument and are
+ * admitted at once. When an Agent cannot send bytes, the tool opens the drop
+ * target and returns immediately; the Agent can then use Computer Use or a
+ * browser file chooser without being blocked by its own WebMCP call. The page
+ * cannot inspect the Agent's tool inventory, so the Agent owns that capability
+ * check. When host UI automation is unavailable, it opens the real asset folder
+ * and asks the reader to drag its files once instead of making them hunt
+ * through a hidden work directory.
  */
 
 export const IMAGE_HANDOFF_ASSET_USES = ["source-photo", "book-art"] as const;
@@ -87,7 +88,7 @@ function settleImageHandoff(requestId: string, outcome: ImageHandoffOutcome) {
  * cannot both be open, and an Agent that asks twice means the second ask.
  */
 export function requestImageHandoff(request: ImageHandoffRequest): Promise<ImageHandoffOutcome> {
-  pending?.settle({ status: "dismissed", reason: "Superseded by a newer request." });
+  supersedeImageHandoff();
   return new Promise<ImageHandoffOutcome>((resolve) => {
     pending = {
       request,
@@ -101,6 +102,11 @@ export function requestImageHandoff(request: ImageHandoffRequest): Promise<Image
   });
 }
 
+/** An open drawer answers a question the Agent has since re-asked, inline or not. */
+export function supersedeImageHandoff(reason = "Superseded by a newer request.") {
+  pending?.settle({ status: "dismissed", reason });
+}
+
 export function describePartialImageHandoff(counts: ImageHandoffImportCounts) {
   const problems = [
     counts.rejected > 0 ? `${counts.rejected} unsupported ${counts.rejected === 1 ? "file was" : "files were"} rejected` : null,
@@ -109,17 +115,22 @@ export function describePartialImageHandoff(counts: ImageHandoffImportCounts) {
   return `${counts.accepted} ${counts.accepted === 1 ? "image was" : "images were"} added, but ${problems.join(" and ")}. Only the returned asset ids are available; add replacements if the complete set is still required.`;
 }
 
-/** Called by the reader surface once one or more imported assets have real ids. */
-export function completeImageHandoff(requestId: string, imported: ImageHandoffImportResult) {
+/** The one rule for what an import batch means, whether it came through the drawer or inline. */
+export function importOutcome(imported: ImageHandoffImportResult): Exclude<ImageHandoffOutcome, { status: "dismissed" }> {
   if (imported.assetIds.length === 0) throw new TypeError("An image handoff cannot complete without an accepted asset.");
   const counts: ImageHandoffImportCounts = {
     accepted: imported.assetIds.length,
     rejected: imported.rejected,
     failed: imported.failed,
   };
-  const outcome: ImageHandoffOutcome = counts.rejected > 0 || counts.failed > 0
+  return counts.rejected > 0 || counts.failed > 0
     ? { status: "partial", assetIds: imported.assetIds, counts, reason: describePartialImageHandoff(counts) }
     : { status: "provided", assetIds: imported.assetIds, counts };
+}
+
+/** Called by the reader surface once one or more imported assets have real ids. */
+export function completeImageHandoff(requestId: string, imported: ImageHandoffImportResult) {
+  const outcome = importOutcome(imported);
   return settleImageHandoff(requestId, outcome) ? outcome : null;
 }
 

@@ -167,7 +167,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "- Plan the title, dedicated generated portrait cover, every spread, and ordered provenance.",
     ...(bookType === "preserved-photo-album"
       ? ["- Use ImageGen for the dedicated portrait cover. Prepare one source-true original-photo layout per spread for the approximately 1.62:1 stage without reillustrating people or changing photo geometry beyond the authorised policy."]
-      : ["- Use the host ImageGen/image editing capability to make a dedicated portrait cover and purpose-built full-spread artwork for every spread."]),
+      : ["- Use the host ImageGen/image editing capability in 2×2 sheets (cover alone; spreads, clean plates, and cutouts four per sheet) exactly as the authoring guide's imagegen-before-create and cutouts gates describe."]),
     "- Compose full-spread artwork for the approximately 1.62:1 stage. The 1.45–2.10 input range is compatibility tolerance, not an art-direction target.",
     "- Before handoff or create, normalize each spread's source composite and clean plate so their original pixel width and height are identical.",
     "- Use source photos as references and story truth, not as a lazy final right-page placement unless the user explicitly chose a literal photo-album treatment.",
@@ -194,7 +194,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
     "- If running quality review and no spread declares artwork.personalSourceAssetId, record photo-fidelity-integration with outcome: \"note\" and one evidence item with scope: \"book\" and locator: \"creationBrief.sourceAssets\", explaining that no personal source material exists. When any spread declares one, record per-spread evidence.",
     "- Quality review is optional and advisory. Apply useful patches at most once; never delay or block a user-requested share.",
     "- Verify all spreads against the completion gates.",
-    "You cannot send image bytes through a JSON tool argument. Call request_image_handoff with the correct assetUse; it opens the matching drawer and drop target, then returns immediately. Inspect your current tool inventory: if Computer Use or a browser file chooser is available, select the local files yourself. Otherwise open the actual asset directory in my file manager (generated book art is normally in work/final-assets) and ask me to drag its files onto the visible target once. Then refresh get_project_context(detail: \"assets\"). Do not pretend a media transfer succeeded.",
+    "Transfer images inline: call request_image_handoff with the correct assetUse and an images array of base64 data URLs (PNG/JPEG/WebP, under 12 MB each). Give every sheet split: true; the page stores its four tiles in reading order and returns the asset ids in the result. Compress before sending: convert each final to WebP (quality about 85, alpha kept) under 3 MB, then base64 it; send one image per call with a long call timeout (about 180 s). Only if inline bytes are impossible, call without images: it opens the drawer and drop target and returns immediately; then use Computer Use or a browser file chooser, or open the actual asset directory in my file manager (normally work/final-assets) and ask me to drag its files onto the visible target once. Then refresh get_project_context(detail: \"assets\"). Do not pretend a media transfer succeeded.",
     "",
     "Completion gates:",
     renderGates(gates),

@@ -1,6 +1,6 @@
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { isStoredAssetId } from "./assetId";
-import { MAX_BOOK_PUBLISHABLE_ASSETS, MOTION_PRESETS } from "./types";
+import { IMAGEGEN_SHEET, MAX_BOOK_PUBLISHABLE_ASSETS, MOTION_PRESETS } from "./types";
 import siteManifest from "../site-manifest.json";
 
 export const SITE_TOOL = Object.freeze(siteManifest.webMcp.tools);
@@ -236,11 +236,11 @@ export function assessCreationReadiness(
   }
 
   const interactionTarget = interactionLayerTarget(input?.interactionDensity);
-  const suggestedSpreadCount = isPhotoBook
-    ? Math.max(4, Math.min(8, assets.length || 6))
-    : 6;
+  // One or two sheets' worth of spreads; more photos than one sheet holds earn the second.
+  const suggestedSpreadCount = isPhotoBook && assets.length > IMAGEGEN_SHEET.tiles ? 2 * IMAGEGEN_SHEET.tiles : IMAGEGEN_SHEET.tiles;
   const recommendedSourceCount = Math.max(1, assets.length);
   if (effectiveSpreadCount && effectiveSpreadCount > 8) recommendations.push("A 4–8 spread first edition usually keeps the story tighter; keep the longer plan only when every beat is distinct.");
+  if (effectiveSpreadCount && effectiveSpreadCount % IMAGEGEN_SHEET.tiles !== 0) recommendations.push(`Use a multiple of ${IMAGEGEN_SHEET.tiles} spreads: each ImageGen sheet renders ${IMAGEGEN_SHEET.tiles} spreads, so other counts leave part of a sheet unused.`);
   if (bookType === "photo-led-keepsake") recommendations.push("Use source photos as identity-faithful references, then build new full-spread scenes around them.");
   if (bookType === "preserved-photo-album") recommendations.push("Keep original photo geometry primary; use restrained framing, captions, and interactive overlays instead of reillustrating faces.");
 
@@ -427,7 +427,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "imagegen-before-create",
-      rule: "Finish every final cover and spread asset before manage_book create. Use host ImageGen for generated art; do not reillustrate preserved-photo-album originals.",
+      rule: "Finish every final cover and spread asset before manage_book create. Use host ImageGen for generated art in sheets, not one request per image: one dedicated portrait cover request, then one 2×2 sheet per four consecutive spreads (each quadrant a complete 1.62:1 composition, no gutters or borders between quadrants), one matching 2×2 sheet of clean plates, and one transparent 2×2 sheet per four cutouts. Ask for the largest output size available so each quadrant stays sharp. Do not reillustrate preserved-photo-album originals.",
     },
     {
       id: "photo-truth",
@@ -435,7 +435,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "handoff-before-refer",
-      rule: "Hand off reader references with request_image_handoff assetUse source-photo and generated finals with assetUse book-art, then refresh get_project_context(detail: assets) before referring to those ids.",
+      rule: "Hand off reader references with request_image_handoff assetUse source-photo and generated finals with assetUse book-art. Prefer the images argument: compress each final to WebP (alpha kept, under 3 MB) before base64, pass one image per call as a data URL, and give every sheet split: true, so the page stores the four tiles in reading order and returns their ids at once. Only when inline bytes are impossible, call without images to open the drop target. Refresh get_project_context(detail: assets) before referring to those ids.",
     },
     {
       id: "layout",
@@ -447,7 +447,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "cutouts",
-      rule: "Foreground subjects must be native transparent cutouts with a real alpha channel. One ImageGen request produces exactly one subject.",
+      rule: "Foreground subjects must be native transparent cutouts with a real alpha channel. One ImageGen request renders up to four subjects on one transparent 2×2 sheet, each complete and centred in its own quadrant with clear padding and nothing crossing a quadrant edge; hand the sheet off with split so every stored asset holds exactly one subject.",
     },
     {
       id: "provenance-revision",
@@ -506,7 +506,8 @@ export function buildAuthoringGuide() {
     },
     cutouts: {
       nativeAlpha: true,
-      oneSubjectPerRequest: true,
+      sheet: "2x2 transparent sheet, up to four subjects per ImageGen request, split at handoff",
+      oneSubjectPerAsset: true,
       reject: [
         "opaque canvas",
         "baked checkerboard",
@@ -515,7 +516,7 @@ export function buildAuthoringGuide() {
         "chroma spill",
         "detached crop fragments",
         "baked glow",
-        "atlas, contact sheet, sprite sheet, or multi-object grid",
+        "an unsplit sheet stored as one asset, or a subject crossing a quadrant edge",
       ],
     },
     provenance: "Ordered provenance for the cover and every spread, distinguishing user photo, generated art, and curated sample.",

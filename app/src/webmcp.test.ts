@@ -4,7 +4,7 @@ import { BookEngine, bookEngine, humanEdit } from "./bookEngine";
 import { completeImageHandoff, currentImageHandoff } from "./imageHandoff";
 import { QUALITY_VISUAL_CRITERION_IDS } from "./qualityContract";
 import { registerWebMcpTools } from "./webmcp";
-import { getAssetMetadata, type StoredAssetMetadata } from "./assetStore";
+import { getAssetMetadata, storeLocalImages, type StoredAssetMetadata } from "./assetStore";
 import { addStoryboardAnnotation, getStoryboardSnapshot, resetStoryboard } from "./storyboard";
 
 const verifiedAssets = vi.hoisted(() => new Map<string, StoredAssetMetadata>());
@@ -32,6 +32,14 @@ vi.mock("./assetStore", () => ({
     .map((id) => verifiedAssets.get(id))
     .filter((asset): asset is StoredAssetMetadata => Boolean(asset))),
   listAssetMetadata: vi.fn(async () => []),
+  storeLocalImages: vi.fn(async (files: Iterable<File>, options: { assetUse: string }) => {
+    const list = [...files];
+    return {
+      assets: list.map((file, index) => ({ id: localAssetId(900 + index), name: file.name, type: file.type, size: file.size, width: 16, height: 16, assetUse: options.assetUse, createdAt: "" })),
+      rejected: 0,
+      failed: 0,
+    };
+  }),
 }));
 
 const readyStoryBrief = (spreadCount: number) => ({
@@ -1524,6 +1532,52 @@ describe("WebMCP registration", () => {
       after: expect.stringMatching(/refresh get_project_context/i),
     });
     expect(currentImageHandoff()?.requestId).toBe("handoff-computer-use");
+    cleanup();
+  });
+
+  it("stores inline data-URL finals at once and never opens the drawer", async () => {
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", {
+      modelContext: {
+        registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+      },
+    });
+    const cleanup = registerWebMcpTools(() => undefined);
+    await vi.waitFor(() => expect(tools).toHaveLength(SITE_TOOL_NAMES.length));
+    const handoff = tools.find((tool) => tool.name === "request_image_handoff")!;
+    // A one-pixel PNG; the bytes matter only in that they round-trip into a File.
+    const pixel = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const result = JSON.parse(String(await handoff.execute({
+      requestId: "handoff-inline",
+      assetUse: "book-art",
+      reason: "Store the cover and one spread sheet.",
+      images: [{ name: "cover.png", dataUrl: pixel }, { name: "spread-sheet.png", dataUrl: pixel }],
+    }, { signal: new AbortController().signal }))) as Record<string, unknown>;
+    expect(result).toMatchObject({
+      status: "provided",
+      assetUse: "book-art",
+      assetIds: [localAssetId(900), localAssetId(901)],
+      counts: { accepted: 2, rejected: 0, failed: 0 },
+      assets: [
+        { id: localAssetId(900), name: "cover.png" },
+        { id: localAssetId(901), name: "spread-sheet.png" },
+      ],
+    });
+    const stored = vi.mocked(storeLocalImages).mock.calls.at(-1)!;
+    const [first] = [...stored[0]];
+    expect(first).toBeInstanceOf(File);
+    expect(first.type).toBe("image/png");
+    expect(first.size).toBe(70);
+    expect(stored[1]).toMatchObject({ assetUse: "book-art" });
+    expect(currentImageHandoff()).toBeNull();
+
+    await expect(handoff.execute({
+      requestId: "handoff-inline-bad",
+      assetUse: "book-art",
+      reason: "Not an image.",
+      images: [{ name: "x.png", dataUrl: "data:text/plain;base64,aGVsbG8gd29ybGQgdGhpcyBpcyBub3QgYW4gaW1hZ2U=" }],
+    }, { signal: new AbortController().signal })).rejects.toThrow("images[0].dataUrl must be a base64 PNG, JPEG, or WebP data URL.");
+    expect(currentImageHandoff()).toBeNull();
     cleanup();
   });
 

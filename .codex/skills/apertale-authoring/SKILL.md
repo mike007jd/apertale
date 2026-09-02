@@ -11,7 +11,7 @@ Treat Apertale as the renderer and browser-local project store. Plan, write, ins
 
 1. Call `get_project_context` before planning or changing anything. If it is unavailable, ask the user to open Apertale in the Codex built-in browser and stop without claiming a change.
 2. Read `get_project_context(detail: "authoring-guide")` and follow its current authoring, evidence, handoff, review, reporting, and stopping contract.
-3. Read [tool workflow](references/tool-workflow.md) before mutation. Sketch the whole rough book with `sketch_storyboard` before generating final art, and revise only the spreads the reader marks in red. Read [authoring recipes](references/authoring-recipes.md) for the selected idea, photo-led, preserved-photo, or illustration-led pattern.
+3. Read [tool workflow](references/tool-workflow.md) before mutation. Sketch the whole rough book with `sketch_storyboard` before generating final art, revise only the spreads the reader marks in red, generate art in 2×2 sheets, and hand finals off inline through `request_image_handoff(images)` with `split`. Read [authoring recipes](references/authoring-recipes.md) for the selected idea, photo-led, preserved-photo, or illustration-led pattern.
 4. Use `get_project_context(detail: "creation-readiness")` with a versioned brief. Ask its blocking questions together, re-check, and reuse the exact ready brief for creation.
 
 ## Mutate with evidence
