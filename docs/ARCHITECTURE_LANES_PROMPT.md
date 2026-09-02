@@ -1,7 +1,7 @@
 # Apertale 架构加深 · 多 lane 执行 prompt（第六轮）
 
 > 用法：新 session 中 `@docs/ARCHITECTURE_LANES_PROMPT.md`。
-> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。第二轮（Lane F–I）、第三轮（Lane J、K）、第四轮（Lane L、M）与第五轮（Lane N）也已合入；第六轮 Lane O（只报告）已完成。本文件是第六轮实作 lane 的 handoff，已内含全部结论，不依赖外部报告。
+> 来源：2026-09-02 架构审查（8 个加深候选）+ ponytail 审计（22 项裁剪）。第一轮（两波五 lane）已于同日合入 main（`05eaad1..2fc00ef`，13 个提交）。第二轮（Lane F–I）、第三轮（Lane J、K）、第四轮（Lane L、M）与第五轮（Lane N）也已合入；第六轮（Lane O 只报告 + Lane P）也已合入。本文件是第七轮的 handoff，已内含全部结论，不依赖外部报告。
 
 ## 你的角色
 
@@ -236,9 +236,19 @@ Lane M 的依赖图要点（grep 为准，GitNexus 索引未含第三轮符号�
 
 Lane O 起始 `npm test`：33 文件 / 361 用例；`git status --short` 为空；未产生分支合并。
 
-### 第六轮实作 lane（待用户决定开哪几条）
+## 第六轮实作已完成（2026-09-02 合入 main，不要重做）
 
-#### Lane P · 去掉三个只为测试 export 的符号（候选 1，建议开）
+| Lane | 结果 | 关键产物 / 偏差 |
+|---|---|---|
+| P · 去掉三个只为测试 export 的符号 | 合并（`a7109bf`，merge `336ad19`） | `authoringContract.ts` 的 `AUTHORING_HARD_GATE_IDS` / `PHOTO_TRUTH_REQUIREMENT` / `authoringHardGates` 去掉 `export`，文案零改动；`authoringContract.test.ts` 删三行 import，`:224` 内联 12 个 hard gate id 字面量，删重复的 `authoringHardGates()` 与 `:297` 断言，`byId["photo-truth"]` 改为对 `guide.gates` 同 id 的 requirement 断言，紧随的三条正则未动。GitNexus `impact` / `detect_changes` 与 grep 一致（索引未落后）。2 文件 +5/−10 |
+
+第六轮总计 2 文件 +5/−10（不含文档）；测试 361 → 361；`verify:release` 退出码 0（vitest 33 / 361，test:sites 46）。无行为差异。Lane Q（候选 3）用户按推荐未开，仍作为「放宽净行数标准时可开」保留在下方。
+
+---
+
+### 第六轮实作 lane（保留作记录 / 待定）
+
+#### Lane P · 去掉三个只为测试 export 的符号（候选 1，已完成）
 
 **目标**：`authoringContract.ts` 的 `AUTHORING_HARD_GATE_IDS` / `PHOTO_TRUTH_REQUIREMENT` / `authoringHardGates` 去掉 `export`；`authoringContract.test.ts` 改为通过 `buildAuthoringGuide()` 的公共输出断言。
 
@@ -248,7 +258,7 @@ Lane O 起始 `npm test`：33 文件 / 361 用例；`git status --short` 为空�
 
 **停止条件**：`grep -rn "AUTHORING_HARD_GATE_IDS\|PHOTO_TRUTH_REQUIREMENT\|authoringHardGates" app/src --include=*.test.ts` 为空；typecheck + test 全绿，用例数 ≥ 361（删的是重复断言不是用例，用例数应不变）；任何 prompt 文案字符串零改动；一次提交。
 
-#### Lane Q · `SUPPORTED_IMAGE_TYPES` 下沉到 `types.ts`（候选 3，仅当用户放宽 (b) 为「不增加」时开）
+#### Lane Q · `SUPPORTED_IMAGE_TYPES` 下沉到 `types.ts`（候选 3，未开；仅当用户放宽 (b) 为「不增加」时开）
 
 **目标**：删 `assetStore.ts:2` 与 `bookAssetContract.ts:3` 两条只为一个常量存在的 `→ bookElementGrammar` 边；`types.ts` 新增 `SUPPORTED_IMAGE_TYPES`（列表 + `ReadonlySet`），紧挨 `BOOK_PROVENANCE`；`bookElementGrammar.ts` 字面量的 `imageTypes` 改从 types 取值，`:65` 删除并 **不 re-export**；`publishingClient.ts` 改从 `./types` 取值（补一条值 import）。
 
@@ -266,4 +276,4 @@ Lane O 起始 `npm test`：33 文件 / 361 用例；`git status --short` 为空�
 
 ## 最终汇报
 
-按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第六轮起点 33 / 361，`test:sites` 46；Lane O 未改代码，仍为 33 / 361）；任何刻意的行为差异单列。
+按 lane 列：合并了 / 跳过了 / 需要用户决策；`git diff <起点> --stat` 总计；`npm run verify:release` 最后 10 行原样贴出；测试数量前后对比（第七轮起点 33 / 361，`test:sites` 46）；任何刻意的行为差异单列。
