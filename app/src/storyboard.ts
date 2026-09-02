@@ -16,7 +16,8 @@ export type StoryboardBox = { x: number; y: number; w: number; h: number };
 
 export type StoryboardMark =
   | { kind: "line"; points: StoryboardPoint[]; label?: string }
-  | { kind: "rect"; x: number; y: number; w: number; h: number; label?: string }
+  /** assetId names a reader source photo; the page ghosts it inside the box so the plan shows the photo in place. */
+  | { kind: "rect"; x: number; y: number; w: number; h: number; label?: string; assetId?: string }
   | { kind: "ellipse"; x: number; y: number; w: number; h: number; label?: string }
   | { kind: "arrow"; from: StoryboardPoint; to: StoryboardPoint; label?: string }
   | { kind: "label"; x: number; y: number; text: string; size?: "s" | "m" | "l" };
