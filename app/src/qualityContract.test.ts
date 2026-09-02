@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./types";
 import type { DocumentState } from "./types";
-import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
 import {
   MINIMUM_CAPABLE_BOOK_ASSETS,
   QUALITY_CONTRACT_VERSION,

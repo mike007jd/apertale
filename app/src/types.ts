@@ -1,3 +1,5 @@
+// Deliberate type-only edge: erased at compile time, so it is not a runtime cycle.
+// The two command-result types below need these; moving them here instead would make the edge real.
 import type { CreationBriefPayload, CreationReadinessAssessment } from "./authoringContract";
 
 export const THEME_IDS = ["paper-atelier", "midnight-desk"] as const;
@@ -5,6 +7,8 @@ export type ThemeId = (typeof THEME_IDS)[number];
 export type QualityTier = "balanced" | "reduced";
 /** Authoring bound shared by persistence validation, create, readiness, and the WebMCP schema. */
 export const MAX_BOOK_SPREADS = 12 as const;
+/** Browser-local image capacity shared by readiness, quality review, and publishing. */
+export const MAX_BOOK_PUBLISHABLE_ASSETS = 50 as const;
 /** Authoring bound on one spread's foreground/procedural layer list. */
 export const MAX_SPREAD_ELEMENTS = 24 as const;
 export const BOOK_ELEMENT_KINDS = ["embedded", "lifted", "decoration"] as const;

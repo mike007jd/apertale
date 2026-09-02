@@ -7,7 +7,7 @@ import {
   BOOK_LIBRARY_STORAGE_KEY,
 } from "./bookLifecycle";
 import { isStoredAssetId } from "./assetId";
-import { MAX_BOOK_PUBLISHABLE_ASSETS, assessCreationReadiness, interactionLayerTarget, type CreationBriefPayload } from "./authoringContract";
+import { assessCreationReadiness, interactionLayerTarget, type CreationBriefPayload } from "./authoringContract";
 import {
   bookAssetReferenceFindings,
   bookAssetReferenceIssueKey,
@@ -33,7 +33,7 @@ import {
   isCurrentQualityReport,
   qualityGateState,
 } from "./qualityContract";
-import { BOOK_ELEMENT_ID_PATTERN, DIRECT_MANIPULATION, MAX_BOOK_SPREADS, isProceduralAssetId, isProceduralElement, spreadBaseAssetId } from "./types";
+import { BOOK_ELEMENT_ID_PATTERN, DIRECT_MANIPULATION, MAX_BOOK_PUBLISHABLE_ASSETS, MAX_BOOK_SPREADS, isProceduralAssetId, isProceduralElement, spreadBaseAssetId } from "./types";
 import type {
   AuthoringQualityLifecycle,
   QualityGateState,

@@ -75,8 +75,8 @@ import {
 import { PublicationPanel, commitPublicationRecordIfCurrent, publicationLauncherPresentation, publicationRecordForDocument } from "./PublicationPanel";
 import { deletePublication, getPublicationRecord } from "./publishingClient";
 import type { PublicationRecord } from "./publishingClient";
-import { INTERACTION_DENSITIES, MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
-import { type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId } from "./types";
+import { INTERACTION_DENSITIES } from "./authoringContract";
+import { MAX_BOOK_PUBLISHABLE_ASSETS, type BookSnapshot, type FocusResponse, type HoverResponse, type MotionPreset, type ThemeId } from "./types";
 import {
   createAuthoringPresentation,
   type ActiveAuthoringSurfaceRequest,

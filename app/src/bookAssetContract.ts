@@ -1,8 +1,7 @@
 import type { StoredAssetMetadata } from "./assetStore";
 import { isStoredAssetId } from "./assetId";
 import { SUPPORTED_IMAGE_TYPES } from "./bookElementGrammar";
-import { MAX_BOOK_PUBLISHABLE_ASSETS } from "./authoringContract";
-import { isProceduralElement, renderedElementAssetIds } from "./types";
+import { MAX_BOOK_PUBLISHABLE_ASSETS, isProceduralElement, renderedElementAssetIds } from "./types";
 import type { DocumentState, PreparedBookBackground, PreparedBookLayer } from "./types";
 
 const COVER_ASPECT = { min: 0.58, max: 0.78 };

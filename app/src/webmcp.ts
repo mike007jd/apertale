@@ -27,7 +27,7 @@ import {
 import { FOCUS_RESPONSES, HOVER_RESPONSES, REVEAL_KINDS } from "./interaction";
 import { listProjectAssetReferences } from "./projectArtifact";
 import { MAX_LABEL_LENGTH, MAX_MARKS_PER_SPREAD, MAX_STROKE_POINTS, applyStoryboardSketches, getStoryboardSnapshot, resetStoryboard, retireStoryboard, summarizeStoryboard, type StoryboardMark, type StoryboardPoint, type StoryboardSketchInput } from "./storyboard";
-import { BOOK_ELEMENT_ID_PATTERN, MOTION_PRESETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
+import { BOOK_ELEMENT_ID_PATTERN, MOTION_PRESETS, MAX_BOOK_PUBLISHABLE_ASSETS, MAX_BOOK_SPREADS, isProceduralAssetId } from "./types";
 import type { FocusResponse, HoverResponse, MotionPreset, MotionSpec, PreparedBookBackground, PreparedBookLayer, RevealKind, RevealSpec, ScenePatchOperation, ThemeId, Transform2D } from "./types";
 import {
   QUALITY_CONTRACT_VERSION,
@@ -43,7 +43,6 @@ import {
   CREATION_BOOK_TYPES,
   CREATION_READINESS_VERSION,
   INTERACTION_DENSITIES,
-  MAX_BOOK_PUBLISHABLE_ASSETS,
   PHOTO_SOURCE_USES,
   PROJECT_CONTEXT_DETAILS,
   SITE_TOOL,
