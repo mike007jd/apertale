@@ -245,7 +245,7 @@ describe("site-native authoring guide contract", () => {
     expect(byId.cutouts).toMatch(/native transparent cutouts/i);
     expect(byId["provenance-revision"]).toMatch(/provenance/i);
     expect(byId["provenance-revision"]).toMatch(/expectedRevision/i);
-    expect(byId["provenance-revision"]).toMatch(/source composite.*clean plate.*original pixel width and height are identical/i);
+    expect(byId["provenance-revision"]).toMatch(/source composite and clean plate as generated.*never resize/i);
     expect(byId["provenance-revision"]).toMatch(/ok:false correction.*fresh requestId/i);
     expect(byId.verify).toMatch(/Verify content, book-type-specific asset counts, spread-specific interaction/i);
     expect(byId.verify).toContain('set_presentation(surface: "shelf")');

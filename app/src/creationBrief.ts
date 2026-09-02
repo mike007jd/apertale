@@ -170,7 +170,7 @@ export function buildCreationBrief(input: CreationBriefInput): CreationBrief {
       ? ["- Use ImageGen for the dedicated portrait cover. Prepare one source-true original-photo layout per spread for the approximately 1.62:1 stage without reillustrating people or changing photo geometry beyond the authorised policy."]
       : ["- Use the host ImageGen/image editing capability in 2×2 sheets (cover alone; spreads, clean plates, and cutouts four per sheet) exactly as the authoring guide's imagegen-before-create and cutouts gates describe."]),
     "- Compose full-spread artwork for the approximately 1.62:1 stage. The 1.45–2.10 input range is compatibility tolerance, not an art-direction target.",
-    "- Before handoff or create, normalize each spread's source composite and clean plate so their original pixel width and height are identical.",
+    "- Hand off the composite and clean-plate sheets as generated; the page splits and upscales both to the same tile size, so never resize or reformat locally.",
     "- Use source photos as references and story truth, not as a lazy final right-page placement unless the user explicitly chose a literal photo-album treatment.",
     ...(bookType === "preserved-photo-album"
       ? [`Required asset counts: generated cover count ${generatedCoverCount}; generated full-spread count 0; preserved original-photo layout count ${preservedPhotoSpreadCount}; provenance entries ${provenanceEntryCount}.`]

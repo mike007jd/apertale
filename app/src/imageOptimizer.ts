@@ -98,10 +98,20 @@ export async function splitImageGrid(file: File, columns: number, rows: number, 
 export function keyOutBackdrop(pixels: Uint8ClampedArray, width: number, height: number) {
   const corners = [0, width - 1, (height - 1) * width, height * width - 1].map((pixel) => pixel * 4);
   const [red, green, blue] = [0, 1, 2].map((channel) => corners.reduce((sum, offset) => sum + pixels[offset + channel], 0) / corners.length);
-  // ponytail: hard chroma key without despill; add edge despill if magenta fringes show on stored cutouts.
+  // Magenta spill (red and blue both above green) measures how much backdrop bled into a visible pixel;
+  // that share becomes transparency and is unmixed out of the colour so fur edges keep their own tint.
+  // ponytail: assumes a magenta backdrop; a violet subject reads as spill and fades at its edges.
+  const backdropSpill = Math.max(1, Math.min(red, blue) - green);
   for (let offset = 0; offset < pixels.length; offset += 4) {
     const distance = Math.max(Math.abs(pixels[offset] - red), Math.abs(pixels[offset + 1] - green), Math.abs(pixels[offset + 2] - blue));
-    pixels[offset + 3] = Math.round(pixels[offset + 3] * Math.min(1, Math.max(0, (distance - KEY_CLEAR) / (KEY_SOLID - KEY_CLEAR))));
+    const alpha = Math.round(pixels[offset + 3] * Math.min(1, Math.max(0, (distance - KEY_CLEAR) / (KEY_SOLID - KEY_CLEAR))));
+    const share = alpha === 0 ? 1 : Math.min(1, Math.max(0, (Math.min(pixels[offset], pixels[offset + 2]) - pixels[offset + 1]) / backdropSpill));
+    pixels[offset + 3] = Math.round(alpha * (1 - share));
+    if (share > 0 && share < 1) {
+      pixels[offset] = (pixels[offset] - share * red) / (1 - share);
+      pixels[offset + 1] = (pixels[offset + 1] - share * green) / (1 - share);
+      pixels[offset + 2] = (pixels[offset + 2] - share * blue) / (1 - share);
+    }
   }
 }
 

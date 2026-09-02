@@ -57,8 +57,8 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("dedicated portrait cover");
     expect(brief.prompt).toContain("purpose-built full-spread artwork");
     expect(brief.prompt).toContain("approximately 1.62:1 stage");
-    expect(brief.prompt).toMatch(/source composite.*clean plate.*original pixel width and height are identical/i);
-    expect(brief.prompt).toMatch(/before handoff or create/i);
+    expect(brief.prompt).toMatch(/composite and clean-plate sheets as generated.*never resize/i);
+    expect(brief.prompt).toMatch(/as generated.*never resize/i);
     expect(brief.prompt).toMatch(/at most 50/i);
     expect(brief.prompt).toMatch(/presentation status pending.*same requestId/i);
     expect(brief.prompt).toMatch(/ok:false correction.*fresh requestId/i);

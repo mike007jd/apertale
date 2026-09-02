@@ -71,7 +71,7 @@ describe("image alpha analysis", () => {
 });
 
 describe("flat backdrop key-out", () => {
-  it("turns the corner colour transparent, keeps far colours opaque, and ramps near ones", () => {
+  it("turns the corner colour transparent, keeps far colours opaque, ramps near ones, and despills magenta", () => {
     const magenta = [255, 0, 255, 255];
     const subject = [40, 120, 30, 255];
     const nearMagenta = [255, 40, 255, 255];
@@ -83,7 +83,11 @@ describe("flat backdrop key-out", () => {
     expect(alpha(0, 0)).toBe(0);
     expect(alpha(2, 2)).toBe(0);
     expect(alpha(1, 1)).toBe(255);
-    expect(alpha(2, 1)).toBe(128);
+    // Near-magenta is mostly backdrop: the key ramp gives 128, the spill share (215/255) leaves 20.
+    expect(alpha(2, 1)).toBe(20);
     expect(Array.from(pixels.slice(16, 19))).toEqual([40, 120, 30]);
+    // The visible near-magenta pixel is unmixed from the backdrop; the keyed-out backdrop keeps its colour.
+    expect(Array.from(pixels.slice(20, 23))).toEqual([255, 255, 255]);
+    expect(Array.from(pixels.slice(0, 3))).toEqual([255, 0, 255]);
   });
 });

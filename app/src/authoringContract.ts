@@ -427,7 +427,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "imagegen-before-create",
-      rule: "Finish every final cover and spread asset before manage_book create. Use host ImageGen for generated art in sheets, not one request per image: one dedicated portrait cover request, then one 2×2 sheet per four consecutive spreads (each quadrant a complete 1.62:1 composition, no gutters or borders between quadrants), one matching 2×2 sheet of clean plates, and one 2×2 sheet per four cutouts on a flat solid magenta backdrop. Any generator size is accepted: split tiles are upscaled to at least 1024×632 at import, so ask for composition, never resize locally. Do not reillustrate preserved-photo-album originals.",
+      rule: "Finish every final cover and spread asset before manage_book create. Use host ImageGen for generated art in sheets, not one request per image: one dedicated portrait cover request, then one 2×2 sheet per four consecutive spreads (each quadrant a complete 1.62:1 composition, no gutters or borders between quadrants), one matching 2×2 sheet of clean plates, and one 2×2 sheet per four cutouts on a flat solid magenta backdrop. Any generator size is accepted: split tiles are upscaled to at least 1024×632 at import, so ask for composition, never resize locally. Run the cover and the spread sheet at the same time from one written character bible, then the clean-plate sheet and the cutout sheet at the same time, both referencing the spread sheet. Do not reillustrate preserved-photo-album originals.",
     },
     {
       id: "photo-truth",
@@ -451,7 +451,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "provenance-revision",
-      rule: "Preserve ordered provenance and requestId. Before handoff and create, normalize each spread's source composite and clean plate so their original pixel width and height are identical. Bind every book or presentation mutation to the expectedDocumentId and expectedRevision returned together by one get_project_context response. Reuse a requestId only for an exact unchanged request or to resume a successful mutation with presentation pending; after any ok:false correction or payload or asset change, use a fresh requestId. For every image-led spread, keep the original composite in sourceAssetId, the final base in cleanPlateAssetId, and any declared personal photo in personalSourceAssetId. Refresh context after every mutation. On conflict, refresh and re-plan.",
+      rule: "Preserve ordered provenance and requestId. Hand off each spread's source composite and clean plate as generated: the page splits and upscales both sheets to the same tile size, so never resize, reformat or inspect pixels locally. Bind every book or presentation mutation to the expectedDocumentId and expectedRevision returned together by one get_project_context response. Reuse a requestId only for an exact unchanged request or to resume a successful mutation with presentation pending; after any ok:false correction or payload or asset change, use a fresh requestId. For every image-led spread, keep the original composite in sourceAssetId, the final base in cleanPlateAssetId, and any declared personal photo in personalSourceAssetId. Refresh context after every mutation. On conflict, refresh and re-plan.",
     },
     {
       id: "verify",
