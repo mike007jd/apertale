@@ -2,7 +2,7 @@
 
 > Status: product closeout complete; challenge-submission gates remain
 >
-> Checked: 2026-08-30 NZST
+> Checked: 2026-09-02 NZST
 > Official deadline: 2026-09-03 1:00 p.m. PDT
 
 This matrix is the current delivery truth for Apertale. A row is only marked passed when its evidence exists in the current workspace or live destination.
@@ -15,7 +15,7 @@ This matrix is the current delivery truth for Apertale. A row is only marked pas
 | Three.js open book and page turn | Passed locally | Five-point browser capture shows the next page during the turn without tearing; five geometry regressions reject endpoint drift and centreline self-intersection. Production turns measured 58 and 56 FPS against the 45 FPS floor. |
 | Illustrated knowledge samples | Passed locally | Eight landmark and six science panoramas are dedicated ImageGen spreads kept as compatibility-tested PNG; the storm includes a transparent three-frame lightning sequence. The runtime ships no GLB/model payload. |
 | Human and Agent share project state | Passed locally | Both paths use the same revisioned `BookEngine`, validation, provenance, idempotency, conflict handling, and exact undo records. |
-| WebMCP tool catalog | Eight locally; six last verified in production | The current runtime registers the prior six document/presentation tools plus `sketch_storyboard` and `request_image_handoff`. The final public-origin host evidence predates that addition and proves the prior exact six-tool list only; the eight-tool surface requires a fresh post-deployment host run. |
+| WebMCP tool catalog | Eight locally; six last verified in production | The current runtime registers the prior six document/presentation tools plus `sketch_storyboard` (labelled pencil plan, interpreted red marks, storyboard-revision conflict protection) and `request_image_handoff` (`source-photo` / `book-art`). The final public-origin host evidence predates that addition and proves the prior exact six-tool list only; the eight-tool surface requires a fresh post-deployment host run. |
 | WebMCP lifecycle and security contract | Passed locally; production refresh pending | All eight registrations are awaited as one fail-closed set, tolerate a host without an execution `AbortSignal`, validate inputs again in code, return compact strings, and carry explicit `readOnlyHint` / `untrustedContentHint` annotations. The already-verified public Worker emits `Origin-Agent-Cluster: ?1` and `Permissions-Policy: tools=(self)` for the prior deployment. |
 | Deployment HTTP verifier | Prior deployment passed; eight-tool rerun pending | `npm run verify:deployment -- URL` passed against the public Site after v9 for Apertale 1.1.0, the prior six identifiers, and both required host policy headers. The verifier now derives the eight-tool catalog from the manifest and must run again after this source state is deployed. |
 | Image import and persistence | Passed locally | PNG/JPEG/WebP sources up to 12 MB are alpha-aware resized/compressed in the browser to at most 1.5 MB, persist in IndexedDB under stable IDs with optimization metadata, are discoverable across books, and are accepted by scene patches only after the trusted local adapter confirms the ID exists. |
@@ -33,7 +33,7 @@ This matrix is the current delivery truth for Apertale. A row is only marked pas
 | Real ChatGPT WebMCP host run | Prior six-tool run passed; eight-tool rerun pending | The genuine desktop in-app Browser host discovered the prior exact six tools, created separate text-led and photo-led books, and called the final production `get_project_context`. Only `com.openai.codex` was installed, so this is not mislabeled as a separately installed ChatGPT desktop binary. A fresh run must also exercise `sketch_storyboard` and `request_image_handoff` after deployment. |
 | Working judge-accessible live URL | Passed | `https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/` is public, returns HTML 200, and serves the retained anonymous share link recorded in the final QA report. |
 | Public source repository | Deliberately private | The configured GitHub repository remains private by explicit product requirement. This satisfies the closeout request but does not satisfy the challenge's public-source submission condition. |
-| Public demo video under 3 minutes | Missing | Record after the final live host run; include audio, a human request in ChatGPT, visible WebMCP calls, the resulting book, direct manipulation, and exact undo. |
+| Public demo video under 3 minutes | Missing | Record after the final live host run following the storyboard-loop script in `SUBMISSION_DRAFT.md`; include audio, a human request in Codex, the pencil storyboard revealing on the page, red-pencil marks and their applied receipt, visible WebMCP calls, the resulting book, direct manipulation, and exact undo. |
 | Source-true submission media | Passed locally | [`SUBMISSION_MEDIA.md`](SUBMISSION_MEDIA.md) selects current implementation captures, captions, alt text, and the six required recording beats without using historical mockups as product evidence. |
 | Devpost submission | Missing | Requires the verified live URL, public repository, public video, project description, and explicit final submit action. |
 
