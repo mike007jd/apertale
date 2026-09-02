@@ -172,8 +172,8 @@ function materializeBookLayer(
     !BOOK_ELEMENT_ID_PATTERN.test(layer.id)
     || layer.label.trim().length < 1
     || layer.label.trim().length > BOOK_ELEMENT_GRAMMAR.label.max
-    || !["left", "right"].includes(layer.page)
-    || (layer.kind && !["embedded", "lifted", "decoration"].includes(layer.kind))
+    || !(BOOK_ELEMENT_GRAMMAR.pages as readonly string[]).includes(layer.page)
+    || (layer.kind && !(BOOK_ELEMENT_GRAMMAR.elementKinds as readonly string[]).includes(layer.kind))
     || !validAssetId(layer.assetId)
     || !validFrameAssets
     || !validTransform(layer.transform)
@@ -1499,8 +1499,8 @@ export class BookEngine {
   private applyScenePatch(command: ScenePatchCommand, source: CommandSource): DocumentResult {
     const spreadIndex = this.documentState.spreads.findIndex((spread) => spread.id === command.spreadId);
     const visibleSpread = this.documentState.spreads[this.sessionState.currentSpreadIndex];
-    if (spreadIndex < 0 || visibleSpread.id !== command.spreadId || command.operations.length < 1 || command.operations.length > 24) {
-      return this.failCommand(command.requestId, source, "invalid", "Scene patches require 1–24 operations on the visible spread.");
+    if (spreadIndex < 0 || visibleSpread.id !== command.spreadId || command.operations.length < 1 || command.operations.length > BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max) {
+      return this.failCommand(command.requestId, source, "invalid", `Scene patches require 1–${BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max} operations on the visible spread.`);
     }
 
     const before = clone(this.documentState);
@@ -1569,7 +1569,7 @@ export class BookEngine {
         }
         const nextElement = materializeBookLayer(operation, source, validForegroundAssetId);
         if (
-          elements.length >= 24
+          elements.length >= BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max
           || findElement(nextDocument, operation.id)
           || !nextElement
         ) return fail(`Add operation for ${operation.id || "element"} is outside the scene limits.`);
@@ -1593,7 +1593,7 @@ export class BookEngine {
       } else {
         if (
           !validTransform(operation.transform)
-          || (operation.kind && !["embedded", "lifted", "decoration"].includes(operation.kind))
+          || (operation.kind && !(BOOK_ELEMENT_GRAMMAR.elementKinds as readonly string[]).includes(operation.kind))
           || (typeof operation.depth === "number" && (operation.depth < BOOK_ELEMENT_GRAMMAR.depth.min || operation.depth > BOOK_ELEMENT_GRAMMAR.depth.max))
           || !validMotion(operation.motion)
           || !validFrameAssets(operation.frameAssetIds)

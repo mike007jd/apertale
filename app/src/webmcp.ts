@@ -300,7 +300,7 @@ function parseSceneOperation(raw: unknown, index: number): ScenePatchOperation {
   }
   if (op === "remove") return { op, elementId: requiredString(value, "elementId") };
   if (op === "reorder") {
-    const order = optionalBoundedNumber(value, "index", 0, 23);
+    const order = optionalBoundedNumber(value, "index", 0, BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max - 1);
     if (!Number.isInteger(order)) invalid("reorder index must be an integer.");
     return { op, elementId: requiredString(value, "elementId"), index: Number(order) };
   }
@@ -316,7 +316,7 @@ function parseSceneOperation(raw: unknown, index: number): ScenePatchOperation {
     invalid(`operations[${index}].frameAssetIds must contain image assets, not procedural markers.`);
   }
   if (op === "add") {
-    const page = pick(value.page, "page", ["left", "right"] as const);
+    const page = pick(value.page, "page", BOOK_ELEMENT_GRAMMAR.pages);
     if (!page) invalid("add requires page.");
     const id = stableElementId(value, "id");
     const assetId = requiredString(value, "assetId");
@@ -330,7 +330,7 @@ function parseSceneOperation(raw: unknown, index: number): ScenePatchOperation {
       assetId,
       frameAssetIds: frameAssetIds ?? undefined,
       page,
-      kind: pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const),
+      kind: pick(value.kind, "kind", BOOK_ELEMENT_GRAMMAR.elementKinds),
       transform,
       depth,
       locked: value.locked as boolean | undefined,
@@ -341,7 +341,7 @@ function parseSceneOperation(raw: unknown, index: number): ScenePatchOperation {
     };
   }
   if (op !== "update") invalid("op must be set-background, add, update, remove, or reorder.");
-  const kind = pick(value.kind, "kind", ["embedded", "lifted", "decoration"] as const);
+  const kind = pick(value.kind, "kind", BOOK_ELEMENT_GRAMMAR.elementKinds);
   if (!kind && !transform && typeof depth === "undefined" && typeof value.locked === "undefined" && typeof motion === "undefined" && typeof frameAssetIds === "undefined" && !hover && !focus && !reveal) {
     invalid("update requires at least one change.");
   }
@@ -395,8 +395,8 @@ const preparedLayerSchema = {
     label: { type: "string", minLength: 1, maxLength: BOOK_ELEMENT_GRAMMAR.label.max },
     assetId: { type: "string", description: "Verified browser-local cutout asset." },
     frameAssetIds: { type: "array", minItems: BOOK_ELEMENT_GRAMMAR.frameAssetIds.min, maxItems: BOOK_ELEMENT_GRAMMAR.frameAssetIds.max, items: { type: "string" }, description: "Optional animation frames; the first item must equal assetId and is the resting frame." },
-    page: { type: "string", enum: ["left", "right"] },
-    kind: { type: "string", enum: ["embedded", "lifted", "decoration"] },
+    page: { type: "string", enum: BOOK_ELEMENT_GRAMMAR.pages },
+    kind: { type: "string", enum: BOOK_ELEMENT_GRAMMAR.elementKinds },
     transform: transformSchema,
     depth: { type: "number", minimum: BOOK_ELEMENT_GRAMMAR.depth.min, maximum: BOOK_ELEMENT_GRAMMAR.depth.max },
     locked: { type: "boolean" },
@@ -1175,7 +1175,7 @@ export function registerWebMcpTools(
       {
         name: SITE_TOOL.applyScenePatch,
         title: "Apply atomic scene patch",
-        description: "Set a spread's composite and clean plate, then add, move, animate, or remove up to 24 layers in one undoable change. Verified local assets only; URLs rejected.",
+        description: `Set a spread's composite and clean plate, then add, move, animate, or remove up to ${BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max} layers in one undoable change. Verified local assets only; URLs rejected.`,
         inputSchema: {
           type: "object",
           properties: {
@@ -1184,7 +1184,7 @@ export function registerWebMcpTools(
             operations: {
               type: "array",
               minItems: 1,
-              maxItems: 24,
+              maxItems: BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max,
               items: {
                 type: "object",
                 properties: {
@@ -1194,7 +1194,7 @@ export function registerWebMcpTools(
                   elementId: { type: "string" },
                   frameAssetIds: { type: ["array", "null"], minItems: 2, maxItems: 6, items: { type: "string" }, description: "Optional 2–6 browser-local image frames. For add, and for update of an existing layer, the first item must equal that layer's assetId." },
                   motion: { ...motionSchema, type: ["object", "null"] },
-                  index: { type: "integer", minimum: 0, maximum: 23 },
+                  index: { type: "integer", minimum: 0, maximum: BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max - 1 },
                 },
                 required: ["op"],
                 additionalProperties: false,
@@ -1211,7 +1211,7 @@ export function registerWebMcpTools(
           const expectedDocumentId = requiredDocumentId(input);
           const expectedRevision = requiredRevision(input);
           const spreadId = requiredString(input, "spreadId");
-          if (!Array.isArray(input.operations) || input.operations.length < 1 || input.operations.length > 24) invalid("operations must contain 1–24 scene operations.");
+          if (!Array.isArray(input.operations) || input.operations.length < 1 || input.operations.length > BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max) invalid(`operations must contain 1–${BOOK_ELEMENT_GRAMMAR.elementsPerSpread.max} scene operations.`);
           const operations = input.operations.map(parseSceneOperation);
           const requestedLocalAssetIds = [...new Set(operations.flatMap((operation) => {
             const ids = operation.op === "set-background"
