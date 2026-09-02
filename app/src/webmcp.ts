@@ -13,6 +13,7 @@ import {
   sourcePhotoAssetRoleIssues,
 } from "./bookAssetContract";
 import { isStoredAssetId } from "./assetId";
+import { CREATION_SOURCE_ASSET_LIMIT } from "./creationBrief";
 import { IMAGE_HANDOFF_ASSET_USES, dismissImageHandoff, requestImageHandoff } from "./imageHandoff";
 import type { AuthoringSurfaceRequest } from "./authoringPresentation";
 import { recordDiagnostic } from "./diagnostics";
@@ -422,7 +423,7 @@ const creationBriefSchema = {
     interactionDensity: { type: "string", enum: INTERACTION_DENSITIES.map((target) => target.id) },
     sourceAssets: {
       type: "array",
-      maxItems: 24,
+      maxItems: CREATION_SOURCE_ASSET_LIMIT,
       items: {
         type: "object",
         properties: {
