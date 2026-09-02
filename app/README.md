@@ -105,4 +105,4 @@ Checked against current primary sources on 2026-08-27:
 - Renderer: `three@0.185.1`
 - UI/runtime: `react@19.2.0`, `vite@6.4.3`
 
-The public Site and anonymous share reader were live-verified on 2026-08-28. Treat any republish as an explicit release action. No owner OpenAI API key is embedded.
+The public Site was republished and live-verified on 2026-09-02 (site version 46); the anonymous share reader was live-verified on 2026-08-28 and its retained share link still resolves. Treat any republish as an explicit release action. No owner OpenAI API key is embedded.

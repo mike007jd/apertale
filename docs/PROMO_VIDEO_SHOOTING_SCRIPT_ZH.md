@@ -35,7 +35,7 @@
    - 插画知识书：`Atlas of Living Wonders`
    - 插画故事书：`Your Story, Made Alive` 或 `The Lantern Garden`
    - 照片驱动的纪念书：优先使用录制账号里的 `[个人照片纪念册标题]`；没有时使用已验证的 `The Starlight Stitch`，并在口播中称“根据照片制作的纪念书”，不要称“家庭照片相册”。
-7. 保底分享结果可使用当前已验证的只读成品：`https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/share/EuyDfVjurmjTsnZxAHNmmZJ-8eYCaB-Ofn4Eb84wK_U`。正式实操优先展示本次新生成、确认可公开的书。
+7. 保底分享结果可使用当前已验证的只读成品：`https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/share/6eE-mTZXYxMBZWwIdcIFaAEDaSN3YhjKohfJD8TLvpc`（原 `EuyDf…` 链接已失效，返回 404）。正式实操优先展示本次新生成、确认可公开的书。
 8. 先完整录下真实生成和发布过程，再剪等待。不要为了节奏中断真实 Site tools 调用。
 
 ## 59 秒主脚本
