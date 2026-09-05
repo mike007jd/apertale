@@ -6,6 +6,7 @@ import { QUALITY_VISUAL_CRITERION_IDS } from "./qualityContract";
 import { registerWebMcpTools } from "./webmcp";
 import { getAssetMetadata, storeLocalImages, type StoredAssetMetadata } from "./assetStore";
 import { addStoryboardAnnotation, getStoryboardSnapshot, resetStoryboard } from "./storyboard";
+import * as diagnostics from "./diagnostics";
 
 const verifiedAssets = vi.hoisted(() => new Map<string, StoredAssetMetadata>());
 
@@ -147,6 +148,7 @@ describe("WebMCP registration", () => {
     });
     const status = vi.fn();
     const onToolActivity = vi.fn();
+    const diagnostic = vi.spyOn(diagnostics, "recordDiagnostic");
     const cleanup = registerWebMcpTools(status, () => undefined, onToolActivity);
 
     await vi.waitFor(() => expect(status).toHaveBeenCalledWith(true));
@@ -158,6 +160,13 @@ describe("WebMCP registration", () => {
     ]);
     await expect(tools[0]!.execute({ detail: "not-a-detail" }, { signal: new AbortController().signal })).rejects.toThrow();
     expect(onToolActivity).toHaveBeenLastCalledWith({ name: "get_project_context", title: "Get project context", phase: "error" });
+    for (const event of ["webmcp:tool-success", "webmcp:tool-failure"]) {
+      expect(diagnostic).toHaveBeenCalledWith(event, expect.objectContaining({
+        name: "get_project_context", durationMs: expect.any(Number),
+      }));
+      const duration = diagnostic.mock.calls.find(([type]) => type === event)![1]!.durationMs;
+      expect(duration).toBeGreaterThanOrEqual(0);
+    }
     cleanup();
   });
 
@@ -219,8 +228,9 @@ describe("WebMCP registration", () => {
     }, { signal: new AbortController().signal })));
     expect(result).toMatchObject({ ok: true, storyboard: { revision: 1, spreads: [{ index: 0, marks: [{ kind: "rect", label: "guide" }, { kind: "arrow" }, { kind: "label", label: "Dawn" }, { kind: "line" }] }] } });
     expect(JSON.stringify(result.storyboard)).not.toContain("points");
-    expect(result.next).toMatch(/end your turn now.*circle changes in red/);
-    expect(result.next).toMatch(/that spread alone/);
+    expect(result.next).toMatch(/end this turn.*circle changes in red/i);
+    expect(result.next).toMatch(/On approval.*start generation/);
+    expect(result.next).toMatch(/revise only those spreads/);
     expect(revealStoryboard).toHaveBeenCalledOnce();
 
     addStoryboardAnnotation(0, { points: [{ x: 0.6, y: 0.45 }, { x: 0.7, y: 0.5 }] });
@@ -342,13 +352,13 @@ describe("WebMCP registration", () => {
     expect(spreadSchema?.properties?.layers?.items?.properties?.id?.pattern).toBe("^[a-z0-9][a-z0-9-]{0,63}$");
     expect(handoffSchema.required).toEqual(["requestId", "assetUse", "reason"]);
     expect(tool("get_project_context").description).toContain("red storyboard marks");
-    expect((tool("get_project_context").inputSchema as TestSchema).properties?.detail?.description).toContain("creation-readiness before create");
+    expect((tool("get_project_context").inputSchema as TestSchema).properties?.detail?.description).toContain("creation-readiness before sketch, quality-review for requested polish");
     expect(tool("manage_book").description).toContain("verified local assets");
     expect(tool("apply_scene_patch").description).toContain("URLs rejected");
     expect(tool("set_presentation").description).toContain("without changing the document revision");
     expect(tool("sketch_storyboard").description).toContain("marked in red");
     const guideRules = buildAuthoringGuide().hardGates.map((gate) => gate.rule).join("\n");
-    for (const moved of ["creation-readiness", "blocking question", "adopt-creation-brief", "personalSourceAssetId", "resolvedAnnotations", "presentation pending"]) {
+    for (const moved of ["creation-readiness", "blocking question", "adopt-creation-brief", "personalSourceAssetId", "resolvedAnnotations", "pending presentation"]) {
       expect(guideRules, moved).toContain(moved);
     }
 
@@ -1588,6 +1598,74 @@ describe("WebMCP registration", () => {
     }, { signal: new AbortController().signal })).rejects.toThrow("images[0].key must be a boolean.");
     const imageSchema = (handoff.inputSchema as { properties: { images: { items: { properties: Record<string, { type: string }> } } } }).properties.images.items.properties;
     expect(imageSchema.key.type).toBe("boolean");
+    cleanup();
+  });
+
+  it.each([
+    { spreadCount: 4, partial: false },
+    { spreadCount: 4, partial: true },
+    { spreadCount: 12, partial: false },
+  ])("creates $spreadCount spreads from retained import results (partial: $partial)", async ({ spreadCount, partial }) => {
+    bookEngine.openBook("apertale-your-story");
+    bookEngine.reset();
+    const tools: WebMCP.ModelContextTool[] = [];
+    vi.stubGlobal("document", { modelContext: {
+      registerTool: vi.fn(async (tool: WebMCP.ModelContextTool) => { tools.push(tool); }),
+    } });
+    const cleanup = registerWebMcpTools(() => undefined, async () => undefined);
+    await vi.waitFor(() => expect(tools).toHaveLength(SITE_TOOL_NAMES.length));
+    const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
+    const signal = { signal: new AbortController().signal };
+    const context = JSON.parse(String(await tool("get_project_context").execute({ detail: AUTHORING_GUIDE_DETAIL }, signal)));
+    const contextRead = vi.spyOn(tool("get_project_context"), "execute");
+    const prepared = preparedBookInput(Array.from({ length: spreadCount }, (_, index) => ({
+      title: `Scene ${index + 1}`, body: `A complete story beat ${index + 1}.`,
+    })));
+    if (spreadCount === 12) prepared.spreads.forEach((spread, index) => spread.layers.push({
+      ...spread.layers[1], id: `third-${index}`, assetId: verifyAsset(localAssetId(100 + index), "cutout"),
+    }));
+    const planned = [...verifiedAssets.values()].map((asset) => ({ ...asset, name: `${asset.id.slice(-12)}.png` }));
+    verifiedAssets.clear();
+    expect(planned).toHaveLength(spreadCount === 12 ? 61 : 17);
+    const batches = spreadCount === 12 ? [planned.slice(0, 50), planned.slice(50)] : [planned];
+    if (partial) batches.push(planned.slice(-1));
+    const retainedIds = new Set<string>();
+    const handoff = tool("request_image_handoff");
+    const pixel = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    for (const [index, batch] of batches.entries()) {
+      const accepted = partial && index === 0 ? batch.slice(0, -1) : batch;
+      const storeBefore = vi.mocked(storeLocalImages).mock.calls.length;
+      vi.mocked(storeLocalImages).mockImplementationOnce(async () => {
+        accepted.forEach((asset) => verifiedAssets.set(asset.id, asset));
+        return { assets: accepted, rejected: 0, failed: batch.length - accepted.length };
+      });
+      const input = { requestId: `batch-${spreadCount}-${partial}-${index}`, assetUse: "book-art", reason: "Import planned finals.",
+        images: batch.map((asset) => ({ name: asset.name, dataUrl: pixel })),
+      };
+      const result = JSON.parse(String(await handoff.execute(input, signal)));
+      expect(result.status).toBe(accepted.length < batch.length ? "partial" : "provided");
+      expect(result.after).toMatch(/partial imports.*only missing or invalid assets/i);
+      expect(result.after).toMatch(/remaining planned batches.*once every required asset is verified/i);
+      expect(result.assets.map((asset: StoredAssetMetadata) => asset.name)).toEqual(accepted.map((asset) => asset.name));
+      result.assetIds.forEach((id: string) => retainedIds.add(id));
+      expect(JSON.parse(String(await handoff.execute(input, signal)))).toEqual(result);
+      expect(vi.mocked(storeLocalImages).mock.calls.length - storeBefore).toBe(1);
+    }
+    expect([...retainedIds].sort()).toEqual(planned.map((asset) => asset.id).sort());
+    const booksBefore = bookEngine.getLibrary().books.length;
+    const create = { requestId: `create-batched-${spreadCount}-${partial}`, action: "create",
+      expectedDocumentId: context.book.id, expectedRevision: context.book.revision,
+      title: "The Complete Batched Book", ...prepared,
+      creationBrief: { ...readyStoryBrief(spreadCount), interactionDensity: "balanced" },
+    };
+    const result = JSON.parse(String(await tool("manage_book").execute(create, signal)));
+    expect(result).toMatchObject({ ok: true, documentId: expect.any(String), undoToken: expect.any(String) });
+    expect(bookEngine.getSnapshot().document.spreads).toHaveLength(spreadCount);
+    expect(bookEngine.getLibrary().books).toHaveLength(booksBefore + 1);
+    expect(JSON.parse(String(await tool("manage_book").execute(create, signal)))).toEqual(result);
+    expect(bookEngine.getLibrary().books).toHaveLength(booksBefore + 1);
+    expect(contextRead).not.toHaveBeenCalled();
+    expect(currentImageHandoff()).toBeNull();
     cleanup();
   });
 

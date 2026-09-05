@@ -5,24 +5,17 @@ description: Create or revise polished interactive Apertale books through the si
 
 # Apertale Authoring
 
-Treat Apertale as the renderer and browser-local project store. Plan, write, inspect, and generate images in the user's current Codex conversation, then mutate the open book only through Apertale Site Tools. Apertale never spends a site-owner API key.
+Use Apertale as the renderer and browser-local store. Generate in the user's current Agent conversation with their own model usage; edit the book through Site Tools.
 
-## Start safely
+## Start and review the sketch
 
-1. Call `get_project_context` before planning or changing anything. If it is unavailable, ask the user to open Apertale in the Codex built-in browser and stop without claiming a change.
-2. Read `get_project_context(detail: "authoring-guide")` and follow its current authoring, evidence, handoff, review, reporting, and stopping contract.
-3. Read [tool workflow](references/tool-workflow.md) before mutation. Sketch the whole rough book as illustrator thumbnails (14–24 marks per spread, at most 6 labelled) with `sketch_storyboard`, end the turn so the reader can mark it, revise only the spreads marked in red, then generate art in 2×2 sheets (cutouts on a flat magenta backdrop) and hand finals off inline through `request_image_handoff(images)` with `split` and `key`. Read [authoring recipes](references/authoring-recipes.md) for the selected idea, photo-led, preserved-photo, or illustration-led pattern.
-4. Use `get_project_context(detail: "creation-readiness")` with a versioned brief. Ask its blocking questions together, re-check, and reuse the exact ready brief for creation.
+1. Read `get_project_context(detail: "authoring-guide")` once for the live book and the authoritative execution contract. If unavailable, ask the reader to open Apertale in a supporting browser and report the blocked connection.
+2. Read [tool workflow](references/tool-workflow.md) and the relevant [recipe](references/authoring-recipes.md) before sketch review. Check creation-readiness with the structured brief, ask blocking questions together, then reuse the exact ready brief.
+3. Sketch the complete rough book, end the turn, and let the reader review and mark it. After approval, follow the live guide's generation, batched handoff, creation, and minimum-check steps continuously. Read annotations only when new marks are reported; apply them to affected spreads without asking for approval again when already given.
 
-## Mutate with evidence
+## Complete the book
 
-- Prepare every required cover, spread, clean plate, and layer before creating the book. Use only asset ids returned by the runtime asset context.
-- Keep each mutation's `requestId`, expected document id, and revision together. Refresh context after document mutations; resolve conflicts from the refreshed state.
-- Treat `presentation.status: "pending"` as saved but visually unconfirmed. Resume with the same request id.
-- Claim generation, import, rendering, or publication only from returned ids, tool results, or an explicit pending-handoff result.
-
-## Finish
-
-Run the [quality bar](references/quality-bar.md) against actual shelf and spread renders. Complete at most two critique rounds, stop for required source material or a user decision when blockers remain, and publish only after explicit user approval when the current report says `publishAllowed: true`.
-
-Return the report required by the runtime authoring guide, including the active revision, evidence inspected, asset provenance, remaining handoffs or blockers, and undo tokens for reversible changes.
+- Treat the live guide as the execution source of truth; the references explain tool usage and book-specific art direction. Reuse returned asset ids and revisions, and refresh context only for a conflict, new reader edits, or a fallback drawer import.
+- Follow [minimum checks and requested polish](references/quality-bar.md). Deliver after the cover and every spread have been inspected once in the current theme and material reading failures are resolved. Keep full critique for an explicit polish request.
+- Preserve successful assets and the created book during local repairs. Resume successful presentation-pending calls with the same request id, bounded by the guide's retry limit; keep undo tokens.
+- Report the guide's required counts, revision, evidence, blockers, and measured stage timings. Publish only when the reader explicitly requests it through the existing publication flow.

@@ -57,17 +57,18 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("dedicated portrait cover");
     expect(brief.prompt).toContain("purpose-built full-spread artwork");
     expect(brief.prompt).toContain("approximately 1.62:1 stage");
-    expect(brief.prompt).toMatch(/Do not call the page until every image exists.*two concurrent ImageGen rounds/);
-    expect(brief.prompt).toMatch(/never resize, reformat, or inspect pixels locally/);
+    expect(brief.prompt).toMatch(/already-read authoring-guide art and handoff-create hard gates/);
+    expect(brief.prompt).toMatch(/Continue without another confirmation.*only newly reported red marks/);
+    expect(brief.prompt).toMatch(/full critique for explicitly requested polish/);
     expect(brief.prompt).toMatch(/at most 50/i);
-    expect(brief.prompt).toMatch(/presentation status pending.*fresh requestId/i);
+    expect(brief.prompt).toMatch(/presentation pending.*fresh requestId/i);
     expect(brief.prompt).toContain('set_presentation(surface: "shelf")');
     expect(brief.prompt).toContain('set_presentation(surface: "reader", spreadId)');
-    expect(brief.prompt).toContain("Never claim generation or import succeeded without evidence");
+    expect(brief.prompt).toContain("Claim generation and import only from returned asset ids and tool results");
     // The paste has to stay short enough that the Agent acts instead of narrating it.
     expect(brief.prompt.length).toBeLessThan(7000);
     expect(brief.prompt.indexOf('detail: "authoring-guide"')).toBeLessThan(brief.prompt.indexOf('detail: "creation-readiness"'));
-    expect(brief.prompt).toContain('request_image_handoff(assetUse: "book-art")');
+    expect(brief.prompt).toContain("bounded import batches, and reuse of verified results");
     expect(brief.prompt).toContain("single manage_book create call");
     expect(brief.prompt).toContain("coverAssetId");
     expect(brief.prompt).toContain("2–3 native-alpha interactive layers");
@@ -167,7 +168,7 @@ describe("host-side creation brief contract", () => {
     expect(brief.prompt).toContain("cannot be represented as simply placing uploaded source photos on the right page");
     expect(brief.prompt).toContain("asset:ticket-stub — Ticket stub.jpg");
     expect(brief.prompt).toContain("generated full-spread count 4");
-    expect(brief.prompt).toMatch(/images array of base64 data URLs.*split: true.*work\/final-assets.*drag/i);
+    expect(brief.prompt).toMatch(/already-read authoring-guide.*concurrent generation, bounded import batches/);
   });
 
   it("preserves caller-selected source-asset order and rejects incomplete or remote ids", () => {

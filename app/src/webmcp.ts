@@ -41,6 +41,7 @@ import {
   type QualityVisualReviewSubmission,
 } from "./qualityContract";
 import {
+  AUTHORING_EXECUTION,
   AUTHORING_GUIDE_DETAIL,
   CREATION_BOOK_TYPES,
   CREATION_READINESS_VERSION,
@@ -374,17 +375,19 @@ function parseSceneOperation(raw: unknown, index: number): ScenePatchOperation {
 }
 
 async function runTool(name: string, signal: AbortSignal, operation: () => unknown) {
+  const startedAt = performance.now();
   recordDiagnostic("webmcp:tool-start", { name });
   try {
     canceled(signal);
     const result = await operation();
     canceled(signal);
-    recordDiagnostic("webmcp:tool-success", { name });
+    recordDiagnostic("webmcp:tool-success", { name, durationMs: Math.round(performance.now() - startedAt) });
     return JSON.stringify(result);
   } catch (error) {
     const aborted = signal.aborted || (error instanceof DOMException && error.name === "AbortError");
     recordDiagnostic(aborted ? "webmcp:tool-canceled" : "webmcp:tool-failure", {
       name,
+      durationMs: Math.round(performance.now() - startedAt),
       error: error instanceof Error ? error.name : "UnknownError",
     });
     throw error;
@@ -754,7 +757,7 @@ export function registerWebMcpTools(
             detail: {
               type: "string",
               enum: [...PROJECT_CONTEXT_DETAILS],
-              description: "compact by default; creation-readiness before create, quality-review after rendering, assets for imports, storyboard for full strokes.",
+              description: "compact by default; creation-readiness before sketch, quality-review for requested polish, assets for missing imports, storyboard for full strokes.",
             },
             creationBrief: creationBriefSchema,
           },
@@ -1506,8 +1509,8 @@ export function registerWebMcpTools(
             storyboard: summarizeStoryboard(applied.storyboard),
             summary: action === "replace" ? "The complete rough storyboard is visible on the book." : "The marked spreads were revised in place.",
             next: action === "replace"
-              ? "Stop and end your turn now: tell the reader the pencil book is on the pages and ask them to circle changes in red or say continue. Next turn, read storyboard.spreads[].annotations from get_project_context, revise only the marked spreads, then generate art. A mark adds or changes something on that spread alone: keep it out of the character bible, the cover and every other quadrant unless the reader says otherwise."
-              : "Marks applied. When the reader says continue, start ImageGen at once without reading the storyboard again. If they add new red marks instead, refresh get_project_context: a loop around a label means change that thing; a stroke across it means remove or move it. Revise only those spreads; what a mark adds stays on that spread, not in the character bible, cover or other quadrants.",
+              ? "End this turn so the reader can review the pencil book and circle changes in red or approve it. On approval, reuse the brief and start generation. If the reader reports new marks, read storyboard.spreads[].annotations once, revise only those spreads, and continue; keep spread-specific changes out of the character bible, cover, and other spreads unless requested."
+              : "Marks applied. If sketch approval is already given, continue generation now using the revised plan. Read context again only for new annotations or a reported conflict; otherwise retain the returned storyboard revision.",
           });
         }),
       },
@@ -1576,7 +1579,9 @@ export function registerWebMcpTools(
                 hasMeaningfulAlpha: asset.analysis?.hasMeaningfulAlpha === true,
                 heightAtScale1: asset.width && asset.height ? stageHeightAtScale1(asset.width, asset.height) : null,
               })),
-              after: "Every id here is verified: call manage_book create with them now, without another get_project_context (readiness, assets, storyboard) or schema read first. Cutouts are trimmed to their subject: place a layer at the storyboard body ellipse (page from cx < 0.5, x = (cx − pageOffset) × 2, y = cy) with scaleX = scaleY = wanted spread-height fraction ÷ heightAtScale1, at most 1.8.",
+              after: assetUse === "book-art"
+                ? AUTHORING_EXECUTION.imported
+                : "Keep these verified source-photo ids for the creation brief. Complete any missing photos, then check creation-readiness before sketch review; use returned metadata instead of refreshing the asset list.",
             });
           }
           const pendingOutcome = requestImageHandoff({ requestId, assetUse, reason });
