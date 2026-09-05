@@ -8,10 +8,10 @@ Call `get_project_context`:
 
 - default/compact for the active book, outline, spread, elements, theme, revision, and capabilities;
 - `detail: "authoring-guide"` before any create flow; obey the returned two-phase quality contract even when this skill is not installed;
-- `detail: "creation-readiness"` with the structured brief before create; ask every blocking question and re-check until `ready: true`;
-- `detail: "assets"` only after a drawer transfer (a `request_image_handoff` without `images`); an inline handoff result already carries every id, size, and alpha flag, so go straight to `manage_book create`;
+- `detail: "creation-readiness"` with the structured brief before sketch review; ask blocking questions together and re-check until `ready: true`, then retain that brief;
+- `detail: "assets"` only after a drawer transfer (a `request_image_handoff` without `images`); inline results carry ids, sizes, and alpha flags, so retain them across batches and create when all required assets are verified;
 - `detail: "selected-reveal"` only when revising the selected element's knowledge card.
-- `detail: "quality-review"` after the current cover and every spread have rendered; use its rubric, deterministic checks, render manifest, and round state;
+- `detail: "quality-review"` only for explicitly requested full polish; use its rubric, render manifest, and round state;
 - `detail: "storyboard"` only when you need the full pencil stroke geometry back. Compact context already carries `storyboard.revision`, per-spread stroke counts, captions, and every red annotation the reader drew.
 
 Treat returned book, spread, and element ids as stable identifiers. Never invent an existing id.
@@ -32,91 +32,39 @@ Build every spread in this order:
 
 Rules: no frame rect around the page, the page is the frame. Labels are scarce: at most 6 per spread, on each character's body ellipse, the key props, the `text` rect, and the action arrow only. Never label the horizon, contours, heads, limbs, motion lines, or background masses; an unlabelled shape is pencilled light as construction, a labelled one heavy as a subject the reader can mark. Shape labels are pencilled inside the shape (rect: top-left corner, ellipse: centre), so keep them to 1–3 words and never put a labelled shape's top-left corner inside another labelled shape's top-left corner. Reuse every label word verbatim when you generate the final art; the reader's red marks come back addressed to those labels. `line` is for what the vocabulary lacks: 2–20 points, no detailed silhouettes. The blank 3D book draws the marks one after another and the workshop opens on the reader's screen; the call never waits for review, so end your turn right after the replace call: tell the reader the pencil book is on the pages and ask them to circle changes in red or say continue. Generate nothing until their next message.
 
-The reader may draw red marks on any spread. Read them from compact `get_project_context` (`storyboard.spreads[].annotations`): each carries `page` (`left`, `right`, `both`), `shape` (`loop` encloses something, `stroke` underlines, crosses, or points), `bounds`, and `near`, the labels it touches. A loop around `"boat"` means change that thing; a stroke across it means remove or move it; a mark with no `near` label is a new element the reader wants there. Then call `sketch_storyboard(action: "update")` for only the marked spreads, passing the `expectedStoryboardRevision` you read together with `resolvedAnnotations` for the spreads you incorporated. A `storyboard_conflict` result means the reader drew more after your read: read again, then retry with a fresh `requestId`. A mark is scoped to its spread: an element the reader adds on spread 1 appears in that quadrant only, never in the character bible, the cover or the other quadrants, and the sheet prompt says so explicitly for the other quadrants, unless the reader asks for it everywhere. Generate final compositions only in that later turn, after the marked spreads are revised. Once the reader says continue, go straight to ImageGen: no storyboard re-read, no readiness re-check, and no page call of any kind until every image exists and goes into one `request_image_handoff`.
+When the reader reports new red marks, read them once. The reader may draw red marks on any spread. Read them from compact `get_project_context` (`storyboard.spreads[].annotations`): each carries `page` (`left`, `right`, `both`), `shape` (`loop` encloses something, `stroke` underlines, crosses, or points), `bounds`, and `near`, the labels it touches. A loop around `"boat"` means change that thing; a stroke across it means remove or move it; a mark with no `near` label is a new element the reader wants there. Then call `sketch_storyboard(action: "update")` for only the marked spreads, passing the `expectedStoryboardRevision` you read together with `resolvedAnnotations` for the spreads you incorporated. A `storyboard_conflict` result means the reader drew more after your read: read again, then retry with a fresh `requestId`. A mark is scoped to its spread: an element the reader adds on spread 1 appears in that quadrant only, never in the character bible, the cover or the other quadrants, and the sheet prompt says so explicitly for the other quadrants, unless the reader asks for it everywhere. Generate final compositions in that later turn after approval and any requested revisions. Reuse the approved brief and returned storyboard revision; start ImageGen without another confirmation. Read the page again only for new marks or a reported conflict. Follow the live guide for import batch limits and retain ids across batches.
 
-## 3. Hand images to the page
+## 3. Execute the approved plan
 
-Generate in sheets, not one request per image: one dedicated portrait cover request; one 2×2 sheet per four consecutive spreads, each quadrant a complete 1.62:1 composition with no gutters, borders, or labels between quadrants; one matching 2×2 sheet of clean plates in the same order; one 2×2 sheet per four cutouts on a flat solid magenta backdrop (#FF00FF, no shadow, glow, or checkerboard), each subject complete and centred in its quadrant with padding and nothing crossing a quadrant edge. The generator picks the pixel size; the page upscales split tiles to at least 1024×632, so never resize locally. Four ImageGen calls in a row cost five to six minutes; run the cover and the spread sheet at the same time (`Promise.all`) from one written character bible, then the clean-plate sheet and the cutout sheet at the same time, both referencing the spread sheet. Keep the storyboard's scale in the final art: main characters fill at least a third of the spread height in the foreground, faces readable at thumbnail size. Spread counts are 4, 8, or 12, so every sheet is full.
+The live `authoring-guide` hard gates own generation, handoff, minimum inspection, and repair policy. Follow those steps instead of adding a second checklist from this document.
 
-Then call `request_image_handoff` with a unique `requestId`, an `assetUse`, a concise `reason`, and `images`: one entry per file with `name` and a base64 `dataUrl` (PNG/JPEG/WebP, under 12 MB each). Give every sheet `split: true` and the cutout sheet `key: true`; the page cuts it into four tiles in reading order (top-left, top-right, bottom-left, bottom-right), keys the flat backdrop into alpha where asked, stores them, and returns `assets` with their ids in that order. Send every final in one call (cover plus all sheets is a few megabytes) with a long timeout, `siteTools.call("request_image_handoff", input, { timeoutMs: 180000 })`; each call costs several seconds of host overhead, so one call beats five. The result's `assets` carry `width`, `height`, `hasMeaningfulAlpha`, and `heightAtScale1` per id, so no `detail: "assets"` refresh is needed. Compress before the page, not after: convert every final to WebP first, which keeps alpha for cutout sheets and is several times smaller than PNG, then base64 it. Target under 3 MB per data URL; only fall back to PNG when a WebP encoder is unavailable.
+- Generate the cover and interior sheets concurrently from the approved character bible. As each interior sheet finishes, its clean-plate and cutout requests can start together. Keep image-tool-required reference reads, and let the browser handle pixel admission.
+- Plan enough cutout sheets for the selected interaction density. Keep the selected page count and layer density; reduce optional art only when the reader requests it.
+- Prepare the complete asset set before layout. Hand off inline using the planned batches, retaining each result's ids and names. Each split sheet produces four assets in reading order; plan at most 50 resulting assets per call, separately from the 50 reader-visible asset limit on the finished book. For example, 12 spreads with 3 unique layers each need 61 imported assets (1 cover + 24 composite/base + 36 layers) but render 49: use two import batches, then create once.
+- Encode once to WebP for transport when needed; preserve PNG/JPEG when encoding is unavailable and the file fits. Follow the host's supported timeout option for larger calls. The page performs splitting, chroma keying, trimming, compression, and real-alpha validation.
+- Match partial results by filename, retain accepted ids, and send only missing or rejected replacements with a fresh requestId. When every planned asset is verified, create directly from those results.
+- When inline transfer is unavailable, open the drawer and use the host file chooser; if that is unavailable, open the actual asset folder and ask for one drag. Read assets once after this fallback import.
 
-```python
-from PIL import Image  # Pillow has WebP on this machine; cwebp is the fallback
-import base64, pathlib
-src = pathlib.Path("work/final-assets/spread-sheet-1.png")
-Image.open(src).save(src.with_suffix(".webp"), "WEBP", quality=85, method=6)  # RGBA stays RGBA
-data_url = "data:image/webp;base64," + base64.b64encode(src.with_suffix(".webp").read_bytes()).decode()
-``` Use `source-photo` for reader-supplied reference images; those join the next creation brief and share its 12-photo limit. Use `book-art` for generated covers, spread composites, clean plates, and cutouts; those enter only the reusable asset registry. Bind only the returned ids. Cutout tiles are trimmed to their subject at import, so a layer's scale means the subject's size.
+## 4. Create once, then revise locally
 
-Only when inline bytes are impossible, call without `images`: the drawer and drop target open and the call returns at once. Then use Computer Use or a browser file chooser when available; otherwise open the actual asset directory (normally `work/final-assets`) in the user's file manager and ask the reader once to drag its files onto the visible target. After import, refresh `get_project_context(detail: "assets")`. Do not claim success until those ids appear.
+Use `manage_book(action: "create")` with the ready `creationBrief`, `coverAssetId`, complete spread copy, each background, and the agreed interactive layer count. The tool validates the finished manifest before saving it. Preserve a successfully created book when its presentation is pending: retry that exact request once with the same requestId; if still pending, report the saved book as visually unconfirmed.
 
-## 4. Open or atomically create a complete book
+Each background binds `sourceAssetId` to the composite, `cleanPlateAssetId` to the final base, and `personalSourceAssetId` to a declared reader photo when applicable. Keep the book-type separation. Use the returned ids directly; the minimum pipeline needs no additional asset-list read after inline import.
 
-Use `manage_book`:
+Place a cutout from its approved sketch body ellipse (centre `cx, cy`, height `eh`):
 
-- `action: "open"` with a library `bookId`;
-- `action: "create"` with the readiness-passed brief, a verified `coverAssetId`, and one complete, publishable 1–12 spread finished-book manifest;
-- `action: "adopt-creation-brief"` once for a legacy personal book that has no stored brief, using the same readiness-passed brief and inspected revision;
-- `action: "set-cover"` only for a later cover correction, with `expectedDocumentId` and `expectedRevision` from one current context plus a validated browser-local `coverAssetId`;
-- `action: "begin-critique"` before inspecting and recording one quality-review round;
-- `action: "record-critique"` with every visual rubric criterion after inspecting actual rendered frames.
+- `page = cx < 0.5 ? "left" : "right"`
+- `x = (cx − (page === "right" ? 0.5 : 0)) × 2`, `y = cy`
+- `scaleX = scaleY = min(1.8, eh / heightAtScale1)` using the handoff result.
 
-Draft all spread titles, kickers, and body copy before `create`. A first pass is 4 or 8 spreads; 12 is the maximum, and counts stay multiples of four so every 2×2 sheet is used. Pass the same creation brief that returned `ready: true`; Apertale runs that readiness gate again before mutation. Every spread must also include a prepared `background` (`sourceAssetId`, `cleanPlateAssetId`, book-type `separation`, and `personalSourceAssetId` when declared) plus the native-alpha `layers` count chosen by `creationBrief.interactionDensity` (none 0, low 1, balanced 2–3, rich 3–6). Every included layer needs an authored hover, focus, or click reveal; idle motion may support that response but cannot replace it. Compose full-spread images for the approximately 1.62:1 stage target; 1.45–2.10 is only the compatible admission range.
+Use `compose_spread` for later text corrections, `apply_scene_patch` for one coherent scene repair, and `set-cover` for a cover correction. Carry the document id and revision returned by each successful mutation forward; a conflict requires one context refresh and reconciliation with the reader's edits. Preserve exact undo tokens.
 
-Image generation does not happen inside this tool. Generate the cover, composite sheets, clean-plate sheets, and cutout sheets in the user's current Agent conversation, then hand them off inline with `split` (and `key` for the cutout sheet) as described in step 3. For a preserved-photo album, prepare source-true layouts and keep identity/crop/colour within the approved policy. Hand every final off inline through `request_image_handoff(images)`; the drawer is the fallback only. Apertale resizes and compresses each source locally to at most 1.5 MB before storage. Refresh assets and bind only returned ids. Deduplicate the reader-visible cover, resolved final base for each spread, rendered layer assets, and frame assets; at most 50 distinct assets may be uploaded. Author-only source and personal-photo provenance stays private and is excluded unless selected for rendering. If any planned reader-visible asset is absent or the upload plan exceeds that limit, do not call create: a text-only or deferred-art shell is not a completed book.
+## 5. Inspect and deliver
 
-If a mutation returns `ok: true` with `presentation.status: "pending"`, the document is already saved but the exact visible frame was not confirmed. Retry the same `requestId` until presentation completes. A new request id would create a duplicate instead of resuming.
+Follow the live guide and [minimum checks](quality-bar.md): present the cover and each spread once in the current theme, inspect the actual frames, and deliver when material reading failures are absent. Keep accepted assets and review only the surfaces changed by a repair. Full rubric submission and dual-theme polish are explicit follow-up work.
 
-## 5. Refine copy
+## 6. Record stage timings
 
-Use `compose_spread` to change one existing spread's title, kicker, or body without disturbing its scene. Refresh context after each call because every document mutation advances the revision.
+Use timestamps already available in host execution and the existing `webmcp:tool-*` diagnostics (`durationMs` on success, failure, or cancellation). Record sketch-approved-to-complete wall time, initial image-generation wait, import time, final inspection time, and repair time including regeneration. Count concurrent waits once and exclude repair time from the initial stages. Include create/layout time in the total; do not attribute it to image generation.
 
-## 6. Refine the scene after visual critique
-
-The initial scene already arrives in the atomic create manifest. Use one atomic `apply_scene_patch` per coherent post-create critique fix. It can add, update, remove, or reorder up to 24 elements.
-
-The only supported scene source is a validated browser-local or bundled asset id. Every image-led spread records the original composite in `sourceAssetId` and the final repaired/preserved base in `cleanPlateAssetId`. A declared user photo belongs in `personalSourceAssetId`; this keeps identity provenance separate from the generated composite. Use `inpainted-clean-plate` for generated illustrated separations and `preserved-photo-layout` for an approved source-true album base. Generate native-alpha transparent cutouts in the user's current conversation before patching the scene: up to four subjects on one 2×2 sheet over a flat solid magenta backdrop, handed off with `assetUse: "book-art"`, `split: true`, and `key: true` so the page keys the backdrop out and each stored asset holds exactly one subject; then refresh asset context.
-
-Built-in ImageGen honours a transparent-background request only some of the time; the other runs paint a checkerboard into RGB and cost a regeneration. The flat magenta backdrop with `key: true` works every time, so ask for magenta, not transparency, and let the page do the matte and despill. If a sheet still comes back with a baked checkerboard, regenerate it once naming the solid colour; keying a checkerboard locally costs minutes and eats pale subjects. Do not inspect or convert pixels locally: the handoff result reports `hasMeaningfulAlpha` per tile, and the page has already keyed and despilled the backdrop. Regenerate a tile only when that flag is false or the stored image shows a rectangular matte, a detached fragment, or a baked glow that the runtime hover effect should supply.
-
-The renderer places illustrated layers in one full-spread stage and maps the composition onto both paper pages. Place each layer once, from the storyboard body ellipse of that subject (centre `cx, cy`, height `eh` in spread coordinates) and the handoff result:
-
-- `page = cx < 0.5 ? "left" : "right"`, `transform.x = (cx − (page === "right" ? 0.5 : 0)) × 2`, `transform.y = cy`;
-- `scaleX = scaleY = min(1.8, eh ÷ heightAtScale1)` where `heightAtScale1` came back with the cutout's asset id (its longer side is one world unit on a 5.18-unit-tall page).
-
-Cutouts are trimmed to their subject at import, so this lands the subject at the size it was drawn. Do not iterate placement with patches and screenshots; one `set_presentation` per spread is the verification.
-
-Interaction vocabulary:
-
-- hover: `none`, `lift-glow`, `tilt-toward-pointer`, `warm-rim`;
-- focus: `none`, `spotlight`, `rise-and-center`, `orbit-inspect`;
-- reveal: `none`, `caption`, `fact-card`;
-- motion: `gentle-float`, `fly-across`, `water-bob`, `soft-pulse`, `slow-orbit`.
-
-Use a reveal when interaction teaches, identifies, or advances the story. Keep illustrated subjects still by default and signal interaction with hover light or a short lift. Use `water-bob` for a boat that should remain on its local patch of water; reserve traversal for a subject whose route stays visually valid. Do not add motion merely to make every object move.
-
-## 7. Present
-
-Use `set_presentation` for `paper-atelier` (Day), `midnight-desk` (Night), Preview, `surface: "shelf"` cover inspection, and `spreadId` reader navigation during visual review. A non-pending result confirms that the requested shelf or reader surface is visible; `presentation.status: "pending"` is not visual evidence and must be resumed with the same `requestId`. Rendering evidence remains separately observable in quality context. Presentation changes do not advance the document revision.
-
-## 8. Critique, patch, and publish gate
-
-1. Render the cover on the shelf and visit every spread in the current revision.
-2. Call `get_project_context(detail: "quality-review")`.
-3. Call `manage_book(action: "begin-critique")` for the returned current revision and next round.
-4. Treat deterministic failures as real blockers. Use the host browser/screenshot capability for composition, readability, consistency, photo fidelity, crop/skew/occlusion, alpha edges, coherence, and premium-sample value; the schema does not make aesthetic judgments.
-5. Record every visual criterion once with evidence location and a suggested patch for blocker/warn results.
-6. Patch, render, read the refreshed quality context, and explicitly begin the next check when needed. Round two is the final automated critique round.
-7. Stop for source material or a user decision when blockers remain. Share is available only when `publishAllowed: true`; recorded warnings may proceed.
-
-## 9. Undo
-
-Use `undo_project_change` with the current revision and the exact returned undo token. Undo is conflict-aware and will preserve newer edits. Record replacement undo tokens returned by successful undo operations.
-
-## Failure handling
-
-- Revision conflict: call `get_project_context`, reconcile the user's latest state, and issue a new request id.
-- Missing asset: call `request_image_handoff` with the correct `assetUse` and the file inline in `images`; fall back to the drawer only when inline bytes are impossible, then refresh asset context.
-- Legacy brief missing: run creation readiness from the visible document and user decisions, then use `adopt-creation-brief` once. Stop rather than inventing photo treatment, identity, crop, or colour permissions.
-- Unsupported asset type: keep the spread illustrated and report the boundary; do not claim that Apertale imported it.
-- Partial scene failure: do not simulate success. Use the returned undo token if the committed change should be reversed.
+Keep timing notes in the current run's report using the existing executor clock; timing itself adds no page calls or validation rounds. When the host does not expose a measurement, label it unavailable. Compare only runs with equivalent spread counts and interaction density; report tool-call counts separately from elapsed time.

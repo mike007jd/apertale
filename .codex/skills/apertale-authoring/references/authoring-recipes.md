@@ -1,6 +1,6 @@
 # Authoring recipes
 
-Compose full-spread artwork for the stage's approximately 1.62:1 target. The 1.45–2.10 range is compatibility tolerance, not a composition target. Before create, deduplicate the reader-visible cover, resolved final base for each spread, rendered layers, and frames; at most 50 distinct assets may be uploaded. Author-only source and personal-photo provenance remains private and is excluded unless it is also selected for rendering. Call create once only when that manifest is one publishable finished book with no required artwork deferred.
+Compose full-spread artwork for the stage's approximately 1.62:1 target. The 1.45–2.10 range is compatibility tolerance, not a composition target. Before create, deduplicate the reader-visible cover, resolved final base for each spread, rendered layers, and frames; at most 50 distinct assets may be uploaded. Author-only source and personal-photo provenance remains private and is excluded unless it is also selected for rendering. Use the live authoring guide for import batches, creation, and minimum checks; these recipes add book-specific art direction. Create once when all required artwork is verified.
 
 ## Text-led / idea book
 
@@ -9,10 +9,10 @@ Compose full-spread artwork for the stage's approximately 1.62:1 target. The 1.4
 3. Define a distinct visual beat for each spread before generating art.
 4. Generate a dedicated 2:3 portrait cover with a legible exact title and no extra copy.
 5. Generate one original purpose-built full-spread artwork for every spread, four at a time on a 2×2 sheet (plus a matching clean-plate sheet). Required counts after splitting: generated cover 1, generated full-spreads equal to the agreed spread count.
-6. Only after that art set exists, hand every sheet off inline with `split: true` (cutouts also `key: true`), refresh the registry, and create once with the verified cover plus every spread's complete background and 2–4 layer manifest as one publishable finished book.
+6. After the art set exists, follow the guide's batched inline handoff and create once from returned ids with the selected interactionDensity.
 7. Plan foreground, midground, background, and interactive cutouts rather than placing one full-bleed image everywhere.
 8. For each spread, decide which parts belong in the full-spread illustration, which become isolated interactive subjects, and whether a short 2–6 frame sequence adds meaning.
-9. Add content-specific interactions and inspect both themes.
+9. Add the planned content-specific interactions, then follow the guide's single inspection in the current theme.
 
 ## Photo-led book
 
@@ -24,7 +24,7 @@ Hard rejection: placing an uploaded source photo on the right page, or using a r
 4. Use host ImageGen/image editing to make those assets. Crop, isolate, or extend source photos only as references into new compositions.
 5. Keep the selected source-asset ids in the user's given order. Map each id as a reference, not as a lazy right-page placement.
 6. Only after the complete art set exists, hand the sheets off inline through `request_image_handoff(images, assetUse: "book-art")` with `split: true` (cutouts also `key: true`); the drawer is the fallback only.
-7. Refresh the asset list, then create once with exact asset ids bound to the cover and every complete spread manifest as one publishable finished book. Preserve the person's identity and source truth in provenance; do not create while any final is missing.
+7. Create once from retained handoff results when the complete manifest is verified. Preserve the person's identity and source truth in provenance; replace any missing final before creation.
 8. Use interaction to reveal captions, memories, dates, places, or facts—not to obscure the original photograph when a photo is cited as story truth.
 
 ## Preserved-photo album
@@ -33,7 +33,7 @@ Hard rejection: placing an uploaded source photo on the right page, or using a r
 2. Confirm identity preservation, face changes disabled, and explicit crop and colour-correction permissions.
 3. Keep the user's source-photo order. Prepare one source-true layout per spread at the approximately 1.62:1 stage target and one generated portrait cover; generated interior count is zero.
 4. Set each final base with `separation: "preserved-photo-layout"`; keep the full layout/composite in `sourceAssetId`, the rendered base in `cleanPlateAssetId`, and the declared original photo provenance in `personalSourceAssetId` (these may intentionally refer to the same approved original for a preserved layout).
-5. Add 2–4 restrained native-alpha foreground or interactive layers without reillustrating people or covering defining photo content.
+5. Use the selected interactionDensity for restrained foreground or interactive layers, preserving people and defining photo content.
 6. Use captions, dates, places, and non-destructive overlays to create meaning. Verify identity, crop, geometry, and chronology in the actual rendered frame.
 
 ## Illustration-led book

@@ -291,6 +291,15 @@ type AuthoringHardGateId = (typeof AUTHORING_HARD_GATE_IDS)[number];
 const PHOTO_TRUTH_REQUIREMENT =
   "Use source photos as references and story truth. Do not use a raw uploaded photo as finished interior or right-page artwork unless the user explicitly requested a literal photo album.";
 
+/** Shared execution instructions for the live guide and import reply. */
+export const AUTHORING_EXECUTION = {
+  generate: "After sketch approval, reuse the brief and character bible; read only new reported red marks or conflicts, apply local changes, and continue without another confirmation. Generate finals before any page call of layout: cover and 2×2 interior sheets concurrently; as each interior sheet finishes, start its clean plate and required cutout sheets together. Compose for the approximately 1.62:1 stage; use up to four complete subjects on flat magenta per cutout sheet, matching interactionDensity. Preserved-photo-album generates only the cover and uses authorised source-true layouts/overlays. Do required reference-image reads once; let browser import check pixels instead of reopening every output or running local pixel audits.",
+  handoff: `Plan batches before generation: at most ${MAX_BOOK_PUBLISHABLE_ASSETS} resulting assets per request_image_handoff, counting a split sheet as ${IMAGEGEN_SHEET.tiles}; one batch when it fits, otherwise several with distinct requestIds. Separately cap reader-visible assets at ${MAX_BOOK_PUBLISHABLE_ASSETS}; private composites count toward import. Use unique filenames and assetUse book-art (source-photo for reader references). Send an images array of base64 data URLs, split: true for sheets, key: true for magenta cutouts. Encode once to WebP when needed. Use a supported long timeout; if inline is unavailable, use the drawer/file chooser or one reader drag, then read assets once.`,
+  imported: "Retain returned ids, names, dimensions, hasMeaningfulAlpha, and heightAtScale1 across batches. For partial imports, replace only missing or invalid assets with fresh requestIds. Continue remaining planned batches; once every required asset is verified, call a single manage_book create without another get_project_context or schema read. Let create enforce asset roles, dimensions, real alpha, existence, revision, and completeness; place layers from the approved sketch and heightAtScale1.",
+  verify: "Present the cover with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId) once in the current theme. Inspect actual frames for missing/wrong images, severe subject/text occlusion, photo identity errors, or unreadable/broken pages; reuse confirmed frames at the same revision. Deliver when clear. Run full quality-review, critique submission, dual-theme checks, or polish only when the reader explicitly requests it.",
+  repair: "On failure, keep accepted assets and the created book; replace failed assets and patch only affected spreads or the cover, then recheck only those surfaces. Allow two repair rounds; report remaining blockers. Use the same requestId for exact retries; after an ok:false correction use a fresh requestId. Refresh context on revision conflicts. Retry a pending presentation once with the same requestId; if still pending, report the saved book as visually unconfirmed.",
+} as const;
+
 export type CreationCompletionGate = {
   id: RequiredGateId;
   token: `[GATE:${RequiredGateId}]`;
@@ -330,7 +339,7 @@ export function creationCompletionGates(input: AuthoringCountSpec): CreationComp
     {
       id: "story",
       token: "[GATE:story]",
-      requirement: `Inspect the sources and user prompt, state the audience or the assumption used, then a complete story arc with beginning, development, turn, and ending, a title, and a plan for the dedicated portrait cover and every spread. Required counts: generated cover ${input.generatedCoverCount}, ${spreadAssetPlan}, provenance entries ${input.provenanceEntryCount}. Never invent unseen photo content.`,
+      requirement: `Inspect sources and prompt; state the audience, complete story arc, title, and cover/spread plan. Required counts: generated cover ${input.generatedCoverCount}, ${spreadAssetPlan}, provenance entries ${input.provenanceEntryCount}. Use observed photo content only.`,
     },
     {
       id: "art",
@@ -344,12 +353,12 @@ export function creationCompletionGates(input: AuthoringCountSpec): CreationComp
     {
       id: "layout",
       token: "[GATE:layout]",
-      requirement: `One inline request_image_handoff for every final, then one manage_book create with the verified cover, every spread's background, and the foreground-layer count selected in creationBrief.interactionDensity (none 0, low 1, balanced 2–3, rich 3–6), at or below ${MAX_BOOK_PUBLISHABLE_ASSETS} reader-visible assets. Source-photo provenance stays private unless selected for rendering. Never create a text-only shell.`,
+      requirement: `Import all finals in batches of at most ${MAX_BOOK_PUBLISHABLE_ASSETS} resulting assets; retain ids, then one complete manage_book create with the cover, backgrounds, and creationBrief.interactionDensity layer counts. Keep reader-visible assets at or below ${MAX_BOOK_PUBLISHABLE_ASSETS}; provenance stays private unless rendered.`,
     },
     {
       id: "evidence",
       token: "[GATE:evidence]",
-      requirement: "Never claim generation or import succeeded without evidence: returned asset ids and tool results. Present the cover and every spread after create; quality critique is advisory and never blocks sharing.",
+      requirement: "Claim generation and import only from returned asset ids and tool results. Inspect cover/spread frames once in the current theme for material reading failures; deliver when clear. Full critique requires a reader request.",
     },
   ];
 }
@@ -366,6 +375,7 @@ export function creationReportRequirements(input: Pick<AuthoringCountSpec, "gene
     `generated cover count ${input.generatedCoverCount} with the cover asset id`,
     spreadAssetReport,
     "ordered source-asset ids and user-visible names with their role (reference or preserved layout), and anything pending or unsupported, with no success claim",
+    "measured sketch-approved-to-book wall time, initial generation wait, import, inspection, and repair including regeneration; count overlapping waits once, keep repair separate, use host timestamps/webmcp durationMs without extra page calls, and mark missing measurements unavailable",
   ];
 }
 
@@ -373,15 +383,15 @@ function authoringHardGates(): AuthoringHardGate[] {
   return [
     {
       id: "story",
-      rule: "Inspect source assets and the user prompt before planning, never invent unseen photo content, and write a coherent complete story arc with beginning, development, turn, and ending plus one written character bible reused verbatim in every image request. Check get_project_context(detail: creation-readiness) with the structured brief and ask every returned blocking question together in one turn; manage_book create reruns the same gate. A legacy personal book without a stored brief uses manage_book adopt-creation-brief once.",
+      rule: "Plan from observed sources and the prompt: beginning, development, turn, ending, and one character bible reused verbatim in every image request. Check get_project_context(detail: creation-readiness) with the brief; ask returned blocking questions together. Create enforces readiness again. For a legacy personal book, use manage_book adopt-creation-brief once.",
     },
     {
       id: "storyboard",
-      rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Before final art, call sketch_storyboard action replace so the complete rough book appears on the blank 3D pages: per spread a caption plus 14–24 marks listed back to front that read as an illustrator's thumbnail, at most 6 of them labelled (character bodies, key props, the text rect, the action arrow; never horizon, contours, heads, limbs, motion lines, or background masses): horizon and contour lines, background masses, props, each character as head and body ellipses with limb lines, motion lines, one labelled action arrow, and a rect labelled text holding one title label, all in spread coordinates. Main characters are foreground subjects: each body ellipse spans at least 0.3 of the spread height, and the final art keeps that scale. When the reader supplied source photos, give the rect that will hold each photo its assetId so the pencil plan shows the photo ghosted in place. After the replace call, end the turn and ask the reader to circle changes in red on the pencil book or say continue. Next turn, read their marks from compact project context (page, loop-or-stroke, bounds, touched labels) and update only marked spreads, clearing applied marks through resolvedAnnotations with the storyboard revision you read; what a mark adds belongs to that spread alone, never to the character bible, cover or other spreads unless the reader says so. Preserve source-photo geometry for preserved-photo-album.",
+      rule: "Plan one dedicated portrait cover and one distinct composition for the approximately 1.62:1 stage per spread; 1.45–2.10 is only the compatible input range. Before final art, call sketch_storyboard action replace so the complete rough book appears on the blank 3D pages: per spread a caption plus 14–24 marks listed back to front that read as an illustrator's thumbnail, at most 6 of them labelled (character bodies, key props, the text rect, the action arrow; never horizon, contours, heads, limbs, motion lines, or background masses): horizon and contour lines, background masses, props, each character as head and body ellipses with limb lines, motion lines, one labelled action arrow, and a rect labelled text holding one title label, all in spread coordinates. Main characters are foreground subjects: each body ellipse spans at least 0.3 of the spread height, and the final art keeps that scale. When the reader supplied source photos, give the rect that will hold each photo its assetId so the pencil plan shows the photo ghosted in place. After the replace call, end the turn and ask the reader to circle changes in red on the pencil book or say continue. After approval, reuse the plan; when the reader reports new red marks, read them once from compact project context (page, loop-or-stroke, bounds, touched labels) and update only marked spreads, clearing applied marks through resolvedAnnotations with the storyboard revision you read; what a mark adds belongs to that spread alone, never to the character bible, cover or other spreads unless the reader says so. Preserve source-photo geometry for preserved-photo-album.",
     },
     {
       id: "art",
-      rule: "Once the reader says continue, generate every final before any page call, in two concurrent ImageGen rounds: first the portrait cover together with one 2×2 sheet per four consecutive spreads (each quadrant a complete 1.62:1 composition, no gutters or borders) from the character bible; then, both referencing the spread sheet, the matching 2×2 clean-plate sheet and one 2×2 cutout sheet with up to four subjects on a flat solid magenta backdrop (#FF00FF, no shadow or glow), each complete and centred in its own quadrant with clear padding. Never ask ImageGen for transparency. Any generator size is accepted: tiles are cropped to the stage and upscaled to at least 1024×632 at import, so ask for composition and never resize, reformat, or inspect pixels locally. Do not reillustrate preserved-photo-album originals.",
+      rule: AUTHORING_EXECUTION.generate,
     },
     {
       id: "photo-truth",
@@ -389,7 +399,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "handoff-create",
-      rule: `Send every final in one request_image_handoff with assetUse book-art (reader references use assetUse source-photo): WebP under 3 MB each as base64 data URLs, split: true on every sheet and key: true on the cutout sheet, so the page stores the tiles in reading order, keys the backdrop into alpha, and returns each id with width, height, hasMeaningfulAlpha, and heightAtScale1; call manage_book create next without any other read. Create once with coverAssetId, every spread's background (sourceAssetId composite, cleanPlateAssetId base, personalSourceAssetId when declared), and the layer count from creationBrief.interactionDensity, at or below ${MAX_BOOK_PUBLISHABLE_ASSETS} reader-visible assets. Place each layer once from the storyboard: cutouts are trimmed to their subject, so page = left when the body ellipse centre cx < 0.5 else right, transform.x = (cx − pageOffset) × 2, transform.y = cy, scaleX = scaleY = the ellipse height ÷ the asset's heightAtScale1 (at most 1.8); do not iterate placement with patches and screenshots. Bind every mutation to the expectedDocumentId and expectedRevision you last read; reuse a requestId only for an exact retry or a successful mutation with presentation pending, and after any ok:false correction use a fresh one. Never create a text-only shell or overwrite a curated sample; set-cover and patch are later fixes only.`,
+      rule: `${AUTHORING_EXECUTION.handoff} ${AUTHORING_EXECUTION.imported} Use coverAssetId, backgrounds (sourceAssetId composite, cleanPlateAssetId base, declared personalSourceAssetId), and selected layers. Sketch ellipse placement: page left if cx < 0.5 else right; x = (cx − pageOffset) × 2, y = cy, scaleX = scaleY = min(1.8, ellipse height ÷ heightAtScale1). Use returned document id and revision; retain undo tokens and preserve curated samples.`,
     },
     {
       id: "interaction",
@@ -397,7 +407,7 @@ function authoringHardGates(): AuthoringHardGate[] {
     },
     {
       id: "present",
-      rule: "After create, present the cover with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId), then report the title, asset ids, revision, and undo token. Quality critique is optional: get_project_context(detail: quality-review), manage_book begin-critique, then record-critique with real render evidence, at most two rounds; never delay or block a user-requested share.",
+      rule: `${AUTHORING_EXECUTION.verify} ${AUTHORING_EXECUTION.repair}`,
     },
   ];
 }
@@ -419,7 +429,7 @@ export function buildAuthoringGuide() {
   }
   return {
     id: "apertale-authoring-guide",
-    version: 5,
+    version: 6,
     skillMirror: "apertale-authoring",
     contract: "two-phase",
     tools: SITE_TOOL_NAMES,
@@ -455,7 +465,7 @@ export function buildAuthoringGuide() {
     verify: [
       "content: title, agreed spread count, and complete story arc",
       "asset counts: generated cover 1 plus one generated illustration or preserved original-photo layout per spread, according to book type",
-      "presentation: the cover shown with set_presentation(surface: \"shelf\") and every spread with set_presentation(surface: \"reader\", spreadId); report the revision and undo token",
+      'presentation: follow the present hard gate; set_presentation(surface: "shelf") and set_presentation(surface: "reader", spreadId) once per surface in the current theme',
     ],
     report: creationReportRequirements(requiredCounts),
   };
