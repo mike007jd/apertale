@@ -111,8 +111,8 @@ Voice: "A plain MCP server has no page. Browser automation has no meaning. WebMC
 ## Submission fields
 
 - Live app URL: [https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/](https://livingbook-studio-challenge-11.mike007jd2.chatgpt.site/)
-- Public repository URL: `PENDING_PUBLIC_REPOSITORY_URL`
-- Public YouTube demo URL: `PENDING_PUBLIC_VIDEO_URL`
+- Public repository URL: [https://github.com/mike007jd/apertale](https://github.com/mike007jd/apertale)
+- Public demo video URL: [https://vimeo.com/1223632817](https://vimeo.com/1223632817)
 - Figma design URL: [Apertale — Product Design v1.1](https://www.figma.com/design/3Kq19oItsbBczMIeB739cO/Apertale-%E2%80%94-Product-Design-v1.1?node-id=7-6)
 
 Do not replace a placeholder until the destination is public or supplied with judge credentials and has passed the corresponding readiness gate.

@@ -28,7 +28,7 @@ The user's ChatGPT/Codex supplies the intelligence. Apertale does not proxy ever
 
 Implemented in the current build: a first-run editorial library of five independently generated hardcovers; an in-product Field Guide; five independent books with 28 spreads; the repaired watertight Three.js page turn with frozen composition sampling for illustrated layers; fourteen dedicated ImageGen panorama spreads; transparent cut-paper subjects and short frame animation; closed interaction presets; revisioned commands; conflict-safe undo including book creation, cover assignment, and library membership; distinct Day/Night presentation; the eight-tool project surface; a repository-level Codex authoring skill; a versioned creation-brief readiness gate shared by context and create; distinct illustrated-story, photo-led keepsake, and preserved-photo album contracts; IndexedDB-backed local image import; a versioned deterministic plus AI-visual quality rubric with current-render evidence and a two-round repair ceiling; fail-closed client/Worker publication; durable D1/R2 publication; and an anonymous read-only share reader.
 
-The supporting-host tool run, public Site, and anonymous share lifecycle passed with the disclosures recorded in [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md). External delivery still open is the explicitly approved public repository, demo video, and Devpost submission. Direct host attachment transfer remains a post-v1.1 expansion rather than a hidden release dependency.
+The supporting-host tool run, public Site, and anonymous share lifecycle passed with the disclosures recorded in [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md). The public repository is live; remaining external delivery state is tracked in [`CHALLENGE_READINESS.md`](CHALLENGE_READINESS.md). Direct host attachment transfer remains a post-v1.1 expansion rather than a hidden release dependency.
 
 ## 2. Feasibility decision
 
@@ -294,7 +294,7 @@ Motion principles:
 
 - Customer-facing names, UI, README, screenshots, and sample copy use Apertale, not internal event language.
 - Historical event docs are retained as archive evidence and excluded from the primary navigation.
-- The public Site and anonymous share reader were live-verified on 2026-08-28; the source repository remains private.
+- The public Site and anonymous share reader were live-verified on 2026-08-28; the source repository is public at [github.com/mike007jd/apertale](https://github.com/mike007jd/apertale).
 - Republishing the website or making the GitHub repository public requires explicit user approval.
 - A release must never embed an OpenAI API key.
 
