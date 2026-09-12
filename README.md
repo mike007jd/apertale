@@ -21,6 +21,7 @@ The application provides the medium—Three.js book rendering, assets, safe inte
 - Declarative hover and click interactions validated against closed presets.
 - Twenty-eight spreads across five independent books, including an eight-spread landmark atlas and a six-spread science book.
 - Fourteen dedicated ImageGen panorama spreads for the landmark atlas and science book, plus transparent illustrated layers and a three-frame lightning sequence.
+- A read-only WebMCP surface on the anonymous share reader: `get_shared_book_context` lets a reader's own Agent read the published book's outline, the visible spread's text, and every element's knowledge reveal without touching the document.
 - A host-portable Sites bundle. The public Site and anonymous share reader were live-verified on 2026-08-28; any republish remains an explicit release action.
 
 ## Try the collaboration loop

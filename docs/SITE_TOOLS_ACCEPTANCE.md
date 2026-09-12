@@ -36,6 +36,10 @@ Create flows must call `get_project_context` with `detail: "authoring-guide"`, t
 
 If the arrow is absent, first verify that the selected account and model have Site Tools access; then refresh the page after enabling the permission. Do not reinterpret ordinary browser automation as a passing WebMCP run.
 
+### Shared reader surface
+
+Open a published share link in the same built-in browser. The address-bar tool list must show exactly one tool, `get_shared_book_context`, marked read-only. Ask the Agent what is on the open spread; it must answer from the tool result without any create or patch tool being offered. Turn a page and ask again; the answer must follow the visible spread.
+
 ## 3. Execute the shared-state acceptance story
 
 Use one conversation and one open Apertale tab.

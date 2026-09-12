@@ -38,6 +38,10 @@ The WebMCP tool catalog is the authoritative ordered set of Agent-discoverable
 Site Tools shipped by Apertale. Runtime registration, the authoring guide, the
 public manifest, and deployment verification consume this same catalog.
 
+The anonymous share reader registers its own single read-only tool
+(`app/src/sharedBookTools.ts`); it is not part of this catalog or the manifest,
+and it imports nothing from the authoring tool module.
+
 ## Asset registry
 
 The Asset registry admits supported browser-local images, optimizes and stores

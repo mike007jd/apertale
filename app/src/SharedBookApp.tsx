@@ -7,6 +7,7 @@ import { PortraitOrientationGate } from "./PortraitOrientationGate";
 import { hasReveal, resolveInteraction } from "./interaction";
 import { announce, supportsWebGl2, useReaderShell } from "./readerShell";
 import { readerSceneStructureKey } from "./renderEvidence";
+import { registerSharedBookTools, type SharedBookView } from "./sharedBookTools";
 import { type BookSnapshot, type DocumentState, type ThemeId } from "./types";
 
 const ThreeBook = lazy(() => import("./ThreeBook").then((module) => ({ default: module.ThreeBook })));
@@ -76,6 +77,12 @@ export function SharedBookApp() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme === "midnight-desk" ? "night" : "day";
   }, [theme]);
+
+  // The reader's own Agent reads the page through one read-only tool. A ref
+  // keeps the tool on the latest spread and selection without re-registering.
+  const sharedView = useRef<SharedBookView | null>(null);
+  sharedView.current = documentState ? { document: documentState, spreadIndex, selectionId } : null;
+  useEffect(() => registerSharedBookTools(() => sharedView.current), []);
 
   useEffect(() => {
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
