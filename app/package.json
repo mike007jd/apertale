@@ -39,6 +39,6 @@
     "jsdom": "^30.0.1",
     "typescript": "7.0.2",
     "vitest": "4.1.11",
-    "webmcp-types": "0.1.5"
+    "webmcp-types": "0.1.7"
   }
 }

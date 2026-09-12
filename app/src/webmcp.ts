@@ -647,7 +647,7 @@ export function registerWebMcpTools(
   let registeredCount = 0;
   // Every registration passes through here, so the page learns which tool is
   // running from the one place that already knows its human title.
-  const register: typeof registerTool = (tool, options) => registerTool({
+  const register = (tool: WebMCP.ModelContextTool, options?: WebMCP.ModelContextRegisterToolOptions): Promise<void> => registerTool({
     ...tool,
     execute: async (input, executeOptions) => {
       const activity = { name: tool.name, title: tool.title ?? tool.name };
@@ -879,7 +879,9 @@ export function registerWebMcpTools(
           ],
           additionalProperties: false,
         },
-        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        // create commits a whole book to the shelf with no undo token, so the
+        // host is told this one is consequential.
+        annotations: { readOnlyHint: false, untrustedContentHint: true, consequentialHint: true },
         execute: (input, options) => runRegisteredTool(SITE_TOOL.manageBook, options?.signal ?? uncancelledToolSignal, async () => {
           assertOnly(input, [...requiredMutationFields, "action", "bookId", "coverAssetId", "title", "spreads", "creationBrief", "qualityReview"]);
           const requestId = requiredString(input, "requestId");

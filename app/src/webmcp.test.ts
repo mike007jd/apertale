@@ -293,6 +293,7 @@ describe("WebMCP registration", () => {
       expect(registeredTool.annotations).toEqual({
         readOnlyHint: registeredTool.name === "get_project_context",
         untrustedContentHint: registeredTool.name !== "set_presentation",
+        ...(registeredTool.name === "manage_book" ? { consequentialHint: true } : {}),
       });
       const schemaNodes: unknown[] = [registeredTool.inputSchema];
       while (schemaNodes.length > 0) {
